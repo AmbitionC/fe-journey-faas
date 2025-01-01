@@ -21,7 +21,7 @@ export class AuthHTTPService {
     path: '/auth/queryCaptcha',
     method: 'get',
   })
-  async handleHTTPEvent() {
+  async queryCaptcha() {
     const { id, imageBase64 } = await this.captchaService.getCaptcha({
       height: 35,
       width: 75,

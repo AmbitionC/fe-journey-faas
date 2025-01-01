@@ -13,17 +13,17 @@ services:
       region: cn-hangzhou
       service: ${vars.service}
       function:
-        name: hello # 函数名
-        handler: helloHttpService.handleHTTPEvent
+        name: queryCaptcha # 函数名
+        handler: authHttpService.queryCaptcha
         codeUri: '.'
-        initializer: helloHttpService.initializer
+        initializer: authHttpService.initializer
       customDomains:
         - domainName: auto
           protocol: HTTP
           routeConfigs:
-            - path: /*
+            - path: /auth/queryCaptcha
               serviceName: ${vars.service.name}
-              functionName: helloHttpService-handleHTTPEvent
+              functionName: authHttpService-queryCaptcha
       triggers:
         - name: http
           type: http

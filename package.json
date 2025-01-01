@@ -22,14 +22,14 @@
     "deploy": "sh deploy.sh"
   },
   "dependencies": {
+    "@midwayjs/cache": "^3.12.0",
+    "@midwayjs/captcha": "^3.16.5",
     "@midwayjs/core": "^3.12.0",
     "@midwayjs/faas": "^3.12.0",
     "@midwayjs/fc-starter": "^3.12.0",
     "@midwayjs/logger": "^3.1.0",
-    "@midwayjs/captcha": "^3.16.5",
-    "@midwayjs/cache": "^3.12.0",
-    "@midwayjs/typeorm": "^3.16.5",
     "@midwayjs/redis": "^3.16.5",
+    "@midwayjs/typeorm": "^3.16.5",
     "mini-svg-data-uri": "^1.4.4",
     "nanoid": "^3.3.7",
     "svg-captcha": "^1.4.0",
