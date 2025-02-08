@@ -8,7 +8,7 @@ import {
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { LoginDTO } from '../dto/auth';
-import { CaptchaService } from '../service/auth/captcha.service';
+import { CaptchaService } from '../service/auth/captcha';
 
 @Provide()
 export class AuthHTTPService {
@@ -44,10 +44,10 @@ export class AuthHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '登录接口',
-    functionName: 'signIn',
+    description: '登录',
+    functionName: 'login',
     name: 'http',
-    path: '/auth/signIn',
+    path: '/auth/login',
     method: 'post',
   })
   async signIn(@Body(ALL) loginDTO: LoginDTO): Promise<any> {}

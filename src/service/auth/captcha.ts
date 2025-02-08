@@ -2,7 +2,7 @@ import { Inject, Provide, Config } from '@midwayjs/core';
 import { CacheManager } from '@midwayjs/cache';
 import * as svgCaptcha from 'svg-captcha';
 import * as svgBase64 from 'mini-svg-data-uri';
-import { CaptchaOptions } from './interface';
+import { CaptchaOptions } from '../../interface';
 import { uuid } from '../../utils/uuid';
 
 @Provide()

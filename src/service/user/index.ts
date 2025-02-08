@@ -3,12 +3,15 @@ import { InjectEntityModel } from '@midwayjs/typeorm';
 import { RedisService } from '@midwayjs/redis';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
-import { TokenConfig } from './interface';
+import { omit } from 'lodash';
+import { TokenConfig } from '../../interface';
 import { UserEntity } from '../../entity/user';
+import { UserDTO } from '../../dto/user';
+import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
 
 @Provide()
-export class AuthService {
+export class UserService {
   @InjectEntityModel(UserEntity)
   userModel: Repository<UserEntity>;
 
@@ -18,41 +21,29 @@ export class AuthService {
   @Inject()
   redisService: RedisService;
 
-  async login(loginDTO: LoginDTO): Promise<any> {
-    const { accountNumber } = loginDTO;
-    const user = await this.userModel
-      .createQueryBuilder('user')
-      .where('user.phoneNumber = :accountNumber', { accountNumber })
-      .select(['user.id', 'user.password'])
-      .getOne();
-
-    if (!user) {
-      throw R.error('账号或密码错误！');
-    }
-
-    if (!bcrypt.compareSync(loginDTO.password, user.password)) {
-      throw R.error('用户名或密码错误！');
-    }
+  async createUser(user: UserDTO): Promise<any> {
+    const entity = user.toEntity();
+    const { phoneNumber } = user;
+    // 1. 校验手机号是否已注册
+    const isExist = (await this.userModel.countBy({ phoneNumber })) > 0;
+    if (isExist) R.error('当前手机号已注册！');
+    // 2. 对当前用户密码进行加密
+    const password = bcrypt.hashSync(user.password);
+    entity.password = password;
+    entity.avatar = 'default';
+    await this.userModel.save(entity);
 
     const { expire } = this.tokenConfig;
-
     const token = uuid();
-
     // multi可以实现redis指令并发执行
     await this.redisService
       .multi()
       .set(`token:${token}`, user.id)
       .expire(`token:${token}`, expire)
       .exec();
-
-    const responseData: TokenVO = {
-      expire,
-      token,
-    };
-
     return {
-      data: responseData,
       success: true,
+      data: { ...omit(entity, ['password']), expire, token },
     };
   }
 }
