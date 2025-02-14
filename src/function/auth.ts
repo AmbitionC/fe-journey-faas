@@ -6,9 +6,12 @@ import {
   Body,
   ALL,
 } from '@midwayjs/core';
+import { RedisService } from '@midwayjs/redis';
 import { Context } from '@midwayjs/faas';
 import { LoginDTO } from '../dto/auth';
 import { CaptchaService } from '../service/auth/captcha';
+import { AuthService } from '../service/auth';
+import { R } from '../common/base.error.utils';
 
 @Provide()
 export class AuthHTTPService {
@@ -18,10 +21,16 @@ export class AuthHTTPService {
   @Inject()
   captchaService: CaptchaService;
 
+  @Inject()
+  authService: AuthService;
+
+  @Inject()
+  redisService: RedisService;
+
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '获取图片验证码',
     functionName: 'queryCaptcha',
-    name: 'http',
+    name: 'queryCaptcha',
     path: '/auth/queryCaptcha',
     method: 'get',
   })
@@ -46,9 +55,33 @@ export class AuthHTTPService {
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '登录',
     functionName: 'login',
-    name: 'http',
+    name: 'login',
     path: '/auth/login',
     method: 'post',
   })
-  async signIn(@Body(ALL) loginDTO: LoginDTO): Promise<any> {}
+  async login(@Body(ALL) data: LoginDTO): Promise<any> {
+    const { captcha, captchaId } = data;
+    const result = await this.captchaService.checkCaptcha(captchaId, captcha);
+    if (!result) throw R.error('验证码错误');
+    return await this.authService.login(data);
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '退出登录',
+    functionName: 'logout',
+    name: 'logout',
+    path: '/auth/logout',
+    method: 'post',
+  })
+  async logout(): Promise<any> {
+    // 清除token和refreshToken
+    const res = await this.redisService
+      .multi()
+      .del(`token:${this.ctx.token}`)
+      .exec();
+    if (res.some(item => item[0])) {
+      throw R.error('退出登录失败');
+    }
+    return true;
+  }
 }

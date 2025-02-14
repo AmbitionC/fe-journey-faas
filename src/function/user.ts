@@ -4,6 +4,7 @@ import {
   ServerlessTriggerType,
   Inject,
   Body,
+  Query,
   ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
@@ -25,15 +26,26 @@ export class UserHTTPService {
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '创建账号',
-    functionName: 'create',
-    name: 'http',
+    functionName: 'createAccount',
+    name: 'createAccount',
     path: '/user/create',
     method: 'post',
   })
-  async create(@Body(ALL) data: UserDTO): Promise<any> {
+  async createAccount(@Body(ALL) data: UserDTO): Promise<any> {
     const { captcha, captchaId } = data;
     const result = await this.captchaService.checkCaptcha(captchaId, captcha);
     if (!result) throw R.error('验证码错误');
     return await this.userService.createUser(data);
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '获取用户信息',
+    functionName: 'getUserInfo',
+    name: 'getUserInfo',
+    path: '/user/getUserInfo',
+    method: 'get',
+  })
+  async getUserInfo(@Query('userId') userId: string): Promise<any> {
+    return await this.userService.getUserById(userId);
   }
 }

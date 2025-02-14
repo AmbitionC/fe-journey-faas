@@ -10,6 +10,18 @@ interface BaseCaptchaOptions {
   background?: string;
 }
 
+interface UserContext {
+  userId: string;
+  token: string;
+}
+
+declare module '@midwayjs/core' {
+  interface Context {
+    userInfo: UserContext;
+    token: string;
+  }
+}
+
 export interface CaptchaOptions extends BaseCaptchaOptions {
   default?: BaseCaptchaOptions;
   image?: ImageCaptchaOptions;

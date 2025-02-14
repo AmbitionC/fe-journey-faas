@@ -22,4 +22,12 @@ export default {
       },
     },
   },
+  redis: {
+    client: {
+      port: 6379,
+      host: '112.124.56.156',
+      password: '123456',
+      db: 0,
+    },
+  },
 } as MidwayConfig;

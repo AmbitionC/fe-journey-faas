@@ -7,7 +7,7 @@ vars:
     name: fe-journey-faas
     description: 'frontend journey faas service'
 services:
-  project-0981cd9b07:
+  queryCaptcha:
     component: devsapp/fc
     props:
       region: cn-hangzhou
@@ -24,6 +24,102 @@ services:
             - path: /auth/queryCaptcha
               serviceName: ${vars.service.name}
               functionName: authHttpService-queryCaptcha
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  login:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: login # 函数名
+        handler: authHttpService.login
+        codeUri: '.'
+        initializer: authHttpService.initializer
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /auth/login
+              serviceName: ${vars.service.name}
+              functionName: authHttpService-login
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  logout:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: logout # 函数名
+        handler: authHttpService.logout
+        codeUri: '.'
+        initializer: authHttpService.initializer
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /auth/login
+              serviceName: ${vars.service.name}
+              functionName: authHttpService-logout
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  createAccount:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: createAccount # 函数名
+        handler: userHttpService.createAccount
+        codeUri: '.'
+        initializer: userHttpService.initializer
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /user/create
+              serviceName: ${vars.service.name}
+              functionName: userHttpService-createAccount
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  getUserInfo:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getUserInfo # 函数名
+        handler: userHttpService.getUserInfo
+        codeUri: '.'
+        initializer: userHttpService.initializer
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /user/getUserInfo
+              serviceName: ${vars.service.name}
+              functionName: userHttpService-getUserInfo
       triggers:
         - name: http
           type: http

@@ -21,6 +21,7 @@ export class UserService {
   @Inject()
   redisService: RedisService;
 
+  // 创建用户
   async createUser(user: UserDTO): Promise<any> {
     const entity = user.toEntity();
     const { phoneNumber } = user;
@@ -45,5 +46,14 @@ export class UserService {
       success: true,
       data: { ...omit(entity, ['password']), expire, token },
     };
+  }
+
+  // 通过userId查询数据
+  async getUserById(userId: string): Promise<any> {
+    const userInfo = await this.userModel
+      .createQueryBuilder('user')
+      .where('user.phoneNumber = :userId', { userId })
+      .getOne();
+    return userInfo;
   }
 }

@@ -22,4 +22,12 @@ export default {
       },
     },
   },
+  redis: {
+    client: {
+      port: 6379,
+      host: 'r-bp1ybv5h4ilxu3cqikpd.redis.rds.aliyuncs.com',
+      password: 'Ch823147833',
+      db: 0,
+    },
+  },
 } as MidwayConfig;
