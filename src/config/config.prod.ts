@@ -1,5 +1,6 @@
 // load when NODE_ENV=production
 import { MidwayConfig } from '@midwayjs/core';
+import { UserEntity } from '../entity/user';
 
 export default {
   // test: 'test'
@@ -18,15 +19,15 @@ export default {
         database: 'fe-journey', // 数据库名称
         synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
         logging: true,
-        entities: ['**/entity{.ts,.js}'],
+        entities: [UserEntity],
       },
     },
   },
   redis: {
     client: {
       port: 6379,
-      host: '112.124.56.156',
-      password: '123456',
+      host: 'r-bp1ybv5h4ilxu3cqikpd.redis.rds.aliyuncs.com',
+      password: 'Ch823147833',
       db: 0,
     },
   },
