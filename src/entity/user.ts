@@ -3,7 +3,7 @@ import { omit } from 'lodash';
 import { BaseEntity } from './base';
 import { OmitVO } from '../utils/vo.utils';
 
-@Entity('user')
+@Entity({ name: 'user' })
 export class UserEntity extends BaseEntity {
   @Column({ comment: '手机号' })
   phoneNumber: string;
