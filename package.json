@@ -31,6 +31,7 @@
     "@midwayjs/redis": "^3.16.5",
     "@midwayjs/typeorm": "^3.16.5",
     "@midwayjs/validate": "^3.16.5",
+    "@midwayjs/decorator": "^3.16.2",
     "mini-svg-data-uri": "^1.4.4",
     "mysql2": "^3.10.3",
     "bcryptjs": "^2.4.3",

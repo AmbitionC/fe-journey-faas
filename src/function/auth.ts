@@ -11,6 +11,7 @@ import { Context } from '@midwayjs/faas';
 import { LoginDTO } from '../dto/auth';
 import { CaptchaService } from '../service/auth/captcha';
 import { AuthService } from '../service/auth';
+import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
 
 @Provide()
@@ -34,6 +35,7 @@ export class AuthHTTPService {
     path: '/auth/queryCaptcha',
     method: 'get',
   })
+  @NoAuth()
   async queryCaptcha() {
     const { id, imageBase64 } = await this.captchaService.getCaptcha({
       height: 35,
@@ -59,6 +61,7 @@ export class AuthHTTPService {
     path: '/auth/login',
     method: 'post',
   })
+  @NoAuth()
   async login(@Body(ALL) data: LoginDTO): Promise<any> {
     const { captcha, captchaId } = data;
     const result = await this.captchaService.checkCaptcha(captchaId, captcha);
@@ -73,6 +76,7 @@ export class AuthHTTPService {
     path: '/auth/logout',
     method: 'post',
   })
+  @NoAuth()
   async logout(): Promise<any> {
     // 清除token和refreshToken
     const res = await this.redisService
