@@ -1,4 +1,4 @@
-import { Inject, Provide, Config } from '@midwayjs/core';
+import { Inject, Provide, Config, ILogger } from '@midwayjs/core';
 import { CacheManager } from '@midwayjs/cache';
 import * as svgCaptcha from 'svg-captcha';
 import * as svgBase64 from 'mini-svg-data-uri';
@@ -9,6 +9,9 @@ import { uuid } from '../../utils/uuid';
 export class CaptchaService {
   @Inject()
   cacheManager: CacheManager;
+
+  @Inject()
+  logger: ILogger;
 
   @Config('captcha')
   captcha: CaptchaOptions;
@@ -30,6 +33,7 @@ export class CaptchaService {
     }
     const storeId = this.getStoreId(id);
     const storedValue = await this.cacheManager.get(storeId);
+    this.logger.info('验证码缓存值:', storedValue);
     if (value.toLowerCase() !== storedValue) {
       return false;
     }

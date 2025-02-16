@@ -1,5 +1,6 @@
 import { MidwayConfig } from '@midwayjs/core';
 import { UserEntity } from '../entity/user';
+import { join } from 'path';
 
 export default {
   // if use http/API Gateway, please set keys here.
@@ -29,6 +30,24 @@ export default {
       host: 'r-bp1ybv5h4ilxu3cqikpd.redis.rds.aliyuncs.com',
       password: 'Ch823147833',
       db: 0,
+    },
+  },
+  captcha: {
+    expirationTime: 3600,
+  },
+  swagger: {
+    title: 'Fe Journey API',
+    description: 'Fe Journey API 文档',
+    version: '1.0.0',
+    enableOpenApi: true,
+    swaggerPath: '/swagger-ui',
+  },
+  staticFile: {
+    dirs: {
+      default: {
+        prefix: '/',
+        dir: join(__dirname, '../public'), // 静态文件目录
+      },
     },
   },
 } as MidwayConfig;

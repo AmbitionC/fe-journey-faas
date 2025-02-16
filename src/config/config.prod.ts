@@ -31,4 +31,7 @@ export default {
       db: 0,
     },
   },
+  captcha: {
+    expirationTime: 3600,
+  },
 } as MidwayConfig;

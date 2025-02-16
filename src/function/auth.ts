@@ -8,6 +8,7 @@ import {
 } from '@midwayjs/core';
 import { RedisService } from '@midwayjs/redis';
 import { Context } from '@midwayjs/faas';
+import { ApiResponse } from '@midwayjs/swagger';
 import { LoginDTO } from '../dto/auth';
 import { CaptchaService } from '../service/auth/captcha';
 import { AuthService } from '../service/auth';
@@ -60,6 +61,9 @@ export class AuthHTTPService {
     name: 'login',
     path: '/auth/login',
     method: 'post',
+  })
+  @ApiResponse({
+    type: LoginDTO,
   })
   @NoAuth()
   async login(@Body(ALL) data: LoginDTO): Promise<any> {
