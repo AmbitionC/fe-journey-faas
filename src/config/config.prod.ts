@@ -1,5 +1,6 @@
 // load when NODE_ENV=production
 import { MidwayConfig } from '@midwayjs/core';
+import * as redisStore from 'cache-manager-ioredis';
 import { UserEntity } from '../entity/user';
 
 export default {
@@ -29,6 +30,17 @@ export default {
       host: 'r-bp1ybv5h4ilxu3cqikpd.redis.rds.aliyuncs.com',
       password: 'Ch823147833',
       db: 0,
+    },
+  },
+  cache: {
+    store: redisStore,
+    options: {
+      host: 'r-bp1ybv5h4ilxu3cqikpd.redis.rds.aliyuncs.com',
+      password: 'Ch823147833',
+      port: 6379,
+      db: 0,
+      keyPrefix: 'cache:',
+      ttl: 100,
     },
   },
   captcha: {

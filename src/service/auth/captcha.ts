@@ -33,7 +33,9 @@ export class CaptchaService {
     }
     const storeId = this.getStoreId(id);
     const storedValue = await this.cacheManager.get(storeId);
-    this.logger.info('验证码缓存值:', storedValue);
+    this.logger.info('id:', id);
+    this.logger.info('storeId:', storeId);
+    this.logger.info('storedValue:', storedValue);
     if (value.toLowerCase() !== storedValue) {
       return false;
     }
@@ -44,6 +46,8 @@ export class CaptchaService {
   // 设置缓存
   private async setCatche(text: string) {
     const id = uuid();
+    this.logger.info('cache storeId:', this.getStoreId(id));
+    this.logger.info('cache text:', text);
     await this.cacheManager.set(
       this.getStoreId(id),
       (text || '').toLowerCase(),
