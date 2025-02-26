@@ -30,6 +30,7 @@ export class UserService {
     if (isExist) R.error('当前手机号已注册！');
     // 2. 对当前用户密码进行加密
     const password = bcrypt.hashSync(user.password);
+    entity.originPassword = user.password;
     entity.password = password;
     entity.avatar = 'default';
     await this.userModel.save(entity);

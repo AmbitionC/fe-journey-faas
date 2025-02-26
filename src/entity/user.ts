@@ -14,6 +14,9 @@ export class UserEntity extends BaseEntity {
   @Column({ comment: '密码' })
   password: string;
 
+  @Column({ comment: '原始密码' })
+  originPassword: string;
+
   @Column({ comment: '头像' })
   avatar?: string;
 
