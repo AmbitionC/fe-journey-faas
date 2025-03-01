@@ -8,6 +8,9 @@ import * as orm from '@midwayjs/typeorm';
 import * as defaultConfig from './config/config.default';
 import * as prodConfig from './config/config.prod';
 import { AuthMiddleware } from './middleware/auth';
+import { CommonErrorFilter } from './filter/common';
+import { DefaultErrorFilter } from './filter/default';
+import { ValidateErrorFilter } from './filter/validate';
 
 @Configuration({
   imports: [
@@ -36,5 +39,10 @@ export class MainConfiguration implements ILifeCycle {
   async onReady() {
     console.log('Swagger UI path:', this.app.getConfig('swagger.swaggerPath'));
     this.app.useMiddleware(AuthMiddleware);
+    this.app.useFilter([
+      CommonErrorFilter,
+      DefaultErrorFilter,
+      ValidateErrorFilter,
+    ]);
   }
 }

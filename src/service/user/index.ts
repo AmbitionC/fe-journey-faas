@@ -55,6 +55,9 @@ export class UserService {
       .createQueryBuilder('user')
       .where('user.phoneNumber = :userId', { userId })
       .getOne();
-    return userInfo;
+    return {
+      success: true,
+      data: userInfo,
+    };
   }
 }
