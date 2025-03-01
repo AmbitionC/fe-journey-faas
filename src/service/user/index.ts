@@ -27,7 +27,7 @@ export class UserService {
     const { phoneNumber } = user;
     // 1. 校验手机号是否已注册
     const isExist = (await this.userModel.countBy({ phoneNumber })) > 0;
-    if (isExist) R.error('当前手机号已注册！');
+    if (isExist) throw R.error('当前手机号已注册！');
     // 2. 对当前用户密码进行加密
     const password = bcrypt.hashSync(user.password);
     entity.originPassword = user.password;
