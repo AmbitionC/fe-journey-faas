@@ -28,7 +28,7 @@ export default {
   redis: {
     client: {
       port: 6379,
-      host: 'r-bp1bwq5o4hpvnfwfbz.redis.rds.aliyuncs.com',
+      host: 'r-bp1bwq5o4hpvnfwfbzpd.redis.rds.aliyuncs.com',
       password: 'Ch823147833',
       db: 0,
     },

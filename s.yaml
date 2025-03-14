@@ -17,6 +17,10 @@ services:
         handler: authHttpService.queryCaptcha
         codeUri: '.'
         initializer: authHttpService.initializer
+        runtime: nodejs16
+        memorySize: 1024
+        cpu: 1
+        timeout: 60
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -41,6 +45,10 @@ services:
         handler: authHttpService.login
         codeUri: '.'
         initializer: authHttpService.initializer
+        runtime: nodejs16
+        memorySize: 1024
+        cpu: 1
+        timeout: 60
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -65,6 +73,10 @@ services:
         handler: authHttpService.logout
         codeUri: '.'
         initializer: authHttpService.initializer
+        runtime: nodejs16
+        memorySize: 1024
+        cpu: 1
+        timeout: 60
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -89,6 +101,10 @@ services:
         handler: userHttpService.createAccount
         codeUri: '.'
         initializer: userHttpService.initializer
+        runtime: nodejs16
+        memorySize: 1024
+        cpu: 1
+        timeout: 60
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -113,6 +129,10 @@ services:
         handler: userHttpService.getUserInfo
         codeUri: '.'
         initializer: userHttpService.initializer
+        runtime: nodejs16
+        memorySize: 1024
+        cpu: 1
+        timeout: 60
       customDomains:
         - domainName: auto
           protocol: HTTP
