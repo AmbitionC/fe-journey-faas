@@ -21,6 +21,7 @@ services:
         memorySize: 1024
         cpu: 1
         timeout: 60
+        instanceConcurrency: 10000
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -49,6 +50,7 @@ services:
         memorySize: 1024
         cpu: 1
         timeout: 60
+        instanceConcurrency: 10000
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -77,6 +79,7 @@ services:
         memorySize: 1024
         cpu: 1
         timeout: 60
+        instanceConcurrency: 10000
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -105,6 +108,7 @@ services:
         memorySize: 1024
         cpu: 1
         timeout: 60
+        instanceConcurrency: 10000
       customDomains:
         - domainName: auto
           protocol: HTTP
@@ -133,6 +137,7 @@ services:
         memorySize: 1024
         cpu: 1
         timeout: 60
+        instanceConcurrency: 10000
       customDomains:
         - domainName: auto
           protocol: HTTP
