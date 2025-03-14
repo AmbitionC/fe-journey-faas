@@ -36,7 +36,7 @@ export default {
   cache: {
     store: redisStore,
     options: {
-      host: 'r-bp1ybv5h4ilxu3cqikpd.redis.rds.aliyuncs.com',
+      host: 'r-bp1bwq5o4hpvnfwfbzpd.redis.rds.aliyuncs.com',
       password: 'Ch823147833',
       port: 6379,
       db: 0,
