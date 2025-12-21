@@ -152,3 +152,32 @@ services:
             methods:
               - GET
             authType: anonymous
+  saveInterview:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: saveInterview
+        handler: interviewHTTPService.saveInterview
+        codeUri: '.'
+        initializer: interviewHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 1024
+        cpu: 1
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /interview/save
+              serviceName: ${vars.service.name}
+              functionName: interviewHTTPService-saveInterview
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
