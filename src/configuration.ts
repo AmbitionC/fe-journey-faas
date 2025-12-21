@@ -5,6 +5,7 @@ import * as cache from '@midwayjs/cache';
 import * as captcha from '@midwayjs/captcha';
 import * as swagger from '@midwayjs/swagger';
 import * as orm from '@midwayjs/typeorm';
+import * as crossDomain from '@midwayjs/cross-domain';
 import * as defaultConfig from './config/config.default';
 import * as prodConfig from './config/config.prod';
 import { AuthMiddleware } from './middleware/auth';
@@ -19,6 +20,7 @@ import { ValidateErrorFilter } from './filter/validate';
     cache,
     captcha,
     orm,
+    crossDomain,
     {
       component: swagger,
       enabledEnvironment: ['local'],

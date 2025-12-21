@@ -10,11 +10,14 @@ import {
 import { InterviewDTO } from '../dto/interview';
 import { InterviewService } from '../service/interview/index';
 
+import { NoAuth } from '../decorator/noAuth';
+
 @Provide()
 export class InterviewHTTPService {
   @Inject()
   interviewService: InterviewService;
 
+  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '保存面试面经',
     functionName: 'saveInterview',
@@ -26,6 +29,7 @@ export class InterviewHTTPService {
     return await this.interviewService.saveInterview(data);
   }
 
+  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '获取面试面经列表',
     functionName: 'listInterviews',
@@ -45,6 +49,7 @@ export class InterviewHTTPService {
     );
   }
 
+  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '删除面试面经',
     functionName: 'deleteInterview',
@@ -56,6 +61,7 @@ export class InterviewHTTPService {
     return await this.interviewService.deleteInterview(id);
   }
 
+  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '更新面试面经状态',
     functionName: 'updateInterviewStatus',
