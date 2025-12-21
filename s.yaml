@@ -164,9 +164,9 @@ services:
       service: ${vars.service}
       function:
         name: saveInterview
-        handler: interviewHTTPService.saveInterview
+        handler: interviewHttpService.saveInterview
         codeUri: '.'
-        initializer: interviewHTTPService.initializer
+        initializer: interviewHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -179,7 +179,7 @@ services:
           routeConfigs:
             - path: /interview/save
               serviceName: ${vars.service.name}
-              functionName: interviewHTTPService-saveInterview
+              functionName: interviewHttpService-saveInterview
       triggers:
         - name: http
           type: http
@@ -194,9 +194,9 @@ services:
       service: ${vars.service}
       function:
         name: listInterviews
-        handler: interviewHTTPService.listInterviews
+        handler: interviewHttpService.listInterviews
         codeUri: '.'
-        initializer: interviewHTTPService.initializer
+        initializer: interviewHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -209,7 +209,7 @@ services:
           routeConfigs:
             - path: /interview/list
               serviceName: ${vars.service.name}
-              functionName: interviewHTTPService-listInterviews
+              functionName: interviewHttpService-listInterviews
       triggers:
         - name: http
           type: http
@@ -224,9 +224,9 @@ services:
       service: ${vars.service}
       function:
         name: deleteInterview
-        handler: interviewHTTPService.deleteInterview
+        handler: interviewHttpService.deleteInterview
         codeUri: '.'
-        initializer: interviewHTTPService.initializer
+        initializer: interviewHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -239,7 +239,7 @@ services:
           routeConfigs:
             - path: /interview/delete
               serviceName: ${vars.service.name}
-              functionName: interviewHTTPService-deleteInterview
+              functionName: interviewHttpService-deleteInterview
       triggers:
         - name: http
           type: http
@@ -254,9 +254,9 @@ services:
       service: ${vars.service}
       function:
         name: updateInterviewStatus
-        handler: interviewHTTPService.updateInterviewStatus
+        handler: interviewHttpService.updateInterviewStatus
         codeUri: '.'
-        initializer: interviewHTTPService.initializer
+        initializer: interviewHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -269,7 +269,7 @@ services:
           routeConfigs:
             - path: /interview/status
               serviceName: ${vars.service.name}
-              functionName: interviewHTTPService-updateInterviewStatus
+              functionName: interviewHttpService-updateInterviewStatus
       triggers:
         - name: http
           type: http

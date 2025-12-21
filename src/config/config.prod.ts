@@ -2,6 +2,7 @@
 import { MidwayConfig } from '@midwayjs/core';
 import * as redisStore from 'cache-manager-ioredis';
 import { UserEntity } from '../entity/user';
+import { InterviewEntity } from '../entity/interview';
 
 export default {
   // test: 'test'
@@ -20,7 +21,7 @@ export default {
         database: 'fe-journey', // 数据库名称
         synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
         logging: true,
-        entities: [UserEntity],
+        entities: [UserEntity, InterviewEntity],
       },
     },
   },
