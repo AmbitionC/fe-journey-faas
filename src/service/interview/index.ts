@@ -29,4 +29,47 @@ export class InterviewService {
       data: result,
     };
   }
+
+  async listInterviews(page = 1, pageSize = 10, status?: string): Promise<any> {
+    const query = this.interviewModel.createQueryBuilder('interview');
+
+    if (status) {
+      query.where('interview.status = :status', { status });
+    }
+
+    // 默认不显示已删除的，除非显式查询 'deleted'
+    if (status !== 'deleted') {
+      query.andWhere('interview.status != :deletedStatus', {
+        deletedStatus: 'deleted',
+      });
+    }
+
+    query
+      .orderBy('interview.createTime', 'DESC')
+      .skip((page - 1) * pageSize)
+      .take(pageSize);
+
+    const [list, total] = await query.getManyAndCount();
+
+    return {
+      success: true,
+      data: {
+        list,
+        total,
+        page,
+        pageSize,
+      },
+    };
+  }
+
+  async deleteInterview(id: string): Promise<any> {
+    // 软删除，更新状态为 deleted
+    await this.interviewModel.update(id, { status: 'deleted' });
+    return { success: true };
+  }
+
+  async updateInterviewStatus(id: string, status: string): Promise<any> {
+    await this.interviewModel.update(id, { status });
+    return { success: true };
+  }
 }
