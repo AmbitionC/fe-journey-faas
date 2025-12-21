@@ -44,4 +44,4 @@ npm install --production
 echo "Build success"
 
 # 在 .serverless 目录进行部署
-s deploy
+s deploy -y --use-local

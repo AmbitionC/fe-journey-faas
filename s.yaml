@@ -20,6 +20,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -49,6 +50,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -78,6 +80,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -107,6 +110,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -136,6 +140,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -165,6 +170,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -194,6 +200,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -223,6 +230,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
@@ -252,6 +260,7 @@ services:
         runtime: nodejs16
         memorySize: 1024
         cpu: 1
+        diskSize: 512
         timeout: 60
         instanceConcurrency: 200
       customDomains:
