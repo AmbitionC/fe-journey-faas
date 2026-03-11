@@ -20,6 +20,7 @@ export default {
         username: 'ch17394940726',
         password: 'Ch823147833',
         database: 'fe-journey', // 数据库名称
+        charset: 'utf8mb4',
         synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
         logging: true,
         entities: [UserEntity, InterviewEntity], // 新增实体注册
