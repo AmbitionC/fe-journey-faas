@@ -7,8 +7,12 @@ import { OrderEntity } from '../entity/order';
 import { join } from 'path';
 
 export default {
-  // if use http/API Gateway, please set keys here.
-  // keys: '1735466280322_8684',
+  cors: {
+    credentials: true,
+    origin: (ctx) => ctx.get('origin') || '*',
+    allowMethods: 'GET,HEAD,PUT,POST,DELETE,PATCH,OPTIONS',
+    allowHeaders: 'Content-Type,Authorization,Accept',
+  },
   token: {
     expire: 60 * 60 * 24 * 7,
   },

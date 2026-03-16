@@ -5,7 +5,12 @@ import { UserEntity } from '../entity/user';
 import { InterviewEntity } from '../entity/interview';
 
 export default {
-  // test: 'test'
+  cors: {
+    credentials: true,
+    origin: (ctx) => ctx.get('origin') || '*',
+    allowMethods: 'GET,HEAD,PUT,POST,DELETE,PATCH,OPTIONS',
+    allowHeaders: 'Content-Type,Authorization,Accept',
+  },
   token: {
     expire: 60 * 60 * 24 * 7,
   },
