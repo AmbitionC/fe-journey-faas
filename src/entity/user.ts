@@ -26,8 +26,11 @@ export class UserEntity extends BaseEntity {
   @Column({ comment: '会员到期时间' })
   memberDate?: string;
 
+  @Column({ comment: '邀请码', default: '' })
+  inviteCode?: string;
+
   toVO(): UserVO {
-    const userVO = omit<UserEntity>(this, ['password']) as UserVO;
+    const userVO = omit<UserEntity>(this, ['password', 'originPassword']) as UserVO;
     return userVO;
   }
 }

@@ -1,7 +1,9 @@
 import { MidwayConfig } from '@midwayjs/core';
 import * as redisStore from 'cache-manager-ioredis';
 import { UserEntity } from '../entity/user';
-import { InterviewEntity } from '../entity/interview'; // 新增导入
+import { InterviewEntity } from '../entity/interview';
+import { VisitLogEntity } from '../entity/visitLog';
+import { OrderEntity } from '../entity/order';
 import { join } from 'path';
 
 export default {
@@ -23,7 +25,7 @@ export default {
         charset: 'utf8mb4',
         synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
         logging: true,
-        entities: [UserEntity, InterviewEntity], // 新增实体注册
+        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity],
       },
     },
   },

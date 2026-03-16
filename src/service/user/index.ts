@@ -33,6 +33,7 @@ export class UserService {
     entity.originPassword = user.password;
     entity.password = password;
     entity.avatar = 'default';
+    entity.inviteCode = uuid().slice(0, 8);
     await this.userModel.save(entity);
 
     const { expire } = this.tokenConfig;
@@ -49,15 +50,31 @@ export class UserService {
     };
   }
 
-  // 通过userId查询数据
   async getUserById(userId: string): Promise<any> {
     const userInfo = await this.userModel
       .createQueryBuilder('user')
       .where('user.phoneNumber = :userId', { userId })
       .getOne();
-    return {
-      success: true,
-      data: userInfo,
-    };
+    if (userInfo) {
+      return {
+        success: true,
+        data: userInfo.toVO(),
+      };
+    }
+    return { success: false, message: '用户不存在' };
+  }
+
+  async updateUser(
+    userId: string,
+    data: { nickName?: string; avatar?: string }
+  ): Promise<any> {
+    const user = await this.userModel.findOneBy({ phoneNumber: userId });
+    if (!user) throw R.error('用户不存在');
+
+    if (data.nickName !== undefined) user.nickName = data.nickName;
+    if (data.avatar !== undefined) user.avatar = data.avatar;
+
+    await this.userModel.save(user);
+    return { success: true, data: user.toVO() };
   }
 }

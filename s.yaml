@@ -277,3 +277,153 @@ services:
             methods:
               - POST
             authType: anonymous
+  updateUserInfo:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: updateUserInfo
+        handler: userHttpService.updateUserInfo
+        codeUri: '.'
+        initializer: userHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /user/updateUserInfo
+              serviceName: ${vars.service.name}
+              functionName: userHttpService-updateUserInfo
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  recordVisit:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: recordVisit
+        handler: profileHttpService.recordVisit
+        codeUri: '.'
+        initializer: profileHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /profile/recordVisit
+              serviceName: ${vars.service.name}
+              functionName: profileHttpService-recordVisit
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  getVisitStats:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getVisitStats
+        handler: profileHttpService.getVisitStats
+        codeUri: '.'
+        initializer: profileHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /profile/visitStats
+              serviceName: ${vars.service.name}
+              functionName: profileHttpService-getVisitStats
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getMemberOrders:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getMemberOrders
+        handler: profileHttpService.getMemberOrders
+        codeUri: '.'
+        initializer: profileHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /profile/memberOrders
+              serviceName: ${vars.service.name}
+              functionName: profileHttpService-getMemberOrders
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getPdfOrders:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getPdfOrders
+        handler: profileHttpService.getPdfOrders
+        codeUri: '.'
+        initializer: profileHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /profile/pdfOrders
+              serviceName: ${vars.service.name}
+              functionName: profileHttpService-getPdfOrders
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous

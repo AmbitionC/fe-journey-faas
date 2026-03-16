@@ -48,4 +48,19 @@ export class UserHTTPService {
   async getUserInfo(@Query('userId') userId: string): Promise<any> {
     return await this.userService.getUserById(userId);
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '更新用户信息',
+    functionName: 'updateUserInfo',
+    name: 'updateUserInfo',
+    path: '/user/updateUserInfo',
+    method: 'post',
+  })
+  async updateUserInfo(
+    @Body(ALL) data: { userId: string; nickName?: string; avatar?: string }
+  ): Promise<any> {
+    const { userId, nickName, avatar } = data;
+    if (!userId) throw R.error('用户ID不能为空');
+    return await this.userService.updateUser(userId, { nickName, avatar });
+  }
 }
