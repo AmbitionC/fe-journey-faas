@@ -6,8 +6,8 @@ import { BaseEntity } from './base';
   unique: true,
 })
 export class UserArticleActionEntity extends BaseEntity {
-  @Column({ comment: '用户 ID，关联 user 表' })
-  userId: number;
+  @Column({ comment: '用户 ID，关联 user 表', length: 20 })
+  userId: string;
 
   @Column({ comment: '文章唯一标识', length: 100 })
   articleKey: string;

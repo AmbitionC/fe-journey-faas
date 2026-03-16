@@ -42,7 +42,9 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
         return;
       }
 
-      const token = ctx.header.authorization?.replace('Bearer', '');
+      const token =
+        ctx.header.token ||
+        ctx.header.authorization?.replace('Bearer ', '');
       if (!token) throw R.unauthorizedError('未登录');
 
       const userInfoStr = await this.redisService.get(`token:${token}`);

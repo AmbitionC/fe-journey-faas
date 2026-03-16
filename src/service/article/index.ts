@@ -52,7 +52,7 @@ export class ArticleService {
   }
 
   async toggleLike(
-    userId: number,
+    userId: string,
     articleKey: string,
     module: string,
     title?: string
@@ -84,7 +84,7 @@ export class ArticleService {
   }
 
   async toggleBookmark(
-    userId: number,
+    userId: string,
     articleKey: string,
     module: string,
     title?: string
@@ -122,7 +122,7 @@ export class ArticleService {
     return { shareCount: article.shareCount };
   }
 
-  async getUserActions(userId: number, articleKey: string) {
+  async getUserActions(userId: string, articleKey: string) {
     const actions = await this.userArticleActionModel.findBy({
       userId,
       articleKey,
@@ -133,7 +133,7 @@ export class ArticleService {
     };
   }
 
-  async getUserLikes(userId: number, module?: string, page = 1, pageSize = 20) {
+  async getUserLikes(userId: string, module?: string, page = 1, pageSize = 20) {
     const qb = this.userArticleActionModel
       .createQueryBuilder('action')
       .where('action.userId = :userId', { userId })
@@ -168,7 +168,7 @@ export class ArticleService {
   }
 
   async getUserBookmarks(
-    userId: number,
+    userId: string,
     module?: string,
     page = 1,
     pageSize = 20
