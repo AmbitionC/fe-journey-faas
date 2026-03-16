@@ -4,6 +4,9 @@ import { UserEntity } from '../entity/user';
 import { InterviewEntity } from '../entity/interview';
 import { VisitLogEntity } from '../entity/visitLog';
 import { OrderEntity } from '../entity/order';
+import { NavConfigEntity } from '../entity/navConfig';
+import { ArticleEntity } from '../entity/article';
+import { UserArticleActionEntity } from '../entity/userArticleAction';
 import { join } from 'path';
 
 export default {
@@ -29,7 +32,7 @@ export default {
         charset: 'utf8mb4',
         synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
         logging: true,
-        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity],
+        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity, ArticleEntity, UserArticleActionEntity],
       },
     },
   },

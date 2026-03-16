@@ -427,3 +427,243 @@ services:
             methods:
               - GET
             authType: anonymous
+  getNavList:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getNavList
+        handler: articleHttpService.getNavList
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/navList
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-getNavList
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getArticleStats:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getArticleStats
+        handler: articleHttpService.getArticleStats
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/stats
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-getArticleStats
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  toggleLike:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: toggleLike
+        handler: articleHttpService.toggleLike
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/like
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-toggleLike
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  toggleBookmark:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: toggleBookmark
+        handler: articleHttpService.toggleBookmark
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/bookmark
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-toggleBookmark
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  recordShare:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: recordShare
+        handler: articleHttpService.recordShare
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/share
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-recordShare
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  getUserActions:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getUserActions
+        handler: articleHttpService.getUserActions
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/userActions
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-getUserActions
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getUserLikes:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getUserLikes
+        handler: articleHttpService.getUserLikes
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/userLikes
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-getUserLikes
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getUserBookmarks:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getUserBookmarks
+        handler: articleHttpService.getUserBookmarks
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/userBookmarks
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-getUserBookmarks
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
