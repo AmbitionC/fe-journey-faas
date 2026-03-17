@@ -44,6 +44,9 @@ export class RunCodeDTO {
 
   @Rule(RuleType.string().max(50000).required())
   code: string;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
 
 export class SubmitCodeDTO {
@@ -59,6 +62,9 @@ export class SubmitCodeDTO {
 
   @Rule(RuleType.string().max(50000).required())
   code: string;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
 
 export class SubmissionListQueryDTO {
@@ -70,6 +76,9 @@ export class SubmissionListQueryDTO {
 
   @Rule(RuleType.number().integer().min(1).max(50).default(20).optional())
   pageSize?: number;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
 
 // --- 管理端 ---
@@ -167,14 +176,23 @@ export class SaveDraftDTO {
 
   @Rule(RuleType.string().max(50000).required())
   code: string;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
 
 export class GetDraftDTO {
   @Rule(RuleType.number().integer().required())
   problemId: number;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
 
 export class LastResultQueryDTO {
   @Rule(RuleType.number().integer().required())
   problemId: number;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }

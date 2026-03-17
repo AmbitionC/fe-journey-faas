@@ -63,7 +63,7 @@ export class ArticleHTTPService {
     method: 'post',
   })
   async toggleLike(@Body(ALL) body: ArticleActionDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = body.userId || this.ctx.userInfo?.userId;
     const data = await this.articleService.toggleLike(
       userId,
       body.articleKey,
@@ -81,7 +81,7 @@ export class ArticleHTTPService {
     method: 'post',
   })
   async toggleBookmark(@Body(ALL) body: ArticleActionDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = body.userId || this.ctx.userInfo?.userId;
     const data = await this.articleService.toggleBookmark(
       userId,
       body.articleKey,
@@ -116,7 +116,7 @@ export class ArticleHTTPService {
     method: 'get',
   })
   async getUserActions(@Query(ALL) query: UserActionsQueryDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = query.userId || this.ctx.userInfo?.userId;
     const data = await this.articleService.getUserActions(
       userId,
       query.articleKey
@@ -132,7 +132,7 @@ export class ArticleHTTPService {
     method: 'get',
   })
   async getUserLikes(@Query(ALL) query: UserActionListQueryDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = query.userId || this.ctx.userInfo?.userId;
     const data = await this.articleService.getUserLikes(
       userId,
       query.module,
@@ -150,7 +150,7 @@ export class ArticleHTTPService {
     method: 'get',
   })
   async getUserBookmarks(@Query(ALL) query: UserActionListQueryDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = query.userId || this.ctx.userInfo?.userId;
     const data = await this.articleService.getUserBookmarks(
       userId,
       query.module,

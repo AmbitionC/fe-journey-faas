@@ -1,6 +1,6 @@
 import { Inject, Provide } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
-import { In, Like, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { AlgorithmProblemEntity } from '../../entity/algorithm/problem';
 import { AlgorithmTestCaseEntity } from '../../entity/algorithm/testCase';
 import { AlgorithmTagEntity } from '../../entity/algorithm/tag';
@@ -72,7 +72,7 @@ export class AlgorithmService {
       .getMany();
 
     const problemIds = list.map(p => p.id);
-    let tagsMap: Record<string, any[]> = {};
+    const tagsMap: Record<string, any[]> = {};
     if (problemIds.length) {
       const relations = await this.problemTagModel.find({
         where: { problemId: In(problemIds.map(Number)) },
@@ -468,9 +468,7 @@ export class AlgorithmService {
         slug: item.slug,
         difficulty: item.difficulty || 'easy',
         description: item.description || '',
-        defaultCode: item.defaultCode
-          ? JSON.stringify(item.defaultCode)
-          : null,
+        defaultCode: item.defaultCode ? JSON.stringify(item.defaultCode) : null,
         solution: item.solution || null,
         orderNum: item.orderNum || 0,
         status: item.status || 'draft',

@@ -4,6 +4,8 @@ import {
   ServerlessTriggerType,
   Inject,
   Query,
+  Body,
+  ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { VisitService } from '../service/visit';
@@ -27,8 +29,8 @@ export class ProfileHTTPService {
     path: '/profile/recordVisit',
     method: 'post',
   })
-  async recordVisit(): Promise<any> {
-    const userId = this.ctx.userInfo.userId;
+  async recordVisit(@Body(ALL) body: { userId?: string }): Promise<any> {
+    const userId = body?.userId || this.ctx.userInfo?.userId;
     return await this.visitService.recordVisit(userId);
   }
 

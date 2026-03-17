@@ -83,7 +83,7 @@ export class AlgorithmHTTPService {
     method: 'post',
   })
   async runCode(@Body(ALL) body: RunCodeDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = body.userId || this.ctx.userInfo?.userId;
     const data = await this.algorithmService.runCode({ ...body, userId });
     return { success: true, data };
   }
@@ -96,7 +96,7 @@ export class AlgorithmHTTPService {
     method: 'post',
   })
   async submitCode(@Body(ALL) body: SubmitCodeDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = body.userId || this.ctx.userInfo?.userId;
     const data = await this.algorithmService.submitCode({
       ...body,
       userId,
@@ -112,7 +112,7 @@ export class AlgorithmHTTPService {
     method: 'get',
   })
   async getSubmissions(@Query(ALL) query: SubmissionListQueryDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = query.userId || this.ctx.userInfo?.userId;
     const data = await this.algorithmService.getSubmissions({
       ...query,
       userId,
@@ -130,7 +130,7 @@ export class AlgorithmHTTPService {
     method: 'post',
   })
   async saveDraft(@Body(ALL) body: SaveDraftDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = body.userId || this.ctx.userInfo?.userId;
     const data = await this.algorithmService.saveDraft({
       ...body,
       userId,
@@ -146,7 +146,7 @@ export class AlgorithmHTTPService {
     method: 'get',
   })
   async getDraft(@Query(ALL) query: GetDraftDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = query.userId || this.ctx.userInfo?.userId;
     const data = await this.algorithmService.getDrafts(userId, query.problemId);
     return { success: true, data };
   }
@@ -159,7 +159,7 @@ export class AlgorithmHTTPService {
     method: 'get',
   })
   async getLastResult(@Query(ALL) query: LastResultQueryDTO) {
-    const userId = this.ctx.userInfo.userId;
+    const userId = query.userId || this.ctx.userInfo?.userId;
     const data = await this.algorithmService.getLastResult(
       userId,
       query.problemId

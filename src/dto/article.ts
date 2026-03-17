@@ -24,6 +24,9 @@ export class ArticleActionDTO {
 
   @Rule(RuleType.string().max(255).optional())
   title?: string;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
 
 export class ArticleStatsQueryDTO {
@@ -34,6 +37,9 @@ export class ArticleStatsQueryDTO {
 export class UserActionsQueryDTO {
   @Rule(RuleType.string().max(100).required())
   articleKey: string;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
 
 export class RecordViewDTO {
@@ -69,4 +75,7 @@ export class UserActionListQueryDTO {
 
   @Rule(RuleType.number().integer().min(1).max(50).default(20).optional())
   pageSize?: number;
+
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
 }
