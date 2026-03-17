@@ -7,6 +7,13 @@ import { OrderEntity } from '../entity/order';
 import { NavConfigEntity } from '../entity/navConfig';
 import { ArticleEntity } from '../entity/article';
 import { UserArticleActionEntity } from '../entity/userArticleAction';
+import { ArticleViewLogEntity } from '../entity/articleViewLog';
+import { AlgorithmProblemEntity } from '../entity/algorithm/problem';
+import { AlgorithmTestCaseEntity } from '../entity/algorithm/testCase';
+import { AlgorithmTagEntity } from '../entity/algorithm/tag';
+import { AlgorithmProblemTagEntity } from '../entity/algorithm/problemTag';
+import { AlgorithmSubmissionEntity } from '../entity/algorithm/submission';
+import { AlgorithmCodeDraftEntity } from '../entity/algorithm/codeDraft';
 import { join } from 'path';
 
 export default {
@@ -32,9 +39,15 @@ export default {
         charset: 'utf8mb4',
         synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
         logging: true,
-        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity, ArticleEntity, UserArticleActionEntity],
+        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity, ArticleEntity, UserArticleActionEntity, ArticleViewLogEntity, AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity, AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity],
       },
     },
+  },
+  judge0: {
+    apiUrl: 'https://judge0-ce.p.rapidapi.com',
+    apiKey: 'YOUR_RAPIDAPI_KEY',
+    timeout: 10,
+    memoryLimit: 128000,
   },
   redis: {
     client: {

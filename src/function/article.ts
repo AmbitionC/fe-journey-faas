@@ -16,7 +16,10 @@ import {
   ArticleStatsQueryDTO,
   UserActionsQueryDTO,
   UserActionListQueryDTO,
+  RecordViewDTO,
+  BatchArticleStatsQueryDTO,
 } from '../dto/article';
+import { createHash } from 'crypto';
 
 @Provide()
 export class ArticleHTTPService {
@@ -154,6 +157,54 @@ export class ArticleHTTPService {
       query.page,
       query.pageSize
     );
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '记录文章浏览',
+    functionName: 'recordArticleView',
+    name: 'recordArticleView',
+    path: '/article/view',
+    method: 'post',
+  })
+  @NoAuth()
+  async recordArticleView(@Body(ALL) body: RecordViewDTO) {
+    const userId = this.ctx.userInfo?.userId;
+    const ip =
+      this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      this.ctx.ip ||
+      '';
+    const ua = this.ctx.get('user-agent') || '';
+    const fingerprint =
+      userId ||
+      createHash('md5')
+        .update(ip + ua)
+        .digest('hex');
+    const data = await this.articleService.recordView(
+      fingerprint,
+      ip,
+      ua,
+      body.articleKey,
+      body.module,
+      body.title
+    );
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '批量获取文章统计',
+    functionName: 'batchArticleStats',
+    name: 'batchArticleStats',
+    path: '/article/batchStats',
+    method: 'get',
+  })
+  @NoAuth()
+  async batchArticleStats(@Query(ALL) query: BatchArticleStatsQueryDTO) {
+    const keys = query.articleKeys
+      .split(',')
+      .map(k => k.trim())
+      .filter(Boolean);
+    const data = await this.articleService.batchGetArticleStats(keys);
     return { success: true, data };
   }
 }

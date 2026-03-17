@@ -21,4 +21,7 @@ export class ArticleEntity extends BaseEntity {
 
   @Column({ comment: '分享数', default: 0 })
   shareCount: number;
+
+  @Column({ comment: '浏览数', default: 0 })
+  viewCount: number;
 }

@@ -28,7 +28,7 @@ export class ProfileHTTPService {
     method: 'post',
   })
   async recordVisit(): Promise<any> {
-    const userId = (this.ctx as any).userInfo || '';
+    const userId = this.ctx.userInfo.userId;
     return await this.visitService.recordVisit(userId);
   }
 

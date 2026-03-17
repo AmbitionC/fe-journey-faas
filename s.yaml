@@ -667,3 +667,483 @@ services:
             methods:
               - GET
             authType: anonymous
+  recordArticleView:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: recordArticleView
+        handler: articleHttpService.recordArticleView
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/view
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-recordArticleView
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  batchArticleStats:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: batchArticleStats
+        handler: articleHttpService.batchArticleStats
+        codeUri: '.'
+        initializer: articleHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/batchStats
+              serviceName: ${vars.service.name}
+              functionName: articleHttpService-batchArticleStats
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getAlgoProblems:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getAlgoProblems
+        handler: algorithmHTTPService.getProblems
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/problems
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-getProblems
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getAlgoProblemDetail:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getAlgoProblemDetail
+        handler: algorithmHTTPService.getProblemDetail
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/problem/detail
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-getProblemDetail
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getAlgoTags:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getAlgoTags
+        handler: algorithmHTTPService.getTags
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/tags
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-getTags
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  runAlgoCode:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: runAlgoCode
+        handler: algorithmHTTPService.runCode
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 120
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/run
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-runCode
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  submitAlgoCode:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: submitAlgoCode
+        handler: algorithmHTTPService.submitCode
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 120
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/submit
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-submitCode
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  getAlgoSubmissions:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getAlgoSubmissions
+        handler: algorithmHTTPService.getSubmissions
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/submissions
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-getSubmissions
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  saveAlgoProblem:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: saveAlgoProblem
+        handler: algorithmHTTPService.saveProblem
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/problem/save
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-saveProblem
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  deleteAlgoProblem:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: deleteAlgoProblem
+        handler: algorithmHTTPService.deleteProblem
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/problem/delete
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-deleteProblem
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  saveAlgoTestCases:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: saveAlgoTestCases
+        handler: algorithmHTTPService.saveTestCases
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/testcase/save
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-saveTestCases
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  saveAlgoTag:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: saveAlgoTag
+        handler: algorithmHTTPService.saveTag
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/tag/save
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-saveTag
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  importAlgoProblems:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: importAlgoProblems
+        handler: algorithmHTTPService.importProblems
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 120
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/import
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-importProblems
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  saveAlgoDraft:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: saveAlgoDraft
+        handler: algorithmHTTPService.saveDraft
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/draft/save
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-saveDraft
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  getAlgoDraft:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getAlgoDraft
+        handler: algorithmHTTPService.getDraft
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/draft
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-getDraft
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  getAlgoLastResult:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getAlgoLastResult
+        handler: algorithmHTTPService.getLastResult
+        codeUri: '.'
+        initializer: algorithmHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /algorithm/lastResult
+              serviceName: ${vars.service.name}
+              functionName: algorithmHTTPService-getLastResult
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous

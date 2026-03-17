@@ -36,6 +36,26 @@ export class UserActionsQueryDTO {
   articleKey: string;
 }
 
+export class RecordViewDTO {
+  @Rule(RuleType.string().max(100).required())
+  articleKey: string;
+
+  @Rule(
+    RuleType.string()
+      .valid(...MODULE_ENUM)
+      .required()
+  )
+  module: string;
+
+  @Rule(RuleType.string().max(255).optional())
+  title?: string;
+}
+
+export class BatchArticleStatsQueryDTO {
+  @Rule(RuleType.string().max(2000).required())
+  articleKeys: string;
+}
+
 export class UserActionListQueryDTO {
   @Rule(
     RuleType.string()

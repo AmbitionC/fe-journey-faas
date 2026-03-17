@@ -49,7 +49,7 @@ export class AuthService {
     // multi可以实现redis指令并发执行
     await this.redisService
       .multi()
-      .set(`token:${token}`, user.id)
+      .set(`token:${token}`, JSON.stringify({ userId: accountNumber }))
       .expire(`token:${token}`, expire)
       .exec();
 
