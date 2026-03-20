@@ -14,6 +14,10 @@ import { AlgorithmTagEntity } from '../entity/algorithm/tag';
 import { AlgorithmProblemTagEntity } from '../entity/algorithm/problemTag';
 import { AlgorithmSubmissionEntity } from '../entity/algorithm/submission';
 import { AlgorithmCodeDraftEntity } from '../entity/algorithm/codeDraft';
+import { ArticleViewLogEntity } from '../entity/articleViewLog';
+import { ArticleAnnotationEntity } from '../entity/articleAnnotation';
+import { BookEntity } from '../entity/book';
+import { BookOrderEntity } from '../entity/bookOrder';
 
 export default {
   cors: {
@@ -37,7 +41,7 @@ export default {
         database: 'fe-journey', // 数据库名称
         synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
         logging: true,
-        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity, ArticleEntity, UserArticleActionEntity, AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity, AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity],
+        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity, ArticleEntity, UserArticleActionEntity, ArticleViewLogEntity, AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity, AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity, ArticleAnnotationEntity, BookEntity, BookOrderEntity],
       },
     },
   },
