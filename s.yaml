@@ -734,9 +734,9 @@ services:
       service: ${vars.service}
       function:
         name: getAlgoProblems
-        handler: algorithmHTTPService.getProblems
+        handler: algorithmHttpService.getProblems
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -749,7 +749,7 @@ services:
           routeConfigs:
             - path: /algorithm/problems
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-getProblems
+              functionName: algorithmHttpService-getProblems
       triggers:
         - name: http
           type: http
@@ -764,9 +764,9 @@ services:
       service: ${vars.service}
       function:
         name: getAlgoProblemDetail
-        handler: algorithmHTTPService.getProblemDetail
+        handler: algorithmHttpService.getProblemDetail
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -779,7 +779,7 @@ services:
           routeConfigs:
             - path: /algorithm/problem/detail
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-getProblemDetail
+              functionName: algorithmHttpService-getProblemDetail
       triggers:
         - name: http
           type: http
@@ -794,9 +794,9 @@ services:
       service: ${vars.service}
       function:
         name: getAlgoTags
-        handler: algorithmHTTPService.getTags
+        handler: algorithmHttpService.getTags
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -809,7 +809,7 @@ services:
           routeConfigs:
             - path: /algorithm/tags
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-getTags
+              functionName: algorithmHttpService-getTags
       triggers:
         - name: http
           type: http
@@ -824,9 +824,9 @@ services:
       service: ${vars.service}
       function:
         name: runAlgoCode
-        handler: algorithmHTTPService.runCode
+        handler: algorithmHttpService.runCode
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -839,7 +839,7 @@ services:
           routeConfigs:
             - path: /algorithm/run
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-runCode
+              functionName: algorithmHttpService-runCode
       triggers:
         - name: http
           type: http
@@ -854,9 +854,9 @@ services:
       service: ${vars.service}
       function:
         name: submitAlgoCode
-        handler: algorithmHTTPService.submitCode
+        handler: algorithmHttpService.submitCode
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -869,7 +869,7 @@ services:
           routeConfigs:
             - path: /algorithm/submit
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-submitCode
+              functionName: algorithmHttpService-submitCode
       triggers:
         - name: http
           type: http
@@ -884,9 +884,9 @@ services:
       service: ${vars.service}
       function:
         name: getAlgoSubmissions
-        handler: algorithmHTTPService.getSubmissions
+        handler: algorithmHttpService.getSubmissions
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -899,7 +899,7 @@ services:
           routeConfigs:
             - path: /algorithm/submissions
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-getSubmissions
+              functionName: algorithmHttpService-getSubmissions
       triggers:
         - name: http
           type: http
@@ -914,9 +914,9 @@ services:
       service: ${vars.service}
       function:
         name: saveAlgoProblem
-        handler: algorithmHTTPService.saveProblem
+        handler: algorithmHttpService.saveProblem
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -929,7 +929,7 @@ services:
           routeConfigs:
             - path: /algorithm/problem/save
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-saveProblem
+              functionName: algorithmHttpService-saveProblem
       triggers:
         - name: http
           type: http
@@ -944,9 +944,9 @@ services:
       service: ${vars.service}
       function:
         name: deleteAlgoProblem
-        handler: algorithmHTTPService.deleteProblem
+        handler: algorithmHttpService.deleteProblem
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -959,7 +959,7 @@ services:
           routeConfigs:
             - path: /algorithm/problem/delete
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-deleteProblem
+              functionName: algorithmHttpService-deleteProblem
       triggers:
         - name: http
           type: http
@@ -974,9 +974,9 @@ services:
       service: ${vars.service}
       function:
         name: saveAlgoTestCases
-        handler: algorithmHTTPService.saveTestCases
+        handler: algorithmHttpService.saveTestCases
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -989,7 +989,7 @@ services:
           routeConfigs:
             - path: /algorithm/testcase/save
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-saveTestCases
+              functionName: algorithmHttpService-saveTestCases
       triggers:
         - name: http
           type: http
@@ -1004,9 +1004,9 @@ services:
       service: ${vars.service}
       function:
         name: saveAlgoTag
-        handler: algorithmHTTPService.saveTag
+        handler: algorithmHttpService.saveTag
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1019,7 +1019,7 @@ services:
           routeConfigs:
             - path: /algorithm/tag/save
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-saveTag
+              functionName: algorithmHttpService-saveTag
       triggers:
         - name: http
           type: http
@@ -1034,9 +1034,9 @@ services:
       service: ${vars.service}
       function:
         name: importAlgoProblems
-        handler: algorithmHTTPService.importProblems
+        handler: algorithmHttpService.importProblems
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1049,7 +1049,7 @@ services:
           routeConfigs:
             - path: /algorithm/import
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-importProblems
+              functionName: algorithmHttpService-importProblems
       triggers:
         - name: http
           type: http
@@ -1064,9 +1064,9 @@ services:
       service: ${vars.service}
       function:
         name: saveAlgoDraft
-        handler: algorithmHTTPService.saveDraft
+        handler: algorithmHttpService.saveDraft
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1079,7 +1079,7 @@ services:
           routeConfigs:
             - path: /algorithm/draft/save
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-saveDraft
+              functionName: algorithmHttpService-saveDraft
       triggers:
         - name: http
           type: http
@@ -1094,9 +1094,9 @@ services:
       service: ${vars.service}
       function:
         name: getAlgoDraft
-        handler: algorithmHTTPService.getDraft
+        handler: algorithmHttpService.getDraft
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1109,7 +1109,7 @@ services:
           routeConfigs:
             - path: /algorithm/draft
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-getDraft
+              functionName: algorithmHttpService-getDraft
       triggers:
         - name: http
           type: http
@@ -1124,9 +1124,9 @@ services:
       service: ${vars.service}
       function:
         name: getAlgoLastResult
-        handler: algorithmHTTPService.getLastResult
+        handler: algorithmHttpService.getLastResult
         codeUri: '.'
-        initializer: algorithmHTTPService.initializer
+        initializer: algorithmHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1139,7 +1139,7 @@ services:
           routeConfigs:
             - path: /algorithm/lastResult
               serviceName: ${vars.service.name}
-              functionName: algorithmHTTPService-getLastResult
+              functionName: algorithmHttpService-getLastResult
       triggers:
         - name: http
           type: http
@@ -1154,9 +1154,9 @@ services:
       service: ${vars.service}
       function:
         name: getBookList
-        handler: bookHTTPService.getBookList
+        handler: bookHttpService.getBookList
         codeUri: '.'
-        initializer: bookHTTPService.initializer
+        initializer: bookHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1169,7 +1169,7 @@ services:
           routeConfigs:
             - path: /book/list
               serviceName: ${vars.service.name}
-              functionName: bookHTTPService-getBookList
+              functionName: bookHttpService-getBookList
       triggers:
         - name: http
           type: http
@@ -1184,9 +1184,9 @@ services:
       service: ${vars.service}
       function:
         name: getBookDetail
-        handler: bookHTTPService.getBookDetail
+        handler: bookHttpService.getBookDetail
         codeUri: '.'
-        initializer: bookHTTPService.initializer
+        initializer: bookHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1199,7 +1199,7 @@ services:
           routeConfigs:
             - path: /book/detail
               serviceName: ${vars.service.name}
-              functionName: bookHTTPService-getBookDetail
+              functionName: bookHttpService-getBookDetail
       triggers:
         - name: http
           type: http
@@ -1214,9 +1214,9 @@ services:
       service: ${vars.service}
       function:
         name: createBookOrder
-        handler: bookHTTPService.createBookOrder
+        handler: bookHttpService.createBookOrder
         codeUri: '.'
-        initializer: bookHTTPService.initializer
+        initializer: bookHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1229,7 +1229,7 @@ services:
           routeConfigs:
             - path: /book/order/create
               serviceName: ${vars.service.name}
-              functionName: bookHTTPService-createBookOrder
+              functionName: bookHttpService-createBookOrder
       triggers:
         - name: http
           type: http
@@ -1244,9 +1244,9 @@ services:
       service: ${vars.service}
       function:
         name: confirmBookOrder
-        handler: bookHTTPService.confirmBookOrder
+        handler: bookHttpService.confirmBookOrder
         codeUri: '.'
-        initializer: bookHTTPService.initializer
+        initializer: bookHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1259,7 +1259,7 @@ services:
           routeConfigs:
             - path: /book/order/confirm
               serviceName: ${vars.service.name}
-              functionName: bookHTTPService-confirmBookOrder
+              functionName: bookHttpService-confirmBookOrder
       triggers:
         - name: http
           type: http
@@ -1274,9 +1274,9 @@ services:
       service: ${vars.service}
       function:
         name: getBookOrders
-        handler: bookHTTPService.getBookOrders
+        handler: bookHttpService.getBookOrders
         codeUri: '.'
-        initializer: bookHTTPService.initializer
+        initializer: bookHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1289,7 +1289,7 @@ services:
           routeConfigs:
             - path: /book/orders
               serviceName: ${vars.service.name}
-              functionName: bookHTTPService-getBookOrders
+              functionName: bookHttpService-getBookOrders
       triggers:
         - name: http
           type: http
@@ -1304,9 +1304,9 @@ services:
       service: ${vars.service}
       function:
         name: saveBook
-        handler: bookHTTPService.saveBook
+        handler: bookHttpService.saveBook
         codeUri: '.'
-        initializer: bookHTTPService.initializer
+        initializer: bookHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1319,7 +1319,7 @@ services:
           routeConfigs:
             - path: /book/save
               serviceName: ${vars.service.name}
-              functionName: bookHTTPService-saveBook
+              functionName: bookHttpService-saveBook
       triggers:
         - name: http
           type: http
@@ -1334,9 +1334,9 @@ services:
       service: ${vars.service}
       function:
         name: deleteBook
-        handler: bookHTTPService.deleteBook
+        handler: bookHttpService.deleteBook
         codeUri: '.'
-        initializer: bookHTTPService.initializer
+        initializer: bookHttpService.initializer
         runtime: nodejs16
         memorySize: 4096
         cpu: 1.5
@@ -1349,7 +1349,97 @@ services:
           routeConfigs:
             - path: /book/delete
               serviceName: ${vars.service.name}
-              functionName: bookHTTPService-deleteBook
+              functionName: bookHttpService-deleteBook
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  createAnnotation:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: createAnnotation
+        handler: annotationHttpService.createAnnotation
+        codeUri: '.'
+        initializer: annotationHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/annotation
+              serviceName: ${vars.service.name}
+              functionName: annotationHttpService-createAnnotation
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
+  getAnnotations:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: getAnnotations
+        handler: annotationHttpService.getAnnotations
+        codeUri: '.'
+        initializer: annotationHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/annotations
+              serviceName: ${vars.service.name}
+              functionName: annotationHttpService-getAnnotations
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
+            authType: anonymous
+  deleteAnnotation:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: deleteAnnotation
+        handler: annotationHttpService.deleteAnnotation
+        codeUri: '.'
+        initializer: annotationHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /article/annotation/delete
+              serviceName: ${vars.service.name}
+              functionName: annotationHttpService-deleteAnnotation
       triggers:
         - name: http
           type: http
