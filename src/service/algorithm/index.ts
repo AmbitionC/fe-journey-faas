@@ -7,7 +7,7 @@ import { AlgorithmTagEntity } from '../../entity/algorithm/tag';
 import { AlgorithmProblemTagEntity } from '../../entity/algorithm/problemTag';
 import { AlgorithmSubmissionEntity } from '../../entity/algorithm/submission';
 import { AlgorithmCodeDraftEntity } from '../../entity/algorithm/codeDraft';
-import { Judge0Service } from './judge0';
+import { Judge0ClientService } from './judge0Client';
 import { R } from '../../common/base.error.utils';
 
 @Provide()
@@ -31,7 +31,7 @@ export class AlgorithmService {
   draftModel: Repository<AlgorithmCodeDraftEntity>;
 
   @Inject()
-  judge0Service: Judge0Service;
+  judge0ClientService: Judge0ClientService;
 
   // ========== 用户端 ==========
 
@@ -151,7 +151,7 @@ export class AlgorithmService {
 
     if (!sampleCases.length) throw R.error('该题目没有示例用例');
 
-    const judgeResult = await this.judge0Service.runTestCases(
+    const judgeResult = await this.judge0ClientService.runTestCases(
       code,
       language,
       sampleCases.map(tc => ({
@@ -214,7 +214,7 @@ export class AlgorithmService {
 
     if (!allCases.length) throw R.error('该题目没有测试用例');
 
-    const judgeResult = await this.judge0Service.runTestCases(
+    const judgeResult = await this.judge0ClientService.runTestCases(
       code,
       language,
       allCases.map(tc => ({
