@@ -85,8 +85,8 @@ export class Judge0Service {
     const error = result.stderr
       ? Buffer.from(result.stderr, 'base64').toString()
       : result.compile_output
-        ? Buffer.from(result.compile_output, 'base64').toString()
-        : null;
+      ? Buffer.from(result.compile_output, 'base64').toString()
+      : null;
 
     return {
       input: stdin,
@@ -122,8 +122,7 @@ export class Judge0Service {
       );
       results.push(result);
       if (result.runtime) totalRuntime += result.runtime;
-      if (result.memory && result.memory > maxMemory)
-        maxMemory = result.memory;
+      if (result.memory && result.memory > maxMemory) maxMemory = result.memory;
 
       if (!result.passed && result.error) break;
     }
