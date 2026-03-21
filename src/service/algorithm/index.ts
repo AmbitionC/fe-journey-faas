@@ -463,7 +463,8 @@ export class AlgorithmService {
         }
       }
 
-      const problem = await this.saveProblem({
+      const existing = await this.problemModel.findOneBy({ slug: item.slug });
+      const problemData: any = {
         title: item.title,
         slug: item.slug,
         difficulty: item.difficulty || 'easy',
@@ -473,7 +474,12 @@ export class AlgorithmService {
         orderNum: item.orderNum || 0,
         status: item.status || 'draft',
         tagIds,
-      });
+      };
+      if (existing) {
+        problemData.id = Number(existing.id);
+      }
+
+      const problem = await this.saveProblem(problemData);
 
       if (item.testCases && Array.isArray(item.testCases)) {
         await this.saveTestCases(Number(problem.id), item.testCases);

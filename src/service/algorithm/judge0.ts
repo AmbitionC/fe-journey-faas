@@ -1,4 +1,5 @@
 import { Config, Provide } from '@midwayjs/core';
+import fetch from 'node-fetch';
 
 const LANGUAGE_MAP: Record<string, number> = {
   javascript: 63,
