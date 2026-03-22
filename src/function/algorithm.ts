@@ -10,6 +10,7 @@ import {
 import { Context } from '@midwayjs/faas';
 import { AlgorithmService } from '../service/algorithm/index';
 import { NoAuth } from '../decorator/noAuth';
+import { R } from '../common/base.error.utils';
 import {
   ProblemListQueryDTO,
   ProblemDetailQueryDTO,
@@ -24,6 +25,7 @@ import {
   SaveDraftDTO,
   GetDraftDTO,
   LastResultQueryDTO,
+  ProblemStatusQueryDTO,
 } from '../dto/algorithm';
 
 @Provide()
@@ -33,6 +35,13 @@ export class AlgorithmHTTPService {
 
   @Inject()
   algorithmService: AlgorithmService;
+
+  private requireUserId(userId?: string) {
+    if (!userId) {
+      throw R.unauthorizedError('请先登录后再操作');
+    }
+    return userId;
+  }
 
   // ========== 用户端 ==========
 
@@ -83,7 +92,7 @@ export class AlgorithmHTTPService {
     method: 'post',
   })
   async runCode(@Body(ALL) body: RunCodeDTO) {
-    const userId = body.userId || this.ctx.userInfo?.userId;
+    const userId = this.requireUserId(body.userId || this.ctx.userInfo?.userId);
     const data = await this.algorithmService.runCode({ ...body, userId });
     return { success: true, data };
   }
@@ -96,7 +105,7 @@ export class AlgorithmHTTPService {
     method: 'post',
   })
   async submitCode(@Body(ALL) body: SubmitCodeDTO) {
-    const userId = body.userId || this.ctx.userInfo?.userId;
+    const userId = this.requireUserId(body.userId || this.ctx.userInfo?.userId);
     const data = await this.algorithmService.submitCode({
       ...body,
       userId,
@@ -112,11 +121,28 @@ export class AlgorithmHTTPService {
     method: 'get',
   })
   async getSubmissions(@Query(ALL) query: SubmissionListQueryDTO) {
-    const userId = query.userId || this.ctx.userInfo?.userId;
+    const userId = this.requireUserId(
+      query.userId || this.ctx.userInfo?.userId
+    );
     const data = await this.algorithmService.getSubmissions({
       ...query,
       userId,
     });
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '获取用户题目状态',
+    functionName: 'getAlgoProblemStatuses',
+    name: 'getAlgoProblemStatuses',
+    path: '/algorithm/problem/statuses',
+    method: 'get',
+  })
+  async getProblemStatuses(@Query(ALL) query: ProblemStatusQueryDTO) {
+    const userId = this.requireUserId(
+      query.userId || this.ctx.userInfo?.userId
+    );
+    const data = await this.algorithmService.getUserProblemStatuses(userId);
     return { success: true, data };
   }
 
@@ -130,7 +156,7 @@ export class AlgorithmHTTPService {
     method: 'post',
   })
   async saveDraft(@Body(ALL) body: SaveDraftDTO) {
-    const userId = body.userId || this.ctx.userInfo?.userId;
+    const userId = this.requireUserId(body.userId || this.ctx.userInfo?.userId);
     const data = await this.algorithmService.saveDraft({
       ...body,
       userId,
@@ -146,7 +172,9 @@ export class AlgorithmHTTPService {
     method: 'get',
   })
   async getDraft(@Query(ALL) query: GetDraftDTO) {
-    const userId = query.userId || this.ctx.userInfo?.userId;
+    const userId = this.requireUserId(
+      query.userId || this.ctx.userInfo?.userId
+    );
     const data = await this.algorithmService.getDrafts(userId, query.problemId);
     return { success: true, data };
   }
@@ -159,7 +187,9 @@ export class AlgorithmHTTPService {
     method: 'get',
   })
   async getLastResult(@Query(ALL) query: LastResultQueryDTO) {
-    const userId = query.userId || this.ctx.userInfo?.userId;
+    const userId = this.requireUserId(
+      query.userId || this.ctx.userInfo?.userId
+    );
     const data = await this.algorithmService.getLastResult(
       userId,
       query.problemId

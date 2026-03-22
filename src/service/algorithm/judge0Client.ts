@@ -12,6 +12,49 @@ const LANGUAGE_MAP: Record<string, number> = {
 
 const EXPLICIT_INPUT_HANDLING_PATTERN =
   /\/dev\/stdin|process\.stdin|readFileSync\s*\(\s*(?:0|['"]\/dev\/stdin['"])\s*[\),]/;
+const FINAL_RESULT_SENTINEL = '__ALGORITHM_RESULT__:';
+
+function normalizeText(value: string | null | undefined) {
+  return String(value ?? '').replace(/\r\n/g, '\n').trim();
+}
+
+function normalizeDisplayText(value: string | null | undefined) {
+  return String(value ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '');
+}
+
+function extractExecutionOutput(stdout: string | null | undefined) {
+  const decoded = String(stdout ?? '').replace(/\r\n/g, '\n');
+  const lines = decoded.split('\n');
+  const debugLines: string[] = [];
+  let hasFinalResult = false;
+  let actualOutput = '';
+
+  for (const line of lines) {
+    if (!line) continue;
+
+    if (line.startsWith(FINAL_RESULT_SENTINEL)) {
+      try {
+        const payload = JSON.parse(line.slice(FINAL_RESULT_SENTINEL.length));
+        actualOutput = normalizeText(payload?.value);
+        hasFinalResult = true;
+        continue;
+      } catch {
+        debugLines.push(line);
+        continue;
+      }
+    }
+
+    debugLines.push(line);
+  }
+
+  return {
+    hasFinalResult,
+    actualOutput: hasFinalResult ? actualOutput : normalizeText(decoded),
+    debugOutput: hasFinalResult
+      ? normalizeDisplayText(debugLines.join('\n')) || null
+      : null,
+  };
+}
 
 const FUNCTION_MODE_RUNNER_SOURCE = String.raw`
 const __algorithmParseInputValue = line => {
@@ -22,6 +65,7 @@ const __algorithmParseInputValue = line => {
   if (text === 'null') return null;
   if (text === 'undefined') return undefined;
   if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
+  const __algorithmBacktick = String.fromCharCode(96);
 
   if (
     (text.startsWith('[') && text.endsWith(']')) ||
@@ -35,7 +79,7 @@ const __algorithmParseInputValue = line => {
 
   if (
     (text.startsWith("'") && text.endsWith("'")) ||
-    (text.startsWith('\`') && text.endsWith('\`'))
+    (text.startsWith(__algorithmBacktick) && text.endsWith(__algorithmBacktick))
   ) {
     return text.slice(1, -1);
   }
@@ -132,13 +176,18 @@ const __algorithmSolution = __algorithmResolve(
 
 if (typeof __algorithmSolution === 'function') {
   const __algorithmResult = __algorithmSolution(...__algorithmArgs);
-  if (typeof __algorithmResult !== 'undefined') {
-    console.log(__algorithmSerialize(__algorithmResult));
-  }
+  console.log('${FINAL_RESULT_SENTINEL}' + JSON.stringify({
+    value:
+      typeof __algorithmResult === 'undefined'
+        ? ''
+        : __algorithmSerialize(__algorithmResult)
+  }));
 } else {
   const __algorithmClassResult = __algorithmRunClassStyle(__algorithmArgs);
   if (__algorithmClassResult.matched) {
-    console.log(__algorithmSerialize(__algorithmClassResult.value));
+    console.log('${FINAL_RESULT_SENTINEL}' + JSON.stringify({
+      value: __algorithmSerialize(__algorithmClassResult.value)
+    }));
   } else {
     throw new Error('请定义 solution 函数，或实现题目要求的类');
   }
@@ -158,6 +207,7 @@ export interface TestCaseResult {
   input: string;
   expectedOutput: string;
   actualOutput: string;
+  debugOutput?: string | null;
   passed: boolean;
   runtime: number | null;
   memory: number | null;
@@ -178,6 +228,21 @@ export class Judge0ClientService {
     const id = LANGUAGE_MAP[language];
     if (!id) throw new Error(`Unsupported language: ${language}`);
     return id;
+  }
+
+  private get isRapidApi() {
+    return this.judge0Config.apiUrl.includes('rapidapi.com');
+  }
+
+  private validateJudge0Config() {
+    if (this.isRapidApi) {
+      if (
+        !this.judge0Config?.apiKey ||
+        this.judge0Config.apiKey === 'YOUR_RAPIDAPI_KEY'
+      ) {
+        throw new Error('判题服务尚未配置完成，请联系管理员');
+      }
+    }
   }
 
   private shouldWrapFunctionMode(language: string, code: string) {
@@ -203,16 +268,24 @@ export class Judge0ClientService {
   ): Promise<TestCaseResult> {
     const languageId = this.getLanguageId(language);
     const executableCode = this.buildExecutableCode(code, language);
+    this.validateJudge0Config();
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.isRapidApi) {
+      headers['X-RapidAPI-Key'] = this.judge0Config.apiKey;
+      headers['X-RapidAPI-Host'] = 'judge0-ce.p.rapidapi.com';
+    } else if (this.judge0Config.apiKey) {
+      headers['X-Auth-Token'] = this.judge0Config.apiKey;
+    }
 
     const response = await fetch(
       `${this.judge0Config.apiUrl}/submissions?base64_encoded=true&wait=true`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-RapidAPI-Key': this.judge0Config.apiKey,
-          'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com',
-        },
+        headers,
         body: JSON.stringify({
           language_id: languageId,
           source_code: Buffer.from(executableCode).toString('base64'),
@@ -225,24 +298,37 @@ export class Judge0ClientService {
     );
 
     if (!response.ok) {
-      throw new Error(`Judge0 API error: ${response.status}`);
+      let detail = '';
+      try {
+        detail = await response.text();
+      } catch {}
+      const hint =
+        response.status === 403
+          ? '（API Key 无效或已过期，请检查 Judge0 配置）'
+          : '';
+      throw new Error(
+        `判题服务异常 (${response.status})${hint}${detail ? ': ' + detail : ''}`
+      );
     }
 
     const result: Judge0Result = await response.json();
-
-    const actualOutput = result.stdout
-      ? Buffer.from(result.stdout, 'base64').toString().trim()
+    const stdoutText = result.stdout
+      ? Buffer.from(result.stdout, 'base64').toString()
       : '';
+    const parsedOutput = extractExecutionOutput(stdoutText);
     const error = result.stderr
       ? Buffer.from(result.stderr, 'base64').toString()
       : result.compile_output
       ? Buffer.from(result.compile_output, 'base64').toString()
       : null;
+    const actualOutput =
+      error && !parsedOutput.hasFinalResult ? '' : parsedOutput.actualOutput;
 
     return {
       input: stdin,
       expectedOutput: expectedOutput.trim(),
       actualOutput,
+      debugOutput: parsedOutput.debugOutput,
       passed: result.status.id === 3, // 3 = Accepted
       runtime: result.time ? parseFloat(result.time) * 1000 : null,
       memory: result.memory,

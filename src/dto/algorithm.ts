@@ -161,6 +161,11 @@ export class ImportProblemsDTO {
   data: string;
 }
 
+export class ProblemStatusQueryDTO {
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
+}
+
 // --- 草稿与运行记录 ---
 
 export class SaveDraftDTO {

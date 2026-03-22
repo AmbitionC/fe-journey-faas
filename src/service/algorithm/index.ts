@@ -255,6 +255,7 @@ export class AlgorithmService {
     await this.problemModel.save(problem);
 
     return {
+      ...judgeResult,
       submissionId: submission.id,
       status,
       runtime: judgeResult.totalRuntime,
@@ -343,6 +344,13 @@ export class AlgorithmService {
 
     if (!last) return null;
 
+    let parsedResults: Array<{ passed?: boolean }> = [];
+    try {
+      parsedResults = last.testResults ? JSON.parse(last.testResults) : [];
+    } catch {
+      parsedResults = [];
+    }
+
     return {
       id: last.id,
       type: last.type,
@@ -352,8 +360,34 @@ export class AlgorithmService {
       memory: last.memory,
       errorMessage: last.errorMessage,
       testResults: last.testResults,
+      allPassed: last.status === 'accepted',
+      passedCount: parsedResults.filter(result => result?.passed).length,
+      totalCount: parsedResults.length,
       createTime: last.createTime,
     };
+  }
+
+  async getUserProblemStatuses(userId: string) {
+    const rows: Array<{ problemId: number; status: string }> =
+      await this.submissionModel
+        .createQueryBuilder('s')
+        .select('s.problemId', 'problemId')
+        .addSelect('s.status', 'status')
+        .where('s.userId = :userId', { userId })
+        .andWhere('s.type = :type', { type: 'submit' })
+        .orderBy('s.createTime', 'ASC')
+        .getRawMany();
+
+    const map: Record<string, 'accepted' | 'attempted'> = {};
+    for (const row of rows) {
+      const pid = String(row.problemId);
+      if (row.status === 'accepted') {
+        map[pid] = 'accepted';
+      } else if (!map[pid]) {
+        map[pid] = 'attempted';
+      }
+    }
+    return map;
   }
 
   // ========== 管理端 ==========

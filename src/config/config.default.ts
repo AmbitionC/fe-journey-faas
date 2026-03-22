@@ -47,8 +47,9 @@ export default {
     },
   },
   judge0: {
-    apiUrl: 'https://judge0-ce.p.rapidapi.com',
-    apiKey: 'YOUR_RAPIDAPI_KEY',
+    apiUrl:
+      process.env.JUDGE0_API_URL || 'https://judge0-ce.p.rapidapi.com',
+    apiKey: process.env.JUDGE0_API_KEY || '',
     timeout: 10,
     memoryLimit: 128000,
   },
