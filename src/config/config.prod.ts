@@ -24,7 +24,7 @@ export default {
     credentials: true,
     origin: (ctx) => ctx.get('origin') || '*',
     allowMethods: 'GET,HEAD,PUT,POST,DELETE,PATCH,OPTIONS',
-    allowHeaders: 'Content-Type,Authorization,Accept',
+    allowHeaders: 'Content-Type,Authorization,Accept,token',
   },
   token: {
     expire: 60 * 60 * 24 * 7,
