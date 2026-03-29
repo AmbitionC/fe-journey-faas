@@ -133,8 +133,8 @@ export class AlgorithmHTTPService {
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '获取用户题目状态',
-    functionName: 'getAlgoProblemStatuses',
-    name: 'getAlgoProblemStatuses',
+    functionName: 'getAlgoStatuses',
+    name: 'getAlgoStatuses',
     path: '/algorithm/problem/statuses',
     method: 'get',
   })
