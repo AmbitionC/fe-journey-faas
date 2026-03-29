@@ -32,7 +32,7 @@ export class AnnotationHTTPService {
     method: 'post',
   })
   async createAnnotation(@Body(ALL) body: CreateAnnotationDTO) {
-    const userId = this.ctx.userInfo?.userId;
+    const userId = body.userId || this.ctx.userInfo?.userId;
     const data = await this.annotationService.createAnnotation(userId, body);
     return { success: true, data };
   }
@@ -61,7 +61,7 @@ export class AnnotationHTTPService {
     method: 'post',
   })
   async deleteAnnotation(@Body(ALL) body: DeleteAnnotationDTO) {
-    const userId = this.ctx.userInfo?.userId;
+    const userId = body.userId || this.ctx.userInfo?.userId;
     const data = await this.annotationService.deleteAnnotation(
       body.id,
       userId

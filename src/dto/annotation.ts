@@ -3,6 +3,9 @@ import { Rule, RuleType } from '@midwayjs/validate';
 const MODULE_ENUM = ['interview', 'knowledge', 'firstclass'];
 
 export class CreateAnnotationDTO {
+  @Rule(RuleType.string().max(20).optional())
+  userId?: string;
+
   @Rule(RuleType.string().max(100).required())
   articleKey: string;
 
@@ -44,4 +47,7 @@ export class QueryAnnotationsDTO {
 export class DeleteAnnotationDTO {
   @Rule(RuleType.number().integer().required())
   id: number;
+
+  @Rule(RuleType.string().max(20).optional())
+  userId?: string;
 }
