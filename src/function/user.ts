@@ -63,4 +63,18 @@ export class UserHTTPService {
     if (!userId) throw R.error('用户ID不能为空');
     return await this.userService.updateUser(userId, { nickName, avatar });
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '激活会员',
+    functionName: 'activateMembership',
+    name: 'activateMembership',
+    path: '/user/activateMembership',
+    method: 'post',
+  })
+  async activateMembership(@Body(ALL) data: { plan: 'monthly' | 'yearly' }): Promise<any> {
+    const userId = this.ctx.userInfo?.userId;
+    if (!userId) throw R.error('请先登录');
+    if (!data.plan || !['monthly', 'yearly'].includes(data.plan)) throw R.error('plan 参数无效');
+    return await this.userService.activateMembership(userId, data.plan);
+  }
 }

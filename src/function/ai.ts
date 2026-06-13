@@ -30,7 +30,7 @@ export class AiHTTPService {
   userModel: Repository<UserEntity>;
 
   @Config('ai')
-  aiConfig: { rateLimit: { freeUserPerHour: number } };
+  aiConfig: { rateLimit: { freeUserPerDay: number } };
 
   private async getIsMember(userId: string): Promise<boolean> {
     try {
@@ -40,6 +40,20 @@ export class AiHTTPService {
     } catch {
       return false;
     }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'AI 问答配额查询',
+    functionName: 'aiQuota',
+    name: 'aiQuota',
+    path: '/api/ai/quota',
+    method: 'get',
+  })
+  async aiQuota() {
+    const userId = this.ctx.userInfo?.userId;
+    const isMember = await this.getIsMember(userId);
+    const quota = await this.aiProxyService.getQuota(userId, isMember);
+    return { success: true, data: { ...quota, isMember } };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

@@ -76,4 +76,24 @@ export class UserService {
     await this.userModel.save(user);
     return { success: true, data: user.toVO() };
   }
+
+  async activateMembership(userId: string, plan: 'monthly' | 'yearly'): Promise<any> {
+    const user = await this.userModel.findOneBy({ phoneNumber: userId });
+    if (!user) throw R.error('用户不存在');
+
+    // If already a member with future date, extend from that date; otherwise start from now
+    const baseDate = (user.isMember && user.memberDate && new Date(user.memberDate) > new Date())
+      ? new Date(user.memberDate)
+      : new Date();
+
+    const days = plan === 'yearly' ? 365 : 30;
+    const newExpiry = new Date(baseDate);
+    newExpiry.setDate(newExpiry.getDate() + days);
+
+    user.isMember = true;
+    user.memberDate = newExpiry.toISOString().slice(0, 19).replace('T', ' ');
+    await this.userModel.save(user);
+
+    return { success: true, data: user.toVO() };
+  }
 }

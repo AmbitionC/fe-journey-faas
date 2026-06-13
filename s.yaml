@@ -307,6 +307,36 @@ services:
             methods:
               - POST
             authType: anonymous
+  activateMembership:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: activateMembership
+        handler: userHttpService.activateMembership
+        codeUri: '.'
+        initializer: userHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 10
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /user/activateMembership
+              serviceName: ${vars.service.name}
+              functionName: userHttpService-activateMembership
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous
   recordVisit:
     component: devsapp/fc
     props:
@@ -1416,6 +1446,36 @@ services:
           config:
             methods:
               - POST
+            authType: anonymous
+  aiQuota:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: aiQuota
+        handler: aiHttpService.aiQuota
+        codeUri: '.'
+        initializer: aiHttpService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 10
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /api/ai/quota
+              serviceName: ${vars.service.name}
+              functionName: aiHttpService-aiQuota
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - GET
             authType: anonymous
   createAnnotation:
     component: devsapp/fc
