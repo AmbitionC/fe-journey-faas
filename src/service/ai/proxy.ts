@@ -21,9 +21,8 @@ interface AiConfig {
   apiKey: string;
   model: string;
   rateLimit: {
-    freeUserPerHour: number;
-    memberPerHour: number;
-    windowSeconds: number;
+    freeUserPerDay: number;
+    freeWindowSeconds: number;
   };
 }
 
@@ -50,17 +49,28 @@ export class AiProxyService {
   aiUsageLogModel: Repository<AiUsageLogEntity>;
 
   async checkRateLimit(userId: string, isMember: boolean): Promise<void> {
-    const limit = isMember
-      ? this.aiConfig.rateLimit.memberPerHour
-      : this.aiConfig.rateLimit.freeUserPerHour;
-    const key = `ai:rate:${userId}`;
+    if (isMember) return; // members have no limit
+    const limit = this.aiConfig.rateLimit.freeUserPerDay;
+    const key = `ai:rate:day:${userId}`;
     const current = await this.redisService.incr(key);
     if (current === 1) {
-      await this.redisService.expire(key, this.aiConfig.rateLimit.windowSeconds);
+      await this.redisService.expire(key, this.aiConfig.rateLimit.freeWindowSeconds);
     }
     if (current > limit) {
-      throw R.forbiddenError(`AI 请求已达上限（每小时 ${limit} 次），请稍后再试`);
+      throw R.forbiddenError(`RATE_LIMIT:今日 AI 问答次数已用完（每天 ${limit} 次），开通会员享无限使用`);
     }
+  }
+
+  async getQuota(userId: string, isMember: boolean): Promise<{ used: number; limit: number | null; resetAt: string | null }> {
+    if (isMember) {
+      return { used: 0, limit: null, resetAt: null };
+    }
+    const key = `ai:rate:day:${userId}`;
+    const usedStr = await this.redisService.get(key);
+    const used = parseInt(usedStr || '0', 10);
+    const ttl = await this.redisService.ttl(key);
+    const resetAt = ttl > 0 ? new Date(Date.now() + ttl * 1000).toISOString() : null;
+    return { used, limit: this.aiConfig.rateLimit.freeUserPerDay, resetAt };
   }
 
   buildSystemPrompt(context: ChatContext): string {

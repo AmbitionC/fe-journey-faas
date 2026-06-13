@@ -108,9 +108,8 @@ export default {
     apiKey: process.env.LLM_API_KEY || '',
     model: process.env.LLM_MODEL || 'qwen-max',
     rateLimit: {
-      freeUserPerHour: parseInt(process.env.AI_RATE_FREE || '30', 10),
-      memberPerHour: parseInt(process.env.AI_RATE_MEMBER || '200', 10),
-      windowSeconds: 3600,
+      freeUserPerDay: parseInt(process.env.AI_RATE_FREE || '10', 10),
+      freeWindowSeconds: 86400,
     },
   },
 } as MidwayConfig;
