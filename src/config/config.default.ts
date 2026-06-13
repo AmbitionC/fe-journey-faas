@@ -17,7 +17,14 @@ import { AlgorithmCodeDraftEntity } from '../entity/algorithm/codeDraft';
 import { ArticleAnnotationEntity } from '../entity/articleAnnotation';
 import { BookEntity } from '../entity/book';
 import { BookOrderEntity } from '../entity/bookOrder';
+import { AiUsageLogEntity } from '../entity/aiUsageLog';
 import { join } from 'path';
+
+const DB_HOST = process.env.DB_HOST || 'rm-bp18fm5u5c7uk47558o.mysql.rds.aliyuncs.com';
+const DB_USER = process.env.DB_USER || 'ch17394940726';
+const DB_PASS = process.env.DB_PASS || 'Ch823147833';
+const REDIS_HOST = process.env.REDIS_HOST || 'r-bp1bwq5o4hpvnfwfbzpd.redis.rds.aliyuncs.com';
+const REDIS_PASS = process.env.REDIS_PASS || 'Ch823147833';
 
 export default {
   cors: {
@@ -33,22 +40,27 @@ export default {
     dataSource: {
       default: {
         type: 'mysql',
-        host: 'rm-bp18fm5u5c7uk47558o.mysql.rds.aliyuncs.com', // 数据库ip地址，本地就写localhost
+        host: DB_HOST,
         port: 3306,
         allowPublicKeyRetrieval: true,
-        username: 'ch17394940726',
-        password: 'Ch823147833',
-        database: 'fe-journey', // 数据库名称
+        username: DB_USER,
+        password: DB_PASS,
+        database: 'fe-journey',
         charset: 'utf8mb4',
-        synchronize: true, // 如果第一次使用，不存在表，有同步的需求可以写 true，注意会丢数据
+        synchronize: true,
         logging: true,
-        entities: [UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity, ArticleEntity, UserArticleActionEntity, ArticleViewLogEntity, AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity, AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity, ArticleAnnotationEntity, BookEntity, BookOrderEntity],
+        entities: [
+          UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity,
+          ArticleEntity, UserArticleActionEntity, ArticleViewLogEntity,
+          AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity,
+          AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity,
+          ArticleAnnotationEntity, BookEntity, BookOrderEntity, AiUsageLogEntity,
+        ],
       },
     },
   },
   judge0: {
-    apiUrl:
-      process.env.JUDGE0_API_URL || 'https://judge0-ce.p.rapidapi.com',
+    apiUrl: process.env.JUDGE0_API_URL || 'https://judge0-ce.p.rapidapi.com',
     apiKey: process.env.JUDGE0_API_KEY || '',
     timeout: 10,
     memoryLimit: 128000,
@@ -56,16 +68,16 @@ export default {
   redis: {
     client: {
       port: 6379,
-      host: 'r-bp1bwq5o4hpvnfwfbzpd.redis.rds.aliyuncs.com',
-      password: 'Ch823147833',
+      host: REDIS_HOST,
+      password: REDIS_PASS,
       db: 0,
     },
   },
   cache: {
     store: redisStore,
     options: {
-      host: 'r-bp1bwq5o4hpvnfwfbzpd.redis.rds.aliyuncs.com',
-      password: 'Ch823147833',
+      host: REDIS_HOST,
+      password: REDIS_PASS,
       port: 6379,
       db: 0,
       keyPrefix: 'cache:',
@@ -87,8 +99,18 @@ export default {
     dirs: {
       default: {
         prefix: '/',
-        dir: join(__dirname, '../public'), // 静态文件目录
+        dir: join(__dirname, '../public'),
       },
+    },
+  },
+  ai: {
+    provider: process.env.LLM_PROVIDER || 'qwen',
+    apiKey: process.env.LLM_API_KEY || '',
+    model: process.env.LLM_MODEL || 'qwen-max',
+    rateLimit: {
+      freeUserPerHour: parseInt(process.env.AI_RATE_FREE || '30', 10),
+      memberPerHour: parseInt(process.env.AI_RATE_MEMBER || '200', 10),
+      windowSeconds: 3600,
     },
   },
 } as MidwayConfig;
