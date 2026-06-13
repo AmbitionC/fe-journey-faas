@@ -22,9 +22,9 @@ import { join } from 'path';
 
 const DB_HOST = process.env.DB_HOST || 'rm-bp18fm5u5c7uk47558o.mysql.rds.aliyuncs.com';
 const DB_USER = process.env.DB_USER || 'ch17394940726';
-const DB_PASS = process.env.DB_PASS || '';
+const DB_PASS = process.env.DB_PASS || 'Ch823147833';
 const REDIS_HOST = process.env.REDIS_HOST || 'r-bp1bwq5o4hpvnfwfbzpd.redis.rds.aliyuncs.com';
-const REDIS_PASS = process.env.REDIS_PASS || '';
+const REDIS_PASS = process.env.REDIS_PASS || 'Ch823147833';
 
 export default {
   cors: {
