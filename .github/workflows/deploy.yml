@@ -34,6 +34,11 @@ jobs:
             --access aliyun \
             -f
 
+      - name: Remove obsolete functions to stay under FC 50-function limit
+        run: |
+          s cli fc api DeleteFunction --region cn-hangzhou --serviceName fe-journey-faas --functionName aiChat --access aliyun 2>/dev/null || true
+          s cli fc api DeleteFunction --region cn-hangzhou --serviceName fe-journey-faas --functionName aiQuota --access aliyun 2>/dev/null || true
+
       - name: Deploy all functions
         env:
           DB_HOST: ${{ secrets.DB_HOST }}

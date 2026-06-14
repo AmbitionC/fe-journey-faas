@@ -9,6 +9,7 @@ import { UserEntity } from '../../entity/user';
 import { UserDTO } from '../../dto/user';
 import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
+import { AiProxyService } from '../ai/proxy';
 
 @Provide()
 export class UserService {
@@ -20,6 +21,9 @@ export class UserService {
 
   @Inject()
   redisService: RedisService;
+
+  @Inject()
+  aiProxyService: AiProxyService;
 
   // 创建用户
   async createUser(user: UserDTO): Promise<any> {
@@ -55,9 +59,10 @@ export class UserService {
       .where('user.phoneNumber = :userId', { userId })
       .getOne();
     if (userInfo) {
+      const quota = await this.aiProxyService.getQuota(userId, !!userInfo.isMember);
       return {
         success: true,
-        data: userInfo.toVO(),
+        data: { ...userInfo.toVO(), aiQuota: quota },
       };
     }
     return { success: false, message: '用户不存在' };
