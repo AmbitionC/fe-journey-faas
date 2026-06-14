@@ -1,0 +1,50 @@
+name: Deploy FaaS to Alibaba Cloud FC
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure Alibaba Cloud credentials
+        run: |
+          s config add \
+            --AccountID "${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}" \
+            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access aliyun \
+            -f
+
+      - name: Deploy all functions
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: s deploy -y --access aliyun
