@@ -65,5 +65,5 @@ export class AlgorithmProblemEntity extends BaseEntity {
   relatedArticles: any;
 
   @Column({ type: 'json', nullable: true, comment: '题单归属（可多个）' })
-  listSlugs: any;
+  listSlugs: string[] | null;
 }

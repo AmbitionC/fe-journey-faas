@@ -393,7 +393,7 @@ export class AlgorithmService {
 
   // ========== 题单 ==========
 
-  async getProblemLists() {
+  async getProblemLists(): Promise<{ slug: string; title: string; problemSlugs: string[] }[]> {
     const LIST_META: Record<string, string> = {
       'campus-hot': '校招高频',
       'by-topic': '按知识点',
