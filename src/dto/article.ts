@@ -87,3 +87,31 @@ export class LeaderboardQueryDTO {
   @Rule(RuleType.string().max(50).allow('').optional())
   userId?: string;
 }
+
+export class ReadingStateQueryDTO {
+  @Rule(RuleType.string().max(20).required())
+  module: string;
+
+  @Rule(RuleType.string().max(50).allow('').optional())
+  userId?: string;
+}
+
+export class ReadingStateBodyDTO {
+  @Rule(RuleType.string().max(20).required())
+  module: string;
+
+  @Rule(RuleType.string().max(100).required())
+  articleKey: string;
+
+  @Rule(RuleType.string().max(16).required())
+  status: string;
+
+  @Rule(RuleType.string().max(16).allow('').optional())
+  mastery?: string;
+
+  @Rule(RuleType.number().optional())
+  lastReadAt?: number;
+
+  @Rule(RuleType.string().max(50).allow('').optional())
+  userId?: string;
+}

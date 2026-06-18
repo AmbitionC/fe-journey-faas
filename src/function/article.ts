@@ -20,6 +20,8 @@ import {
   RecordViewDTO,
   BatchArticleStatsQueryDTO,
   LeaderboardQueryDTO,
+  ReadingStateQueryDTO,
+  ReadingStateBodyDTO,
 } from '../dto/article';
 import { createHash } from 'crypto';
 
@@ -242,5 +244,42 @@ export class ArticleHTTPService {
       query.userId
     );
     return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '查询学习状态',
+    functionName: 'getReadingState',
+    name: 'getReadingState',
+    path: '/article/readingState',
+    method: 'get',
+  })
+  @NoAuth()
+  async getReadingState(@Query(ALL) query: ReadingStateQueryDTO) {
+    const userId = (await this.resolveUserId()) || query.userId || '';
+    if (!userId) return { success: true, data: { list: [] } };
+    const list = await this.articleService.listReadingState(userId, query.module);
+    return { success: true, data: { list } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '上报学习状态',
+    functionName: 'postReadingState',
+    name: 'postReadingState',
+    path: '/article/readingState',
+    method: 'post',
+  })
+  @NoAuth()
+  async postReadingState(@Body(ALL) body: ReadingStateBodyDTO) {
+    const userId = (await this.resolveUserId()) || body.userId || '';
+    if (!userId) return { success: true, data: {} };
+    await this.articleService.upsertReadingState({
+      userId,
+      module: body.module,
+      articleKey: body.articleKey,
+      status: body.status,
+      mastery: body.mastery,
+      lastReadAt: body.lastReadAt || Date.now(),
+    });
+    return { success: true, data: {} };
   }
 }
