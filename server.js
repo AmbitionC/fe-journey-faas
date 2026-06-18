@@ -18,6 +18,7 @@ let appCtx;
 let aiProxyService;
 let aiHistoryService;
 let redisService;
+let articleService;
 
 // 流式分支绕过框架，手动补 CORS（公网跨域调用需要）
 function setCors(req, res) {
@@ -192,6 +193,8 @@ async function bootstrap() {
   aiProxyService = await appCtx.getAsync(AiProxyService);
   aiHistoryService = await appCtx.getAsync(AiHistoryService);
   redisService = await appCtx.getAsync(RedisService);
+  const { ArticleService } = require('./dist/service/article');
+  articleService = await appCtx.getAsync(ArticleService);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -200,7 +203,29 @@ async function bootstrap() {
       const { makeServiceAdapter } = require('./dist/copilot/deepseekAdapter');
       setCors(req, res);
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-      const runtime = new CopilotRuntime({ actions: [] }); // actions 在 Task 10 填
+      const { userId } = await resolveUser(req);
+      const actions = [
+        {
+          name: 'getLearnerProfile',
+          description: '查询当前用户在某模块的学情画像(覆盖度/最近/待复习)',
+          parameters: [
+            { name: 'module', type: 'string', description: '模块如 knowledge/interview', required: true },
+          ],
+          handler: async ({ module }) => await articleService.getLearnerProfile(userId, module),
+        },
+        {
+          name: 'listReviewDue',
+          description: '列出当前用户某模块建议复习的文章 key',
+          parameters: [
+            { name: 'module', type: 'string', description: '模块如 knowledge/interview', required: true },
+          ],
+          handler: async ({ module }) => {
+            const p = await articleService.getLearnerProfile(userId, module);
+            return { reviewDue: p.reviewDue };
+          },
+        },
+      ];
+      const runtime = new CopilotRuntime({ actions });
       const handler = copilotRuntimeNodeHttpEndpoint({
         endpoint: '/copilotkit', runtime, serviceAdapter: makeServiceAdapter(),
       });
