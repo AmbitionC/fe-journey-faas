@@ -282,4 +282,24 @@ export class ArticleHTTPService {
     });
     return { success: true, data: {} };
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '学习者画像（覆盖率/近期/复习/兴趣/连续天数）',
+    functionName: 'getLearnerProfile',
+    name: 'getLearnerProfile',
+    path: '/article/learnerProfile',
+    method: 'get',
+  })
+  @NoAuth()
+  async getLearnerProfile(@Query(ALL) query: ReadingStateQueryDTO) {
+    const userId = (await this.resolveUserId()) || query.userId || '';
+    if (!userId) {
+      return {
+        success: true,
+        data: { coverage: { done: 0, total: 0, ratio: 0 }, recentKeys: [], reviewDue: [], interests: [], streak: 0 },
+      };
+    }
+    const data = await this.articleService.getLearnerProfile(userId, query.module);
+    return { success: true, data };
+  }
 }

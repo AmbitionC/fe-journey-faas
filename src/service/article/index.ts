@@ -9,6 +9,7 @@ import { ArticleViewLogEntity } from '../../entity/articleViewLog';
 import { UserEntity } from '../../entity/user';
 import { ArticleReadingStateEntity } from '../../entity/articleReadingState';
 import { R } from '../../common/base.error.utils';
+import { buildProfile, Profile } from './learnerProfile';
 
 @Provide()
 export class ArticleService {
@@ -370,5 +371,39 @@ export class ArticleService {
       mastery: r.mastery || undefined,
       lastReadAt: Number(r.lastReadAt),
     }));
+  }
+
+  async getLearnerProfile(userId: string, module: string): Promise<Profile> {
+    const cacheKey = `profile:${userId}:${module}`;
+    const cached = await this.redisService.get(cacheKey);
+    if (cached) return JSON.parse(cached) as Profile;
+
+    const reading = await this.listReadingState(userId, module);
+
+    // 拍平叶子节点求 totalArticles
+    let totalArticles = 0;
+    try {
+      const { navData } = await this.getNavList(module);
+      const flattenLeaves = (nodes: any[]): number => {
+        if (!Array.isArray(nodes)) return 0;
+        let count = 0;
+        for (const node of nodes) {
+          if (node.isLeaf === true) {
+            count += 1;
+          } else if (Array.isArray(node.children) && node.children.length) {
+            count += flattenLeaves(node.children);
+          }
+        }
+        return count;
+      };
+      totalArticles = flattenLeaves(navData || []);
+    } catch {
+      // navData 不存在时不影响画像其余字段
+      totalArticles = 0;
+    }
+
+    const profile = buildProfile({ reading, totalArticles, now: Date.now() });
+    await this.redisService.set(cacheKey, JSON.stringify(profile), 'EX', 60);
+    return profile;
   }
 }
