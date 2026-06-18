@@ -103,13 +103,21 @@ async function handleStream(req, res) {
     /* 持久化失败不影响回答 */
   }
 
+  // 深度思考：默认开启（前端开关；缺省也视为开）
+  const deepThink = body.deepThink !== false;
+
   let full = '';
   try {
     await aiProxyService.checkRateLimit(userId, isMember);
-    const gen = aiProxyService.forwardStream(messages, context, userId);
+    const gen = aiProxyService.forwardStream(messages, context, userId, deepThink);
     for await (const chunk of gen) {
-      full += chunk;
-      res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
+      if (chunk && chunk.reasoning) {
+        res.write(`data: ${JSON.stringify({ reasoning: chunk.reasoning })}\n\n`);
+      }
+      if (chunk && chunk.content) {
+        full += chunk.content;
+        res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
+      }
     }
   } catch (err) {
     res.write(

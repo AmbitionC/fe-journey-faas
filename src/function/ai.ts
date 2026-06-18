@@ -20,6 +20,8 @@ class AIChatDTO {
   messages: ChatMessage[];
   context: ChatContext;
   conversationId?: number;
+  /** 深度思考开关（默认开启；走 DeepSeek reasoner 返回思考链） */
+  deepThink?: boolean;
 }
 
 class AIConversationDTO {
@@ -241,11 +243,17 @@ export class AiHTTPService {
       const gen = this.aiProxyService.forwardStream(
         body.messages,
         body.context,
-        userId
+        userId,
+        body.deepThink !== false
       );
 
       for await (const chunk of gen) {
-        res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
+        if (chunk && chunk.reasoning) {
+          res.write(`data: ${JSON.stringify({ reasoning: chunk.reasoning })}\n\n`);
+        }
+        if (chunk && chunk.content) {
+          res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
+        }
       }
     } catch (err: any) {
       res.write(

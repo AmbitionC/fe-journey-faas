@@ -86,15 +86,25 @@ export class AiProxyService {
     );
   }
 
-  private buildRequestBody(messages: ChatMessage[], systemPrompt: string, streaming: boolean) {
+  private buildRequestBody(
+    messages: ChatMessage[],
+    systemPrompt: string,
+    streaming: boolean,
+    deepThink = false
+  ) {
     const allMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...messages,
     ];
 
     if (this.isOpenAiStyle()) {
+      // 深度思考：DeepSeek 走 reasoner 模型（流式 delta 里带 reasoning_content）。
+      // 模型名可用 LLM_REASONER_MODEL 覆盖（默认 deepseek-reasoner）。
+      const useReasoner = deepThink && this.aiConfig.provider === 'deepseek';
       return {
-        model: this.aiConfig.model,
+        model: useReasoner
+          ? process.env.LLM_REASONER_MODEL || 'deepseek-reasoner'
+          : this.aiConfig.model,
         messages: allMessages,
         stream: streaming,
         max_tokens: 2048,
@@ -148,18 +158,28 @@ export class AiProxyService {
     return output?.choices?.[0]?.message?.content || '';
   }
 
-  private extractStreamContent(data: Record<string, unknown>): { content: string; done: boolean } {
+  private extractStreamContent(data: Record<string, unknown>): {
+    content: string;
+    reasoning: string;
+    done: boolean;
+  } {
     if (this.isOpenAiStyle()) {
-      const choices = data?.choices as Array<{ delta?: { content?: string }; finish_reason?: string }>;
+      const choices = data?.choices as Array<{
+        delta?: { content?: string; reasoning_content?: string };
+        finish_reason?: string;
+      }>;
       return {
         content: choices?.[0]?.delta?.content || '',
+        // 深度思考的链路：reasoner 在正文前先流式吐 reasoning_content
+        reasoning: choices?.[0]?.delta?.reasoning_content || '',
         done: choices?.[0]?.finish_reason === 'stop',
       };
     }
-    // DashScope
+    // DashScope（无思考链）
     const output = data?.output as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
     return {
       content: output?.choices?.[0]?.message?.content || '',
+      reasoning: '',
       done: output?.choices?.[0]?.finish_reason === 'stop',
     };
   }
@@ -208,13 +228,14 @@ export class AiProxyService {
   async *forwardStream(
     messages: ChatMessage[],
     context: ChatContext,
-    userId: string
-  ): AsyncGenerator<string> {
+    userId: string,
+    deepThink = false
+  ): AsyncGenerator<{ content?: string; reasoning?: string }> {
     if (!this.aiConfig.apiKey) throw R.error('AI 服务未配置，请联系管理员');
 
     const systemPrompt = this.buildSystemPrompt(context);
     const { url, headers } = this.getRequestConfig(true);
-    const body = this.buildRequestBody(messages, systemPrompt, true);
+    const body = this.buildRequestBody(messages, systemPrompt, true, deepThink);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -242,10 +263,14 @@ export class AiProxyService {
 
         try {
           const parsed = JSON.parse(rawData) as Record<string, unknown>;
-          const { content, done } = this.extractStreamContent(parsed);
+          const { content, reasoning, done } = this.extractStreamContent(parsed);
 
+          // 思考链先于正文：分别下发，前端据此渲染「深度思考」块与正文
+          if (reasoning) {
+            yield { reasoning };
+          }
           if (content) {
-            yield content;
+            yield { content };
           }
 
           // Track token usage from final SSE message
