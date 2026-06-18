@@ -166,6 +166,14 @@ export class ProblemStatusQueryDTO {
   userId?: string;
 }
 
+export class ToggleFavoriteDTO {
+  @Rule(RuleType.string().max(100).required())
+  slug: string;
+
+  @Rule(RuleType.string().valid('favorite', 'redo').allow(null).optional())
+  flag: 'favorite' | 'redo' | null;
+}
+
 // --- 草稿与运行记录 ---
 
 export class SaveDraftDTO {

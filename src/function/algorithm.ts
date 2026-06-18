@@ -26,6 +26,7 @@ import {
   GetDraftDTO,
   LastResultQueryDTO,
   ProblemStatusQueryDTO,
+  ToggleFavoriteDTO,
 } from '../dto/algorithm';
 
 @Provide()
@@ -156,6 +157,34 @@ export class AlgorithmHTTPService {
       query.userId || this.ctx.userInfo?.userId
     );
     const data = await this.algorithmService.getUserProblemStatuses(userId);
+    return { success: true, data };
+  }
+
+  // ========== 收藏 / 标记重做 ==========
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '收藏或标记重做题目',
+    functionName: 'toggleAlgoFavorite',
+    name: 'toggleAlgoFavorite',
+    path: '/algorithm/problem/favorite',
+    method: 'post',
+  })
+  async toggleFavorite(@Body(ALL) body: ToggleFavoriteDTO) {
+    const userId = this.requireUserId(this.ctx.userInfo?.userId);
+    const data = await this.algorithmService.toggleFlag(userId, body.slug, body.flag ?? null);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '获取当前用户的收藏与标记重做列表',
+    functionName: 'getAlgoFavorites',
+    name: 'getAlgoFavorites',
+    path: '/algorithm/problem/favorites',
+    method: 'get',
+  })
+  async getFavorites() {
+    const userId = this.requireUserId(this.ctx.userInfo?.userId);
+    const data = await this.algorithmService.getUserFlags(userId);
     return { success: true, data };
   }
 

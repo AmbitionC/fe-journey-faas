@@ -14,6 +14,7 @@ import { AlgorithmTagEntity } from '../entity/algorithm/tag';
 import { AlgorithmProblemTagEntity } from '../entity/algorithm/problemTag';
 import { AlgorithmSubmissionEntity } from '../entity/algorithm/submission';
 import { AlgorithmCodeDraftEntity } from '../entity/algorithm/codeDraft';
+import { AlgorithmProblemFlagEntity } from '../entity/algorithm/problemFlag';
 import { ArticleAnnotationEntity } from '../entity/articleAnnotation';
 import { BookEntity } from '../entity/book';
 import { BookOrderEntity } from '../entity/bookOrder';
@@ -74,6 +75,7 @@ export default {
           ArticleEntity, UserArticleActionEntity, ArticleViewLogEntity,
           AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity,
           AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity,
+          AlgorithmProblemFlagEntity,
           ArticleAnnotationEntity, BookEntity, BookOrderEntity, AiUsageLogEntity,
           AiConversationEntity, AiMessageEntity, ArticleReadingStateEntity,
         ],

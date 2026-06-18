@@ -7,6 +7,7 @@ import { AlgorithmTagEntity } from '../../entity/algorithm/tag';
 import { AlgorithmProblemTagEntity } from '../../entity/algorithm/problemTag';
 import { AlgorithmSubmissionEntity } from '../../entity/algorithm/submission';
 import { AlgorithmCodeDraftEntity } from '../../entity/algorithm/codeDraft';
+import { AlgorithmProblemFlagEntity } from '../../entity/algorithm/problemFlag';
 import { Judge0ClientService } from './judge0Client';
 import { R } from '../../common/base.error.utils';
 
@@ -29,6 +30,9 @@ export class AlgorithmService {
 
   @InjectEntityModel(AlgorithmCodeDraftEntity)
   draftModel: Repository<AlgorithmCodeDraftEntity>;
+
+  @InjectEntityModel(AlgorithmProblemFlagEntity)
+  problemFlagModel: Repository<AlgorithmProblemFlagEntity>;
 
   @Inject()
   judge0ClientService: Judge0ClientService;
@@ -512,6 +516,36 @@ export class AlgorithmService {
     const tag = new AlgorithmTagEntity();
     tag.name = name;
     return this.tagModel.save(tag);
+  }
+
+  // ========== 收藏 / 标记重做 ==========
+
+  async toggleFlag(userId: string, slug: string, flag: 'favorite' | 'redo' | null) {
+    const existing = await this.problemFlagModel.findOneBy({ userId, slug });
+    if (flag === null) {
+      if (existing) await this.problemFlagModel.remove(existing);
+      return { slug, flag: null };
+    }
+    if (existing) {
+      existing.flag = flag;
+      await this.problemFlagModel.save(existing);
+      return { slug, flag };
+    }
+    const entity = new AlgorithmProblemFlagEntity();
+    entity.userId = userId;
+    entity.slug = slug;
+    entity.flag = flag;
+    await this.problemFlagModel.save(entity);
+    return { slug, flag };
+  }
+
+  async getUserFlags(userId: string): Promise<Record<string, 'favorite' | 'redo'>> {
+    const rows = await this.problemFlagModel.find({ where: { userId } });
+    const map: Record<string, 'favorite' | 'redo'> = {};
+    for (const row of rows) {
+      map[row.slug] = row.flag;
+    }
+    return map;
   }
 
   async importProblems(dataStr: string) {
