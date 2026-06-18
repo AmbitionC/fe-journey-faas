@@ -78,13 +78,21 @@ export class AiProxyService {
     return `${persona}\n\n请用中文回答，保持回答简洁清晰，代码示例使用 Markdown 格式。`;
   }
 
+  /** DeepSeek 与 OpenAI 使用相同的 chat/completions 协议格式。 */
+  private isOpenAiStyle(): boolean {
+    return (
+      this.aiConfig.provider === 'openai' ||
+      this.aiConfig.provider === 'deepseek'
+    );
+  }
+
   private buildRequestBody(messages: ChatMessage[], systemPrompt: string, streaming: boolean) {
     const allMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...messages,
     ];
 
-    if (this.aiConfig.provider === 'openai') {
+    if (this.isOpenAiStyle()) {
       return {
         model: this.aiConfig.model,
         messages: allMessages,
@@ -105,9 +113,12 @@ export class AiProxyService {
   }
 
   private getRequestConfig(streaming: boolean): { url: string; headers: Record<string, string> } {
-    if (this.aiConfig.provider === 'openai') {
+    if (this.isOpenAiStyle()) {
       return {
-        url: 'https://api.openai.com/v1/chat/completions',
+        url:
+          this.aiConfig.provider === 'deepseek'
+            ? 'https://api.deepseek.com/chat/completions'
+            : 'https://api.openai.com/v1/chat/completions',
         headers: {
           'Authorization': `Bearer ${this.aiConfig.apiKey}`,
           'Content-Type': 'application/json',
@@ -128,7 +139,7 @@ export class AiProxyService {
   }
 
   private extractContent(data: Record<string, unknown>): string {
-    if (this.aiConfig.provider === 'openai') {
+    if (this.isOpenAiStyle()) {
       const choices = data?.choices as Array<{ message?: { content?: string }; delta?: { content?: string } }>;
       return choices?.[0]?.message?.content || choices?.[0]?.delta?.content || '';
     }
@@ -138,7 +149,7 @@ export class AiProxyService {
   }
 
   private extractStreamContent(data: Record<string, unknown>): { content: string; done: boolean } {
-    if (this.aiConfig.provider === 'openai') {
+    if (this.isOpenAiStyle()) {
       const choices = data?.choices as Array<{ delta?: { content?: string }; finish_reason?: string }>;
       return {
         content: choices?.[0]?.delta?.content || '',

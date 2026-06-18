@@ -15,3 +15,6 @@ run/
 *.zip
 .serverless
 .s/
+# 本地密钥（勿提交）
+.env
+.env.local

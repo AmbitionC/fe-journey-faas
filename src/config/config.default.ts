@@ -19,6 +19,23 @@ import { BookEntity } from '../entity/book';
 import { BookOrderEntity } from '../entity/bookOrder';
 import { AiUsageLogEntity } from '../entity/aiUsageLog';
 import { join } from 'path';
+import { readFileSync } from 'fs';
+
+// 本地开发：从 .env.local / .env 读取变量到 process.env（两者均已 gitignore）。
+// 生产环境由 FC 环境变量注入，不依赖此文件。需在读取下方 env 常量前执行。
+(() => {
+  for (const f of ['.env.local', '.env']) {
+    try {
+      const raw = readFileSync(`${process.cwd()}/${f}`, 'utf8');
+      for (const line of raw.split('\n')) {
+        const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+        if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+      }
+    } catch {
+      /* 文件不存在时忽略 */
+    }
+  }
+})();
 
 const DB_HOST = process.env.DB_HOST || 'rm-bp18fm5u5c7uk47558o.mysql.rds.aliyuncs.com';
 const DB_USER = process.env.DB_USER || 'ch17394940726';
@@ -104,9 +121,9 @@ export default {
     },
   },
   ai: {
-    provider: process.env.LLM_PROVIDER || 'qwen',
+    provider: process.env.LLM_PROVIDER || 'deepseek',
     apiKey: process.env.LLM_API_KEY || '',
-    model: process.env.LLM_MODEL || 'qwen-max',
+    model: process.env.LLM_MODEL || 'deepseek-chat',
     rateLimit: {
       freeUserPerDay: parseInt(process.env.AI_RATE_FREE || '10', 10),
       freeWindowSeconds: 86400,
