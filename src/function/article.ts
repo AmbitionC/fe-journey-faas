@@ -8,6 +8,7 @@ import {
   ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
+import { RedisService } from '@midwayjs/redis';
 import { ArticleService } from '../service/article';
 import { NoAuth } from '../decorator/noAuth';
 import {
@@ -29,6 +30,24 @@ export class ArticleHTTPService {
 
   @Inject()
   articleService: ArticleService;
+
+  @Inject()
+  redisService: RedisService;
+
+  /** @NoAuth 路由不过鉴权中间件，这里按需手动从 token 解析登录用户（用于浏览归因/学习榜）。 */
+  private async resolveUserId(): Promise<string | undefined> {
+    const fromCtx = (this.ctx as any).userInfo?.userId as string | undefined;
+    if (fromCtx) return fromCtx;
+    const header = (this.ctx.header || {}) as any;
+    const token = header.token || header.authorization?.replace('Bearer ', '');
+    if (!token) return undefined;
+    try {
+      const s = await this.redisService.get(`token:${token}`);
+      return s ? JSON.parse(s).userId : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '获取模块导航列表',
@@ -170,7 +189,7 @@ export class ArticleHTTPService {
   })
   @NoAuth()
   async recordArticleView(@Body(ALL) body: RecordViewDTO) {
-    const userId = this.ctx.userInfo?.userId;
+    const userId = await this.resolveUserId();
     const ip =
       this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       this.ctx.ip ||
