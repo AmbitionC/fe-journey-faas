@@ -62,7 +62,7 @@ export class AlgorithmProblemEntity extends BaseEntity {
   submitCount: number;
 
   @Column({ type: 'json', nullable: true, comment: '关联知识库文章' })
-  relatedArticles: any;
+  relatedArticles: { module: string; key: string; label: string }[] | null;
 
   @Column({ type: 'json', nullable: true, comment: '题单归属（可多个）' })
   listSlugs: string[] | null;
