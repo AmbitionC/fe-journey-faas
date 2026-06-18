@@ -16,7 +16,18 @@ const PORT = process.env.FC_SERVER_PORT || process.env.PORT || 9000;
 let framework;
 let appCtx;
 let aiProxyService;
+let aiHistoryService;
 let redisService;
+
+// 流式分支绕过框架，手动补 CORS（公网跨域调用需要）
+function setCors(req, res) {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,token');
+  res.setHeader('Vary', 'Origin');
+}
 
 function readBody(req) {
   return new Promise((resolve) => {
@@ -50,7 +61,7 @@ async function resolveUser(req) {
   return { userId: `guest:${ip}`, isMember: false };
 }
 
-// 真流式：SSE 直写
+// 真流式：SSE 直写 + 会话持久化
 async function handleStream(req, res) {
   const raw = (await readBody(req)).toString('utf8');
   let body = {};
@@ -63,20 +74,41 @@ async function handleStream(req, res) {
   const { userId, isMember } = await resolveUser(req);
 
   res.statusCode = 200;
+  setCors(req, res);
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
+  const messages = body.messages || [];
+  const context = body.context || {};
+
+  // 取/建会话并落库用户消息（尽力而为）
+  let conv = null;
+  try {
+    const lastUser = [...messages].reverse().find((m) => m && m.role === 'user');
+    conv = await aiHistoryService.ensureConversation(userId, body.conversationId, {
+      module: context.module,
+      articleKey: context.articleKey,
+      firstUserText: lastUser && lastUser.content,
+    });
+    if (lastUser) {
+      await aiHistoryService.appendMessage(conv, {
+        role: 'user',
+        content: lastUser.content,
+      });
+    }
+  } catch (e) {
+    /* 持久化失败不影响回答 */
+  }
+
+  let full = '';
   try {
     await aiProxyService.checkRateLimit(userId, isMember);
-    const gen = aiProxyService.forwardStream(
-      body.messages || [],
-      body.context || {},
-      userId
-    );
+    const gen = aiProxyService.forwardStream(messages, context, userId);
     for await (const chunk of gen) {
+      full += chunk;
       res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
     }
   } catch (err) {
@@ -84,6 +116,20 @@ async function handleStream(req, res) {
       `data: ${JSON.stringify({ error: (err && err.message) || 'AI 请求失败' })}\n\n`
     );
   } finally {
+    // 落库助手回复 + 回传 conversationId
+    if (conv && full) {
+      try {
+        await aiHistoryService.appendMessage(conv, {
+          role: 'assistant',
+          content: full,
+        });
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    if (conv) {
+      res.write(`data: ${JSON.stringify({ conversationId: conv.id })}\n\n`);
+    }
     res.write('data: [DONE]\n\n');
     res.end();
   }
@@ -133,14 +179,22 @@ async function bootstrap() {
 
   // 取流式所需的服务实例（单例，注入已解析）
   const { AiProxyService } = require('./dist/service/ai/proxy');
+  const { AiHistoryService } = require('./dist/service/ai/history');
   const { RedisService } = require('@midwayjs/redis');
   aiProxyService = await appCtx.getAsync(AiProxyService);
+  aiHistoryService = await appCtx.getAsync(AiHistoryService);
   redisService = await appCtx.getAsync(RedisService);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    if (url.pathname === '/api/ai/chat/stream' && (req.method || '').toUpperCase() === 'POST') {
-      return handleStream(req, res);
+    if (url.pathname === '/api/ai/chat/stream') {
+      const m = (req.method || '').toUpperCase();
+      if (m === 'OPTIONS') {
+        setCors(req, res);
+        res.statusCode = 204;
+        return res.end();
+      }
+      if (m === 'POST') return handleStream(req, res);
     }
     return handleFramework(req, res, url);
   });
