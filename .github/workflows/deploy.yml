@@ -16,13 +16,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      # 编译 TS 产物（main.js 聚合入口在运行时从 dist 加载全部路由）
+      # 编译 TS 产物（server.js 运行时从 dist 加载整个应用）
       - name: Build
         run: npm run build
 
@@ -38,27 +38,9 @@ jobs:
             --access aliyun \
             -f
 
-      # 单函数迁移：清掉 s.yaml 不再声明的旧「一路由一函数」（释放 FC 50 槽位）
-      - name: Remove obsolete per-route functions
+      # FC 3.0 Web 函数：单函数 server.js，环境变量经 ${env('...')} 注入到函数
+      - name: Deploy (FC3 web function)
         env:
-          ALIBABA_CLOUD_ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
-          ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
-          ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
-        run: |
-          npm install --no-save @alicloud/fc2
-          node scripts/cleanup-fc.js
-
-      # 部署聚合单函数 main（/* 全路由）
-      - name: Deploy (single aggregated function)
-        env:
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          REDIS_HOST: ${{ secrets.REDIS_HOST }}
-          REDIS_PORT: ${{ secrets.REDIS_PORT }}
-          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}

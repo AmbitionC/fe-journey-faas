@@ -1,41 +1,39 @@
-edition: 1.0.0
-name: 'fe-journey-faas' #  项目名称
-access: 'aliyun' #  秘钥别名
+edition: 3.0.0
+name: fe-journey-faas
+access: aliyun
 
-vars:
-  service:
-    name: fe-journey-faas
-    description: 'frontend journey faas service'
-services:
-  # 聚合单函数：所有 HTTP 路由由 main 一个函数内部分发（/* → main）。
-  # 替代原先「一个接口一个函数」的 50+ 函数结构，规避 FC 单服务 50 函数上限。
-  main:
-    component: devsapp/fc
+# FC 3.0 Web 函数：整个 Midway 应用作为一个 HTTP server（server.js）跑在 FC3，
+# FC3 把 /* 全部请求转发到端口 9000，并原生支持响应流式（真 SSE）。
+resources:
+  fcJourneyMain:
+    component: fc3
     props:
       region: cn-hangzhou
-      service: ${vars.service}
-      function:
-        name: main
-        handler: main.handler
-        codeUri: '.'
-        initializer: main.initializer
-        runtime: nodejs16
-        memorySize: 4096
-        cpu: 1.5
-        diskSize: 512
-        timeout: 120
-        instanceConcurrency: 100
-      customDomains:
-        - domainName: auto
-          protocol: HTTP
-          routeConfigs:
-            - path: /*
-              serviceName: ${vars.service.name}
-              functionName: main
+      functionName: fe-journey-main
+      description: 'fe-journey single web function (FC3, streaming)'
+      runtime: nodejs20
+      code: ./
+      cpu: 1.5
+      memorySize: 4096
+      diskSize: 512
+      timeout: 120
+      instanceConcurrency: 100
+      # 以 Web 函数方式启动：FC3 运行 node server.js，监听 9000，转发 HTTP 并支持流式
+      customRuntimeConfig:
+        command:
+          - node
+          - server.js
+        port: 9000
+      environmentVariables:
+        NODE_ENV: production
+        LLM_PROVIDER: ${env('LLM_PROVIDER')}
+        LLM_API_KEY: ${env('LLM_API_KEY')}
+        LLM_MODEL: ${env('LLM_MODEL')}
       triggers:
-        - name: http
-          type: http
-          config:
+        - triggerName: httpTrigger
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
             methods:
               - GET
               - POST
@@ -43,4 +41,3 @@ services:
               - DELETE
               - OPTIONS
               - HEAD
-            authType: anonymous
