@@ -195,6 +195,17 @@ async function bootstrap() {
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    if (url.pathname === '/copilotkit') {
+      const { CopilotRuntime, copilotRuntimeNodeHttpEndpoint } = require('@copilotkit/runtime');
+      const { makeServiceAdapter } = require('./dist/copilot/deepseekAdapter');
+      setCors(req, res);
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      const runtime = new CopilotRuntime({ actions: [] }); // actions 在 Task 10 填
+      const handler = copilotRuntimeNodeHttpEndpoint({
+        endpoint: '/copilotkit', runtime, serviceAdapter: makeServiceAdapter(),
+      });
+      return handler(req, res);
+    }
     if (url.pathname === '/api/ai/chat/stream') {
       const m = (req.method || '').toUpperCase();
       if (m === 'OPTIONS') {
