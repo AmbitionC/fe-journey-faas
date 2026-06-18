@@ -12,9 +12,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # 需要历史记录才能 diff 出本次推送改动了哪些函数（增量部署）
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -25,12 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 编译 TS 产物 + 生成 FC 入口文件与 s.yaml（与 deploy.sh 一致，CI 之前缺这两步）
+      # 编译 TS 产物（main.js 聚合入口在运行时从 dist 加载全部路由）
       - name: Build
         run: npm run build
-
-      - name: Generate FC entries & s.yaml
-        run: npm run generate
 
       - name: Install Serverless Devs
         run: npm install -g @serverless-devs/s
@@ -44,7 +38,8 @@ jobs:
             --access aliyun \
             -f
 
-      - name: Remove obsolete functions to stay under FC 50-function limit
+      # 单函数迁移：清掉 s.yaml 不再声明的旧「一路由一函数」（释放 FC 50 槽位）
+      - name: Remove obsolete per-route functions
         env:
           ALIBABA_CLOUD_ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
           ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
@@ -53,9 +48,8 @@ jobs:
           npm install --no-save @alicloud/fc2
           node scripts/cleanup-fc.js
 
-      # 增量部署：仅 src/function/*.ts 改动时只部署受影响的函数；
-      # 共享代码/配置/依赖改动时自动回退到全量（所有函数共用同一份代码包）。
-      - name: Deploy (incremental when possible)
+      # 部署聚合单函数 main（/* 全路由）
+      - name: Deploy (single aggregated function)
         env:
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_PORT: ${{ secrets.DB_PORT }}
@@ -68,26 +62,4 @@ jobs:
           LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
-        run: |
-          set -euo pipefail
-          TARGETS=$(node scripts/changed-functions.js "${{ github.event.before }}" "${{ github.sha }}")
-          echo "Deploy decision:"
-          echo "$TARGETS"
-
-          if [ "$TARGETS" = "NONE" ]; then
-            echo "No deploy-relevant changes; skipping deploy."
-            exit 0
-          fi
-
-          if [ "$TARGETS" = "ALL" ]; then
-            echo "==> Full deploy (all functions)"
-            s deploy -y --access aliyun
-          else
-            echo "==> Incremental deploy of changed functions"
-            while IFS= read -r fn; do
-              [ -z "$fn" ] && continue
-              echo "::group::deploy $fn"
-              s "$fn" deploy -y --access aliyun
-              echo "::endgroup::"
-            done <<< "$TARGETS"
-          fi
+        run: s deploy -y --access aliyun

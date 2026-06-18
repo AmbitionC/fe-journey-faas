@@ -1,3 +1,10 @@
 provider:
   name: aliyun
   starter: '@midwayjs/fc-starter'
+
+# 高密度部署：把所有 @ServerlessTrigger 路由合并到单个函数（main），
+# 由 Midway 内部 koa 路由分发。彻底规避 FC「单服务 50 函数」上限。
+aggregation:
+  main:
+    functionsPattern:
+      - '*'
