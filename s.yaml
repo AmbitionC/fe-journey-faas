@@ -11,8 +11,8 @@ resources:
       region: cn-hangzhou
       functionName: fe-journey-main
       description: 'fe-journey single web function (FC3, streaming)'
-      runtime: nodejs20
-      # Web 函数实际由 customRuntimeConfig 的 node server.js 启动，handler 仅占位（FC3 必填）
+      runtime: custom.debian10
+      # Web 函数：custom runtime 跑 node server.js，handler 占位（FC3 必填）
       handler: index.handler
       code: ./
       cpu: 1.5
