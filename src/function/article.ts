@@ -18,6 +18,7 @@ import {
   UserActionListQueryDTO,
   RecordViewDTO,
   BatchArticleStatsQueryDTO,
+  LeaderboardQueryDTO,
 } from '../dto/article';
 import { createHash } from 'crypto';
 
@@ -205,6 +206,22 @@ export class ArticleHTTPService {
       .map(k => k.trim())
       .filter(Boolean);
     const data = await this.articleService.batchGetArticleStats(keys);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '学习榜（本月，按已读篇数）',
+    functionName: 'getLeaderboard',
+    name: 'getLeaderboard',
+    path: '/article/leaderboard',
+    method: 'get',
+  })
+  @NoAuth()
+  async getLeaderboard(@Query(ALL) query: LeaderboardQueryDTO) {
+    const data = await this.articleService.getLeaderboard(
+      query.module,
+      query.userId
+    );
     return { success: true, data };
   }
 }

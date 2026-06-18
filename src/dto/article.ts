@@ -79,3 +79,11 @@ export class UserActionListQueryDTO {
   @Rule(RuleType.string().max(50).optional())
   userId?: string;
 }
+
+export class LeaderboardQueryDTO {
+  @Rule(RuleType.string().max(20).required())
+  module: string;
+
+  @Rule(RuleType.string().max(50).allow('').optional())
+  userId?: string;
+}

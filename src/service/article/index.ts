@@ -6,6 +6,7 @@ import { NavConfigEntity } from '../../entity/navConfig';
 import { ArticleEntity } from '../../entity/article';
 import { UserArticleActionEntity } from '../../entity/userArticleAction';
 import { ArticleViewLogEntity } from '../../entity/articleViewLog';
+import { UserEntity } from '../../entity/user';
 import { R } from '../../common/base.error.utils';
 
 @Provide()
@@ -21,6 +22,9 @@ export class ArticleService {
 
   @InjectEntityModel(ArticleViewLogEntity)
   viewLogModel: Repository<ArticleViewLogEntity>;
+
+  @InjectEntityModel(UserEntity)
+  userModel: Repository<UserEntity>;
 
   @Inject()
   redisService: RedisService;
@@ -266,5 +270,65 @@ export class ArticleService {
       })),
       total,
     };
+  }
+
+  /**
+   * 学习榜（本月）：按「本月在该模块读过的不同文章数」给登录用户排名。
+   * 数据源复用 article_view_log（fingerprint 对登录用户即 userId/手机号），
+   * inner join user 过滤游客；隐私：不外泄他人手机号，仅回昵称/头像/名次 + isMe。
+   */
+  async getLeaderboard(module: string, userId?: string) {
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(
+      now.getMonth() + 1
+    ).padStart(2, '0')}-01`;
+
+    const rows: Array<{ userId: string; cnt: string }> = await this.viewLogModel
+      .createQueryBuilder('v')
+      .select('v.fingerprint', 'userId')
+      .addSelect('COUNT(DISTINCT v.articleKey)', 'cnt')
+      .innerJoin(UserEntity, 'u', 'u.phoneNumber = v.fingerprint')
+      .where('v.module = :module', { module })
+      .andWhere('v.viewDate >= :monthStart', { monthStart })
+      .groupBy('v.fingerprint')
+      .orderBy('cnt', 'DESC')
+      .limit(100)
+      .getRawMany();
+
+    const ids = rows.map(r => r.userId);
+    const users = ids.length
+      ? await this.userModel.find({ where: { phoneNumber: In(ids) } })
+      : [];
+    const uMap = new Map(users.map(u => [u.phoneNumber, u]));
+
+    const ranked = rows.map((r, i) => ({
+      rank: i + 1,
+      nickName: uMap.get(r.userId)?.nickName || '匿名用户',
+      avatar: uMap.get(r.userId)?.avatar || '',
+      count: Number(r.cnt),
+      isMe: !!userId && r.userId === userId,
+    }));
+
+    const top = ranked.slice(0, 20);
+
+    // 我的名次：在前 100 内直接取；否则单独算我的本月已读数（名次记为 null=未上榜）
+    let me: { rank: number | null; count: number } = { rank: null, count: 0 };
+    if (userId) {
+      const mine = ranked.find(r => r.isMe);
+      if (mine) {
+        me = { rank: mine.rank, count: mine.count };
+      } else {
+        const my = await this.viewLogModel
+          .createQueryBuilder('v')
+          .select('COUNT(DISTINCT v.articleKey)', 'cnt')
+          .where('v.module = :module', { module })
+          .andWhere('v.viewDate >= :monthStart', { monthStart })
+          .andWhere('v.fingerprint = :userId', { userId })
+          .getRawOne();
+        me = { rank: null, count: Number(my?.cnt || 0) };
+      }
+    }
+
+    return { period: 'month', top, me };
   }
 }
