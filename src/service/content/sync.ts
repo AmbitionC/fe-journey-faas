@@ -5,6 +5,16 @@
  * 1. 从 GitHub 读取文章内容 / manifest 文件
  * 2. 将文章内容同步到 OSS
  * 3. 将 manifest 更新写回 GitHub + DB
+ *
+ * 一致性说明（I1）：
+ *  - syncArticleToOss / deleteArticleFromGitHub 非原子操作，失败可幂等重放：
+ *      putFile 带 sha、OSS put 幂等、OSS delete 幂等。
+ *  - OSS 步骤（内容缓存）用 try/catch 包住，失败仅记日志不阻断主流程。
+ *  - GitHub 写入（真相源）失败时抛错让调用方重试。
+ *
+ * 并发保护（I2）：
+ *  - _tree.json 的「读 → 改 → putFile」放在乐观重试循环中，捕获 GitHub 409 后重新读取并重算，
+ *    最多重试 3 次，保证并发操作不会丢更新。
  */
 import fetch from 'node-fetch';
 import { OssService } from './oss';
@@ -29,6 +39,9 @@ const GH_API_BASE =
 
 /** GitHub Personal Access Token */
 const GH_TOKEN = process.env.GITHUB_TOKEN || '';
+
+/** 最大乐观重试次数（I2） */
+const TREE_MAX_RETRIES = 3;
 
 /** -------------------------------------------------------------------------
  *  工具函数（纯函数，便于单元测试）
@@ -137,6 +150,29 @@ async function ghApiPut(
   return res.json();
 }
 
+async function ghApiDelete(
+  path: string,
+  body: Record<string, any>
+): Promise<any> {
+  const url = `${GH_API_BASE}/${path}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      ...(GH_TOKEN ? { Authorization: `token ${GH_TOKEN}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`GitHub API DELETE failed: ${url} → ${res.status}: ${txt}`);
+  }
+  // GitHub DELETE /contents returns 200 with JSON or empty body
+  const text = await res.text();
+  return text ? JSON.parse(text) : {};
+}
+
 /** -------------------------------------------------------------------------
  *  同步操作
  * -------------------------------------------------------------------------*/
@@ -153,6 +189,9 @@ export async function fetchArticleFromGitHub(
 
 /**
  * 将文章写入 GitHub 并同步到 OSS
+ *
+ * 非原子操作，失败可幂等重放（putFile 带 sha、OSS put 幂等）。
+ * OSS 步骤失败仅记日志不阻断（I1）。
  *
  * @param module  模块名
  * @param filePath 子路径（扁平模块传 ''）
@@ -178,7 +217,7 @@ export async function syncArticleToOss(
     // 文件不存在，创建新文件
   }
 
-  // 2. 写入 GitHub
+  // 2. 写入 GitHub（真相源，失败直接抛错）
   const body: Record<string, any> = {
     message:
       commitMessage || `chore: sync ${module}/${key}`,
@@ -187,13 +226,25 @@ export async function syncArticleToOss(
   if (sha) body.sha = sha;
   await ghApiPut(`contents/${repoPath}`, body);
 
-  // 3. 同步到 OSS
-  const oss = new OssService();
-  await oss.put(module, filePath, key, content);
+  // 3. 同步到 OSS（内容缓存，失败不阻断）（I1）
+  try {
+    const oss = new OssService();
+    await oss.put(module, filePath, key, content);
+  } catch (ossErr) {
+    console.error('[syncArticleToOss] OSS 同步失败（可由 sync 补偿）:', ossErr);
+  }
 }
 
 /**
  * 从 GitHub 删除文章并从 OSS 删除
+ *
+ * 非原子操作，失败可幂等重放（GitHub delete 带 sha，OSS delete 幂等）。
+ * OSS 步骤失败仅记日志不阻断（I1）。
+ *
+ * @param module  模块名
+ * @param filePath 子路径（扁平模块传 ''）
+ * @param key     文章 key
+ * @param commitMessage Git commit 消息
  */
 export async function deleteArticleFromGitHub(
   module: string,
@@ -203,17 +254,23 @@ export async function deleteArticleFromGitHub(
 ): Promise<void> {
   const repoPath = articlePath(module, filePath, key);
 
-  // 1. 获取当前 SHA
+  // 1. 获取当前 SHA（删除 GitHub 文件需要 sha）
   const fileInfo = await ghApiGet(`contents/${repoPath}`);
   const sha: string = fileInfo.sha;
 
-  // 2. 删除 GitHub 文件
-  await ghApiPut(`contents/${repoPath}`, {
-    message:
-      commitMessage || `chore: delete ${module}/${key}`,
+  // 2. 删除 GitHub 文件（真相源，失败直接抛错）
+  await ghApiDelete(`contents/${repoPath}`, {
+    message: commitMessage || `chore: delete ${module}/${key}`,
     sha,
-    // GitHub API 删除用 DELETE，但通过 PUT with no content 不行，改用 DELETE
   });
+
+  // 3. 删除 OSS 缓存（失败不阻断）（I1）
+  try {
+    const oss = new OssService();
+    await oss.delete(module, filePath, key);
+  } catch (ossErr) {
+    console.error('[deleteArticleFromGitHub] OSS 删除失败（可由 sync 补偿）:', ossErr);
+  }
 }
 
 /** -------------------------------------------------------------------------
@@ -300,4 +357,60 @@ export async function refreshNav(
 ): Promise<void> {
   const navData = await readManifest(module);
   await saveToDb(navData);
+}
+
+/** -------------------------------------------------------------------------
+ *  GitHub manifest（_tree.json）乐观重试写入（I2）
+ * -------------------------------------------------------------------------*/
+
+/**
+ * 读取 manifest → 执行变更 → 写回 GitHub，遇到 409（sha 过期）重试最多 TREE_MAX_RETRIES 次。
+ *
+ * @param module      模块名
+ * @param transform   对当前 manifest JSON 数组做变更的函数
+ * @param commitMsg   commit 消息
+ */
+export async function updateManifestWithRetry(
+  module: string,
+  transform: (tree: any[]) => any[],
+  commitMsg: string
+): Promise<void> {
+  const treePath = manifestPath(module);
+
+  for (let attempt = 0; attempt < TREE_MAX_RETRIES; attempt++) {
+    // 1. 读取当前 manifest（及 sha）
+    let currentSha: string | undefined;
+    let tree: any[] = [];
+    try {
+      const fileInfo = await ghApiGet(`contents/${treePath}`);
+      currentSha = fileInfo.sha;
+      const content = Buffer.from(fileInfo.content, 'base64').toString('utf-8');
+      tree = JSON.parse(content);
+    } catch {
+      // 文件不存在，从空数组开始
+    }
+
+    // 2. 执行变更
+    const updatedTree = transform(tree);
+
+    // 3. 写回 GitHub
+    const body: Record<string, any> = {
+      message: commitMsg,
+      content: Buffer.from(
+        JSON.stringify(updatedTree, null, 2) + '\n',
+        'utf-8'
+      ).toString('base64'),
+    };
+    if (currentSha) body.sha = currentSha;
+
+    try {
+      await ghApiPut(`contents/${treePath}`, body);
+      return; // 成功，退出
+    } catch (e: any) {
+      const is409 =
+        e?.message?.includes('409') || e?.message?.includes('422');
+      if (!is409 || attempt === TREE_MAX_RETRIES - 1) throw e;
+      // 409 sha 过期：重读最新 sha 并重算，继续下一次循环
+    }
+  }
 }

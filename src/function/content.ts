@@ -1,3 +1,29 @@
+/**
+ * 内容管理接口
+ *
+ * 安全说明：
+ *  - filePath / key 在使用前均经 assertSafeSegment 校验，防止路径穿越（C1）。
+ *  - filePath 经 normalizeFilePath 去除首尾斜杠，保证 GitHub 路径与 OSS objectKey 一致（M1）。
+ *  - ArticleQueryDTO.module 已限制枚举（firstclass/interview/knowledge）（C2）。
+ *
+ * 一致性说明（I1）：
+ *  - saveContentArticle / deleteContentArticle 非原子操作，失败可幂等重放：
+ *      GitHub putFile 带 sha、upsertLeaf 是 upsert、DB save 是覆盖式、OSS 操作幂等。
+ *  - OSS 步骤（内容缓存）在 syncArticleToOss / deleteArticleFromGitHub 内部已用 try/catch
+ *    包住，失败仅记日志不阻断主流程（详见 sync.ts）。
+ *  - GitHub 写入（真相源）失败时抛错让调用方重试。
+ *
+ * 并发保护（I2）：
+ *  - _tree.json 的「读 → 改 → putFile」放在 updateManifestWithRetry 乐观重试循环中，
+ *    捕获 GitHub 409 后重新读取并重算，最多重试 3 次（详见 sync.ts）。
+ *
+ * 原子 version（I3）：
+ *  - DB 中 version 自增通过 navConfigModel.increment 原子完成，避免并发下版本回退。
+ *
+ * deleteArticle 完整一致性：
+ *  - 删除时先删 GitHub .md 文件（真相源），再更新 _tree.json manifest，最后更新 DB。
+ *    OSS 删除在 deleteArticleFromGitHub 内部处理（失败不阻断）。
+ */
 import {
   Provide,
   ServerlessTrigger,
@@ -27,20 +53,13 @@ import {
 import {
   fetchArticleFromGitHub,
   syncArticleToOss,
+  deleteArticleFromGitHub,
   upsertLeaf,
   removeLeaf,
+  updateManifestWithRetry,
 } from '../service/content/sync';
 import { OssService } from '../service/content/oss';
-
-/** 合法 segment 字符（路径中不允许的字符） */
-const SAFE_RE = /^[a-zA-Z0-9_\-/.]+$/;
-
-function assertSafeSegment(value: string | undefined, name: string): void {
-  if (value === undefined || value === '') return; // 空字符串对扁平模块合法
-  if (!SAFE_RE.test(value)) {
-    throw R.error(`不合法的 ${name}: ${value}`);
-  }
-}
+import { assertSafeSegment, normalizeFilePath } from '../service/content/path';
 
 @Provide()
 export class ContentHTTPService {
@@ -78,9 +97,9 @@ export class ContentHTTPService {
     method: 'get',
   })
   async getContentArticle(@Query(ALL) query: ArticleQueryDTO): Promise<any> {
-    const filePath = query.filePath || '';
-    assertSafeSegment(filePath, 'filePath');
-    assertSafeSegment(query.key, 'key');
+    // C1: 路径穿越防护
+    const filePath = normalizeFilePath(query.filePath || '');
+    assertSafeSegment(filePath, query.key);
 
     // 扁平模块不需要 filePath，普通模块需要
     if (!isFlat(query.module) && !filePath) {
@@ -96,7 +115,7 @@ export class ContentHTTPService {
   }
 
   // -----------------------------------------------------------------------
-  // 保存文章（写入 GitHub + OSS + 更新 manifest in DB）
+  // 保存文章（写入 GitHub + OSS + 更新 manifest in GitHub + DB）
   // -----------------------------------------------------------------------
   @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -107,15 +126,15 @@ export class ContentHTTPService {
     method: 'post',
   })
   async saveContentArticle(@Body(ALL) body: SaveArticleDTO): Promise<any> {
-    const filePath = body.filePath || '';
-    assertSafeSegment(filePath, 'filePath');
-    assertSafeSegment(body.key, 'key');
+    // C1: 路径穿越防护
+    const filePath = normalizeFilePath(body.filePath || '');
+    assertSafeSegment(filePath, body.key);
 
     if (!isFlat(body.module) && !filePath) {
       throw R.error('普通模块的 filePath 不能为空');
     }
 
-    // 1. 将文章内容同步到 GitHub + OSS
+    // 1. 将文章内容写入 GitHub + OSS（OSS 失败不阻断，见 sync.ts I1）
     await syncArticleToOss(
       body.module,
       filePath,
@@ -124,17 +143,7 @@ export class ContentHTTPService {
       `chore: save ${body.module}/${body.key}`
     );
 
-    // 2. 更新 DB 中的 navData（upsert leaf）
-    let config = await this.navConfigModel.findOneBy({ module: body.module });
-    if (!config) {
-      config = this.navConfigModel.create({
-        module: body.module,
-        navData: [],
-        version: 1,
-      });
-    }
-
-    // 构建叶子对象（扁平模块不写 filePath 字段）
+    // 2. 更新 GitHub manifest（_tree.json），乐观重试（I2）
     const leaf: Record<string, any> = {
       label: body.label,
       key: body.key,
@@ -146,9 +155,27 @@ export class ContentHTTPService {
     if (body.tags !== undefined) leaf.tags = body.tags;
     if (body.currRank !== undefined) leaf.currRank = body.currRank;
 
-    config.navData = upsertLeaf(config.navData || [], body.parentKey, leaf);
-    config.version = (config.version || 1) + 1;
-    await this.navConfigModel.save(config);
+    await updateManifestWithRetry(
+      body.module,
+      (tree) => upsertLeaf(tree, body.parentKey, leaf),
+      `chore: update manifest for ${body.module}/${body.key}`
+    );
+
+    // 3. 更新 DB 中的 navData（I3：version 原子自增）
+    const existing = await this.navConfigModel.findOneBy({ module: body.module });
+    if (!existing) {
+      // 首次创建：直接 insert，version 为 1
+      const config = this.navConfigModel.create({
+        module: body.module,
+        navData: upsertLeaf([], body.parentKey, leaf),
+        version: 1,
+      });
+      await this.navConfigModel.save(config);
+    } else {
+      const updatedNavData = upsertLeaf(existing.navData || [], body.parentKey, leaf);
+      await this.navConfigModel.update({ module: body.module }, { navData: updatedNavData });
+      await this.navConfigModel.increment({ module: body.module }, 'version', 1);
+    }
 
     return {
       success: true,
@@ -160,7 +187,7 @@ export class ContentHTTPService {
   }
 
   // -----------------------------------------------------------------------
-  // 删除文章（从 GitHub 删除 + OSS 删除 + 更新 manifest in DB）
+  // 删除文章（从 GitHub 删除 + OSS 删除 + 更新 manifest in GitHub + DB）
   // -----------------------------------------------------------------------
   @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -171,28 +198,35 @@ export class ContentHTTPService {
     method: 'post',
   })
   async deleteContentArticle(@Body(ALL) body: DeleteArticleDTO): Promise<any> {
-    const filePath = body.filePath || '';
-    assertSafeSegment(filePath, 'filePath');
-    assertSafeSegment(body.key, 'key');
+    // C1: 路径穿越防护
+    const filePath = normalizeFilePath(body.filePath || '');
+    assertSafeSegment(filePath, body.key);
 
     if (!isFlat(body.module) && !filePath) {
       throw R.error('普通模块的 filePath 不能为空');
     }
 
-    // 1. 从 OSS 删除
-    try {
-      const oss = new OssService();
-      await oss.delete(body.module, filePath, body.key);
-    } catch {
-      // 忽略 OSS 删除失败（文件可能不存在）
-    }
+    // 1. 删除 GitHub .md 文件（真相源）+ OSS 缓存（OSS 失败不阻断，见 sync.ts I1）
+    await deleteArticleFromGitHub(
+      body.module,
+      filePath,
+      body.key,
+      `chore: delete ${body.module}/${body.key}`
+    );
 
-    // 2. 更新 DB navData（remove leaf）
+    // 2. 更新 GitHub manifest（_tree.json），乐观重试（I2）
+    await updateManifestWithRetry(
+      body.module,
+      (tree) => removeLeaf(tree, body.key),
+      `chore: update manifest remove ${body.module}/${body.key}`
+    );
+
+    // 3. 更新 DB 中的 navData（I3：version 原子自增）
     const config = await this.navConfigModel.findOneBy({ module: body.module });
     if (config) {
-      config.navData = removeLeaf(config.navData || [], body.key);
-      config.version = (config.version || 1) + 1;
-      await this.navConfigModel.save(config);
+      const updatedNavData = removeLeaf(config.navData || [], body.key);
+      await this.navConfigModel.update({ module: body.module }, { navData: updatedNavData });
+      await this.navConfigModel.increment({ module: body.module }, 'version', 1);
     }
 
     return { success: true };
@@ -237,7 +271,8 @@ export class ContentHTTPService {
     method: 'post',
   })
   async uploadContentImage(@Body(ALL) body: UploadImageDTO): Promise<any> {
-    assertSafeSegment(body.fileName, 'fileName');
+    // C1: fileName 安全校验（不允许路径分隔符和 ..）
+    assertSafeSegment('', body.fileName);
     const buf = Buffer.from(body.dataBase64, 'base64');
     const oss = new OssService();
     const objKey = await oss.putImage(body.fileName, buf);

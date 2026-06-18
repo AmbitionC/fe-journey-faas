@@ -20,21 +20,28 @@ export function buildObjectKey(
   return articlePath(module, filePath, key);
 }
 
-/** 懒初始化 OSS 客户端 */
-function createOssClient(): OSS {
-  return new OSS({
-    region: REGION,
-    accessKeyId: process.env.OSS_ACCESS_KEY_ID || '',
-    accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET || '',
-    bucket: BUCKET,
-  });
-}
-
 export class OssService {
-  private client: OSS;
+  private client: OSS | undefined;
 
   constructor() {
-    this.client = createOssClient();
+    const accessKeyId = process.env.OSS_ACCESS_KEY_ID || '';
+    const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET || '';
+    // 若 key 缺失则 client 保持 undefined，调用时会得到明确错误（I4）
+    if (!accessKeyId || !accessKeySecret) return;
+    // key 存在时初始化失败要抛出，以便运维及时发现配置问题（I4）
+    this.client = new OSS({
+      region: REGION,
+      accessKeyId,
+      accessKeySecret,
+      bucket: BUCKET,
+    });
+  }
+
+  /** I4: 入口守卫——client 未初始化时抛出可诊断错误 */
+  private assertClient(): void {
+    if (!this.client) {
+      throw new Error('OSS 未配置：请检查 OSS_ACCESS_KEY_ID 等环境变量');
+    }
   }
 
   /** 获取对象 key（与 buildObjectKey 保持一致） */
@@ -49,29 +56,33 @@ export class OssService {
     key: string,
     content: string
   ): Promise<void> {
+    this.assertClient();
     const objKey = this.objectKey(module, filePath, key);
-    await this.client.put(objKey, Buffer.from(content, 'utf-8'), {
+    await this.client!.put(objKey, Buffer.from(content, 'utf-8'), {
       headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
     });
   }
 
   /** 从 OSS 读取文件内容 */
   async get(module: string, filePath: string, key: string): Promise<string> {
+    this.assertClient();
     const objKey = this.objectKey(module, filePath, key);
-    const result = await this.client.get(objKey);
+    const result = await this.client!.get(objKey);
     return result.content.toString('utf-8');
   }
 
   /** 删除 OSS 对象 */
   async delete(module: string, filePath: string, key: string): Promise<void> {
+    this.assertClient();
     const objKey = this.objectKey(module, filePath, key);
-    await this.client.delete(objKey);
+    await this.client!.delete(objKey);
   }
 
   /** 将图片字节写入 OSS */
   async putImage(fileName: string, buf: Buffer): Promise<string> {
+    this.assertClient();
     const objKey = `images/${fileName}`;
-    await this.client.put(objKey, buf);
+    await this.client!.put(objKey, buf);
     return objKey;
   }
 }
