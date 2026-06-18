@@ -12,12 +12,22 @@ import { RedisService } from '@midwayjs/redis';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiProxyService, ChatMessage, ChatContext } from '../service/ai/proxy';
+import { AiHistoryService } from '../service/ai/history';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
 
 class AIChatDTO {
   messages: ChatMessage[];
   context: ChatContext;
+  conversationId?: number;
+}
+
+class AIConversationDTO {
+  action: 'list' | 'messages' | 'rename' | 'delete';
+  conversationId?: number;
+  title?: string;
+  page?: number;
+  pageSize?: number;
 }
 
 @Provide()
@@ -27,6 +37,9 @@ export class AiHTTPService {
 
   @Inject()
   aiProxyService: AiProxyService;
+
+  @Inject()
+  aiHistoryService: AiHistoryService;
 
   @Inject()
   redisService: RedisService;
@@ -106,7 +119,99 @@ export class AiHTTPService {
       userId
     );
 
-    return { success: true, content };
+    // 持久化为会话历史（尽力而为，失败不影响回答）
+    let conversationId: number | undefined;
+    try {
+      const lastUser = [...(body.messages || [])]
+        .reverse()
+        .find((m) => m.role === 'user');
+      const conv = await this.aiHistoryService.ensureConversation(
+        userId,
+        body.conversationId,
+        {
+          module: body.context?.module,
+          articleKey: body.context?.articleKey,
+          firstUserText: lastUser?.content,
+        }
+      );
+      if (lastUser) {
+        await this.aiHistoryService.appendMessage(conv, {
+          role: 'user',
+          content: lastUser.content,
+        });
+      }
+      await this.aiHistoryService.appendMessage(conv, {
+        role: 'assistant',
+        content,
+      });
+      conversationId = conv.id as any;
+    } catch (e) {
+      this.ctx.logger?.warn?.('[ai] persist conversation failed', e);
+    }
+
+    return { success: true, content, conversationId };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'AI 会话管理（列表/历史/改名/删除）',
+    functionName: 'aiConversation',
+    name: 'aiConversation',
+    path: '/api/ai/conversation',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiConversation(@Body(ALL) body: AIConversationDTO) {
+    const { userId } = await this.resolveUser();
+    const needId = () => {
+      if (!body.conversationId) {
+        this.ctx.status = 400;
+        return false;
+      }
+      return true;
+    };
+
+    switch (body.action) {
+      case 'list':
+        return {
+          success: true,
+          data: await this.aiHistoryService.listConversations(
+            userId,
+            body.page,
+            body.pageSize
+          ),
+        };
+      case 'messages':
+        if (!needId()) return { success: false, message: 'conversationId 必填' };
+        return {
+          success: true,
+          data: await this.aiHistoryService.listMessages(
+            userId,
+            body.conversationId
+          ),
+        };
+      case 'rename':
+        if (!needId()) return { success: false, message: 'conversationId 必填' };
+        return {
+          success: true,
+          data: await this.aiHistoryService.rename(
+            userId,
+            body.conversationId,
+            body.title || ''
+          ),
+        };
+      case 'delete':
+        if (!needId()) return { success: false, message: 'conversationId 必填' };
+        return {
+          success: true,
+          data: await this.aiHistoryService.softDelete(
+            userId,
+            body.conversationId
+          ),
+        };
+      default:
+        this.ctx.status = 400;
+        return { success: false, message: '未知 action' };
+    }
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

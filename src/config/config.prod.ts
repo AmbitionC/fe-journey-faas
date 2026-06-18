@@ -19,6 +19,8 @@ import { ArticleAnnotationEntity } from '../entity/articleAnnotation';
 import { BookEntity } from '../entity/book';
 import { BookOrderEntity } from '../entity/bookOrder';
 import { AiUsageLogEntity } from '../entity/aiUsageLog';
+import { AiConversationEntity } from '../entity/aiConversation';
+import { AiMessageEntity } from '../entity/aiMessage';
 
 const DB_HOST = process.env.DB_HOST || 'rm-bp18fm5u5c7uk47558o.mysql.rds.aliyuncs.com';
 const DB_USER = process.env.DB_USER || 'ch17394940726';
@@ -55,6 +57,7 @@ export default {
           AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity,
           AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity,
           ArticleAnnotationEntity, BookEntity, BookOrderEntity, AiUsageLogEntity,
+          AiConversationEntity, AiMessageEntity,
         ],
       },
     },

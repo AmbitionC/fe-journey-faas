@@ -18,6 +18,8 @@ import { ArticleAnnotationEntity } from '../entity/articleAnnotation';
 import { BookEntity } from '../entity/book';
 import { BookOrderEntity } from '../entity/bookOrder';
 import { AiUsageLogEntity } from '../entity/aiUsageLog';
+import { AiConversationEntity } from '../entity/aiConversation';
+import { AiMessageEntity } from '../entity/aiMessage';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 
@@ -72,6 +74,7 @@ export default {
           AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity,
           AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity,
           ArticleAnnotationEntity, BookEntity, BookOrderEntity, AiUsageLogEntity,
+          AiConversationEntity, AiMessageEntity,
         ],
       },
     },
