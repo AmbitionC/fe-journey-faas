@@ -7,6 +7,7 @@ import { ArticleEntity } from '../../entity/article';
 import { UserArticleActionEntity } from '../../entity/userArticleAction';
 import { ArticleViewLogEntity } from '../../entity/articleViewLog';
 import { UserEntity } from '../../entity/user';
+import { ArticleReadingStateEntity } from '../../entity/articleReadingState';
 import { R } from '../../common/base.error.utils';
 
 @Provide()
@@ -25,6 +26,9 @@ export class ArticleService {
 
   @InjectEntityModel(UserEntity)
   userModel: Repository<UserEntity>;
+
+  @InjectEntityModel(ArticleReadingStateEntity)
+  readingStateModel: Repository<ArticleReadingStateEntity>;
 
   @Inject()
   redisService: RedisService;
@@ -330,5 +334,41 @@ export class ArticleService {
     }
 
     return { period: 'month', top, me };
+  }
+
+  async upsertReadingState(p: {
+    userId: string; module: string; articleKey: string;
+    status: string; mastery?: string; lastReadAt: number;
+  }): Promise<void> {
+    const existing = await this.readingStateModel.findOne({
+      where: { userId: p.userId, module: p.module, articleKey: p.articleKey },
+    });
+    if (existing) {
+      // 只在更新更晚时覆盖,避免乱序写回退状态
+      if (p.lastReadAt >= Number(existing.lastReadAt)) {
+        existing.status = p.status;
+        if (p.mastery) existing.mastery = p.mastery;
+        existing.lastReadAt = p.lastReadAt;
+        await this.readingStateModel.save(existing);
+      }
+    } else {
+      await this.readingStateModel.save({
+        userId: p.userId, module: p.module, articleKey: p.articleKey,
+        status: p.status, mastery: p.mastery, lastReadAt: p.lastReadAt,
+      });
+    }
+  }
+
+  async listReadingState(userId: string, module: string) {
+    const rows = await this.readingStateModel.find({
+      where: { userId, module },
+      order: { lastReadAt: 'DESC' },
+    });
+    return rows.map(r => ({
+      articleKey: r.articleKey,
+      status: r.status,
+      mastery: r.mastery || undefined,
+      lastReadAt: Number(r.lastReadAt),
+    }));
   }
 }
