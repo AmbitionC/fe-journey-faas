@@ -26,6 +26,9 @@ export class UserEntity extends BaseEntity {
   @Column({ comment: '邀请码', default: '' })
   inviteCode?: string;
 
+  @Column({ comment: '角色: user | admin', default: 'user' })
+  role: string;
+
   toVO(): UserVO {
     const userVO = omit<UserEntity>(this, ['password']) as UserVO;
     return userVO;

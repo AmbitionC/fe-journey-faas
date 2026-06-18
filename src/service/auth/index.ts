@@ -29,7 +29,7 @@ export class AuthService {
     const user = await this.userModel
       .createQueryBuilder('user')
       .where('user.phoneNumber = :accountNumber', { accountNumber })
-      .select(['user.id', 'user.password'])
+      .select(['user.id', 'user.password', 'user.role'])
       .getOne();
 
     if (!user) {
@@ -49,7 +49,7 @@ export class AuthService {
     // multi可以实现redis指令并发执行
     await this.redisService
       .multi()
-      .set(`token:${token}`, JSON.stringify({ userId: accountNumber }))
+      .set(`token:${token}`, JSON.stringify({ userId: accountNumber, role: user.role || 'user' }))
       .expire(`token:${token}`, expire)
       .exec();
 

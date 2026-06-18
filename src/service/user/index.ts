@@ -44,7 +44,7 @@ export class UserService {
     // multi可以实现redis指令并发执行
     await this.redisService
       .multi()
-      .set(`token:${token}`, JSON.stringify({ userId: phoneNumber }))
+      .set(`token:${token}`, JSON.stringify({ userId: phoneNumber, role: entity.role || 'user' }))
       .expire(`token:${token}`, expire)
       .exec();
     return {

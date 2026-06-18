@@ -40,6 +40,7 @@ import { Repository } from 'typeorm';
 import { NavConfigEntity } from '../entity/navConfig';
 import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
+import { assertAdmin } from '../common/admin.guard';
 import {
   TreeQueryDTO,
   ArticleQueryDTO,
@@ -79,7 +80,6 @@ export class ContentHTTPService {
   // -----------------------------------------------------------------------
   // 查询导航树
   // -----------------------------------------------------------------------
-  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '获取内容模块导航树',
     functionName: 'getContentTree',
@@ -88,6 +88,7 @@ export class ContentHTTPService {
     method: 'get',
   })
   async getContentTree(@Query(ALL) query: TreeQueryDTO): Promise<any> {
+    assertAdmin(this.ctx);
     const config = await this.navConfigModel.findOneBy({
       module: query.module,
     });
@@ -98,7 +99,6 @@ export class ContentHTTPService {
   // -----------------------------------------------------------------------
   // 读取文章内容（从 GitHub raw 读取）
   // -----------------------------------------------------------------------
-  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '获取文章内容',
     functionName: 'getContentArticle',
@@ -107,6 +107,7 @@ export class ContentHTTPService {
     method: 'get',
   })
   async getContentArticle(@Query(ALL) query: ArticleQueryDTO): Promise<any> {
+    assertAdmin(this.ctx);
     // C1: 路径穿越防护
     const filePath = normalizeFilePath(query.filePath || '');
     assertSafeSegment(filePath, query.key);
@@ -127,7 +128,6 @@ export class ContentHTTPService {
   // -----------------------------------------------------------------------
   // 保存文章（写入 GitHub + OSS + 更新 manifest in GitHub + DB）
   // -----------------------------------------------------------------------
-  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '保存文章内容',
     functionName: 'saveContentArticle',
@@ -136,6 +136,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async saveContentArticle(@Body(ALL) body: SaveArticleDTO): Promise<any> {
+    assertAdmin(this.ctx);
     // C1: 路径穿越防护
     const filePath = normalizeFilePath(body.filePath || '');
     assertSafeSegment(filePath, body.key);
@@ -199,7 +200,6 @@ export class ContentHTTPService {
   // -----------------------------------------------------------------------
   // 删除文章（从 GitHub 删除 + OSS 删除 + 更新 manifest in GitHub + DB）
   // -----------------------------------------------------------------------
-  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '删除文章',
     functionName: 'deleteContentArticle',
@@ -208,6 +208,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async deleteContentArticle(@Body(ALL) body: DeleteArticleDTO): Promise<any> {
+    assertAdmin(this.ctx);
     // C1: 路径穿越防护
     const filePath = normalizeFilePath(body.filePath || '');
     assertSafeSegment(filePath, body.key);
@@ -245,7 +246,6 @@ export class ContentHTTPService {
   // -----------------------------------------------------------------------
   // 更新导航树（覆盖写入 DB）
   // -----------------------------------------------------------------------
-  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '更新内容导航树',
     functionName: 'updateContentTree',
@@ -254,6 +254,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async updateContentTree(@Body(ALL) body: TreeUpdateDTO): Promise<any> {
+    assertAdmin(this.ctx);
     let config = await this.navConfigModel.findOneBy({ module: body.module });
     if (!config) {
       config = this.navConfigModel.create({
@@ -272,7 +273,6 @@ export class ContentHTTPService {
   // -----------------------------------------------------------------------
   // 上传图片到 OSS
   // -----------------------------------------------------------------------
-  @NoAuth()
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '上传图片到 OSS',
     functionName: 'uploadContentImage',
@@ -281,6 +281,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async uploadContentImage(@Body(ALL) body: UploadImageDTO): Promise<any> {
+    assertAdmin(this.ctx);
     // C1: fileName 安全校验（不允许路径分隔符和 ..）
     assertSafeSegment('', body.fileName);
     const buf = Buffer.from(body.dataBase64, 'base64');

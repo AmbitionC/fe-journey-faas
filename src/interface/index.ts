@@ -13,6 +13,7 @@ interface BaseCaptchaOptions {
 interface UserContext {
   userId: string;
   token: string;
+  role?: string;
 }
 
 declare module '@midwayjs/core' {
