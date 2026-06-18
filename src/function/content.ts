@@ -31,7 +31,10 @@ import {
   Body,
   Query,
   ALL,
+  Config,
+  Inject,
 } from '@midwayjs/core';
+import { Context } from '@midwayjs/faas';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { NavConfigEntity } from '../entity/navConfig';
@@ -44,6 +47,7 @@ import {
   DeleteArticleDTO,
   TreeUpdateDTO,
   UploadImageDTO,
+  SyncDTO,
 } from '../dto/content';
 import {
   articlePath,
@@ -57,12 +61,18 @@ import {
   upsertLeaf,
   removeLeaf,
   updateManifestWithRetry,
+  listChangedSince,
+  syncChanged,
 } from '../service/content/sync';
 import { OssService } from '../service/content/oss';
 import { assertSafeSegment, normalizeFilePath } from '../service/content/path';
 
 @Provide()
 export class ContentHTTPService {
+  @Inject() ctx: Context;
+
+  @Config('syncSecret') syncSecret: string;
+
   @InjectEntityModel(NavConfigEntity)
   navConfigModel: Repository<NavConfigEntity>;
 
@@ -277,5 +287,48 @@ export class ContentHTTPService {
     const oss = new OssService();
     const objKey = await oss.putImage(body.fileName, buf);
     return { success: true, data: { objectKey: objKey } };
+  }
+
+  // -----------------------------------------------------------------------
+  // 增量同步（CI GitHub Action 用）
+  // -----------------------------------------------------------------------
+  @NoAuth()
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '从 git push 增量同步内容到 OSS（CI 用）',
+    functionName: 'syncContent',
+    name: 'syncContent',
+    path: '/content/sync',
+    method: 'post',
+  })
+  async syncContent(@Body(ALL) body: SyncDTO): Promise<any> {
+    // 校验 x-sync-secret header，不匹配则抛 401
+    const secret = this.ctx.headers['x-sync-secret'];
+    if (!this.syncSecret || secret !== this.syncSecret) {
+      throw R.unauthorizedError('sync 需要有效的 x-sync-secret');
+    }
+
+    // 获取变更文件列表：优先使用请求体中的 files，否则调 GitHub compare API
+    let files = body.files;
+    if (!files && body.beforeSha && body.afterSha) {
+      files = await listChangedSince(body.beforeSha, body.afterSha);
+    }
+    if (!files) files = [];
+
+    const oss = new OssService();
+
+    // 构建 saveNavToDb 回调（写入 DB 并原子自增 version）
+    const saveNavToDb = async (module: string, navData: any): Promise<void> => {
+      const existing = await this.navConfigModel.findOneBy({ module });
+      if (!existing) {
+        const config = this.navConfigModel.create({ module, navData, version: 1 });
+        await this.navConfigModel.save(config);
+      } else {
+        await this.navConfigModel.update({ module }, { navData });
+        await this.navConfigModel.increment({ module }, 'version', 1);
+      }
+    };
+
+    const result = await syncChanged(files, saveNavToDb, oss);
+    return { success: true, data: result };
   }
 }

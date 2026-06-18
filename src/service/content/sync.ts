@@ -105,6 +105,17 @@ export function parseArticlePath(
 }
 
 /** -------------------------------------------------------------------------
+ *  公共类型：变更文件条目（listChangedSince / syncChanged 共用）
+ * -------------------------------------------------------------------------*/
+
+export interface ChangedFile {
+  /** 仓库相对路径，例如 "interview/tencent/base/x.md" */
+  path: string;
+  /** GitHub compare API 返回的 status 字段：added / modified / removed 等 */
+  status: string;
+}
+
+/** -------------------------------------------------------------------------
  *  GitHub 请求辅助
  * -------------------------------------------------------------------------*/
 
@@ -171,6 +182,146 @@ async function ghApiDelete(
   // GitHub DELETE /contents returns 200 with JSON or empty body
   const text = await res.text();
   return text ? JSON.parse(text) : {};
+}
+
+/** -------------------------------------------------------------------------
+ *  增量同步：compare API
+ * -------------------------------------------------------------------------*/
+
+/**
+ * 使用 GitHub compare API 列出 beforeSha..afterSha 之间变更的文件列表。
+ *
+ * 对应 GET /repos/{owner}/{repo}/compare/{basehead}
+ *
+ * @param beforeSha  起始 commit SHA
+ * @param afterSha   结束 commit SHA
+ * @returns 变更文件列表，每项含 path 与 status
+ */
+export async function listChangedSince(
+  beforeSha: string,
+  afterSha: string
+): Promise<ChangedFile[]> {
+  const json = await ghApiGet(`compare/${beforeSha}...${afterSha}`);
+  const files: any[] = json.files || [];
+  return files.map((f: any) => ({ path: String(f.filename), status: String(f.status) }));
+}
+
+/**
+ * 从 GitHub 读取文件的原始 Buffer（用于图片等二进制文件）。
+ * 返回 null 表示文件不存在（404）。
+ */
+export async function getRawBuffer(path: string): Promise<Buffer | null> {
+  const url = `${GH_API_BASE}/contents/${path}`;
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      ...(GH_TOKEN ? { Authorization: `token ${GH_TOKEN}` } : {}),
+    },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub getRawBuffer ${path} 失败: ${res.status}`);
+  const json: any = await res.json();
+  return Buffer.from(String(json.content).replace(/\n/g, ''), 'base64');
+}
+
+export interface SyncChangedResult {
+  manifests: number;
+  articles: number;
+  images: number;
+  deleted: number;
+  errors: string[];
+}
+
+/** 可注入的 I/O 依赖（便于单元测试时 mock） */
+export interface SyncChangedIO {
+  /** 从仓库读取文本内容（raw URL）*/
+  fetchText: (repoPath: string) => Promise<string>;
+  /** 从仓库读取二进制内容（用于图片）；返回 null 表示文件不存在 */
+  fetchBuffer: (repoPath: string) => Promise<Buffer | null>;
+}
+
+/** 默认 IO：直接调用内部 GitHub 辅助函数 */
+const defaultSyncIO: SyncChangedIO = {
+  fetchText: ghRaw,
+  fetchBuffer: getRawBuffer,
+};
+
+/**
+ * 处理一批变更文件，将其同步到 OSS / 更新 DB。
+ *
+ * - manifest (_tree.json) → refreshNav 对应模块
+ * - article (.md) → 改/增则同步 OSS；status=removed 则删 OSS
+ * - images/ → 同步图片（二进制安全）
+ *
+ * 单条失败不阻断整批，失败信息收集到 errors。
+ *
+ * @param io  可注入的 I/O 依赖（默认使用 GitHub raw/API，测试时可 mock）
+ */
+export async function syncChanged(
+  files: ChangedFile[],
+  saveNavToDb: (module: string, navData: any) => Promise<void>,
+  oss: { put: (m: string, fp: string, k: string, c: string) => Promise<void>; delete: (m: string, fp: string, k: string) => Promise<void>; putImage: (name: string, buf: Buffer) => Promise<string> },
+  io: SyncChangedIO = defaultSyncIO,
+): Promise<SyncChangedResult> {
+  const result: SyncChangedResult = { manifests: 0, articles: 0, images: 0, deleted: 0, errors: [] };
+
+  for (const file of files) {
+    try {
+      // ---- manifest ----
+      if (isTreeManifest(file.path)) {
+        const module = ALL_MODULES.find(m => file.path === manifestPath(m));
+        if (module) {
+          const text = await io.fetchText(file.path);
+          const navData = JSON.parse(text);
+          await saveNavToDb(module, navData);
+          result.manifests++;
+        }
+        continue;
+      }
+
+      // ---- image ----
+      if (file.path.startsWith('images/')) {
+        if (file.status === 'removed') {
+          // OSS 图片删除（尽力而为，key 与 repoPath 一致）
+          try {
+            const ossClient = oss as any;
+            if (typeof ossClient.deleteRaw === 'function') {
+              await ossClient.deleteRaw(file.path);
+            }
+          } catch { /* 忽略，图片删除失败不阻断 */ }
+          result.deleted++;
+        } else {
+          const buf = await io.fetchBuffer(file.path);
+          if (buf) {
+            const fileName = file.path.replace(/^images\//, '');
+            await oss.putImage(fileName, buf);
+            result.images++;
+          }
+        }
+        continue;
+      }
+
+      // ---- article ----
+      const parsed = parseArticlePath(file.path);
+      if (!parsed) continue;
+
+      if (file.status === 'removed') {
+        try {
+          await oss.delete(parsed.module, parsed.filePath, parsed.key);
+        } catch { /* 忽略，OSS 删除失败不阻断 */ }
+        result.deleted++;
+      } else {
+        // added / modified / renamed / copied
+        const content = await io.fetchText(file.path);
+        await oss.put(parsed.module, parsed.filePath, parsed.key, content);
+        result.articles++;
+      }
+    } catch (e: any) {
+      result.errors.push(`${file.path}: ${e?.message || String(e)}`);
+    }
+  }
+
+  return result;
 }
 
 /** -------------------------------------------------------------------------

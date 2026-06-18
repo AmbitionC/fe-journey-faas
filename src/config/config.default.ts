@@ -132,4 +132,5 @@ export default {
       freeWindowSeconds: 86400,
     },
   },
+  syncSecret: process.env.SYNC_SECRET,
 } as MidwayConfig;

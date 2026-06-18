@@ -1597,3 +1597,33 @@ services:
             methods:
               - POST
             authType: anonymous
+  syncContent:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service: ${vars.service}
+      function:
+        name: syncContent
+        handler: contentHTTPService.syncContent
+        codeUri: '.'
+        initializer: contentHTTPService.initializer
+        runtime: nodejs16
+        memorySize: 4096
+        cpu: 1.5
+        diskSize: 512
+        timeout: 60
+        instanceConcurrency: 200
+      customDomains:
+        - domainName: auto
+          protocol: HTTP
+          routeConfigs:
+            - path: /content/sync
+              serviceName: ${vars.service.name}
+              functionName: contentHTTPService-syncContent
+      triggers:
+        - name: http
+          type: http
+          config:
+            methods:
+              - POST
+            authType: anonymous

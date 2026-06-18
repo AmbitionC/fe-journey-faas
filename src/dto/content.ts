@@ -96,3 +96,30 @@ export class UploadImageDTO {
   @Rule(RuleType.string().min(1).required())
   dataBase64: string;
 }
+
+/**
+ * /content/sync 增量同步请求体
+ *
+ * 两种使用方式：
+ * 1. 传 beforeSha + afterSha → 服务端调 GitHub compare API 获取变更文件列表
+ * 2. 传 files → 直接使用调用方提供的文件列表（测试/手动触发时用）
+ */
+export class SyncDTO {
+  @Rule(RuleType.string().optional())
+  beforeSha?: string;
+
+  @Rule(RuleType.string().optional())
+  afterSha?: string;
+
+  @Rule(
+    RuleType.array()
+      .items(
+        RuleType.object({
+          path: RuleType.string().required(),
+          status: RuleType.string().required(),
+        })
+      )
+      .optional()
+  )
+  files?: Array<{ path: string; status: string }>;
+}
