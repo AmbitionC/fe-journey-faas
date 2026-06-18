@@ -22,6 +22,7 @@
     "deploy": "sh deploy.sh"
   },
   "dependencies": {
+    "@copilotkit/runtime": "1.60.2",
     "@midwayjs/cache": "^3.12.0",
     "@midwayjs/captcha": "^3.16.5",
     "@midwayjs/core": "^3.12.0",
@@ -44,6 +45,7 @@
     "mysql2": "^3.10.3",
     "nanoid": "^3.3.7",
     "node-fetch": "^2.7.0",
+    "openai": "4.104.0",
     "svg-captcha": "^1.4.0",
     "swagger-ui-dist": "^4.19.1",
     "typeorm": "^0.3.20"
