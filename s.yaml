@@ -22,8 +22,9 @@ resources:
       instanceConcurrency: 100
       # 以 Web 函数方式启动：FC3 运行 node server.js，监听 9000，转发 HTTP 并支持流式
       customRuntimeConfig:
+        # custom.debian10 不带 node，用代码包里打入的 node 二进制（workflow 下载到 noderuntime/）
         command:
-          - node
+          - noderuntime/bin/node
           - server.js
         port: 9000
       environmentVariables:
