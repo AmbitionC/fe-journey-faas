@@ -85,6 +85,19 @@ export class AlgorithmHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '获取题单列表',
+    functionName: 'getAlgoLists',
+    name: 'getAlgoLists',
+    path: '/algorithm/lists',
+    method: 'get',
+  })
+  @NoAuth()
+  async getProblemLists() {
+    const data = await this.algorithmService.getProblemLists();
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '运行代码（仅示例用例）',
     functionName: 'runAlgoCode',
     name: 'runAlgoCode',

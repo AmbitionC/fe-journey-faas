@@ -391,6 +391,36 @@ export class AlgorithmService {
     return map;
   }
 
+  // ========== 题单 ==========
+
+  async getProblemLists() {
+    const LIST_META: Record<string, string> = {
+      'campus-hot': '校招高频',
+      'by-topic': '按知识点',
+      agent: 'Agent 专项',
+    };
+
+    const problems = await this.problemModel.find({
+      where: { status: 'published' },
+      select: ['slug', 'listSlugs'],
+    });
+
+    const grouped: Record<string, string[]> = {};
+    for (const p of problems) {
+      const slugs: string[] = Array.isArray(p.listSlugs) ? p.listSlugs : [];
+      for (const ls of slugs) {
+        if (!grouped[ls]) grouped[ls] = [];
+        grouped[ls].push(p.slug);
+      }
+    }
+
+    return Object.entries(LIST_META).map(([slug, title]) => ({
+      slug,
+      title,
+      problemSlugs: grouped[slug] || [],
+    }));
+  }
+
   // ========== 管理端 ==========
 
   async saveProblem(params: {

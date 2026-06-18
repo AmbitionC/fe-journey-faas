@@ -63,4 +63,7 @@ export class AlgorithmProblemEntity extends BaseEntity {
 
   @Column({ type: 'json', nullable: true, comment: '关联知识库文章' })
   relatedArticles: any;
+
+  @Column({ type: 'json', nullable: true, comment: '题单归属（可多个）' })
+  listSlugs: any;
 }
