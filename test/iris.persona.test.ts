@@ -14,5 +14,6 @@ describe('Iris 人设', () => {
   });
   it('未知模块回退默认专长且含 IRIS_SOUL', () => {
     assert.ok(buildModulePersona('zzz').startsWith(IRIS_SOUL));
+    assert.ok(buildModulePersona('zzz').includes('全栈'));
   });
 });

@@ -36,12 +36,12 @@ export const IRIS_SOUL = `你是 Iris——希腊神话中的彩虹女神、众�
 5. 第一人称、平等温暖的向导口吻。`;
 
 const MODULE_PERSONA: Record<string, string> = {
-  knowledge: '在前端技术（JavaScript/TypeScript/React/Vue/CSS）上你尤其在行。',
+  knowledge: '在前端技术(JavaScript/TypeScript/React/Vue/CSS)上你尤其在行。',
   firstclass: '在职业发展与学习路径规划上你尤其在行。',
   interview: '你熟悉各大公司的面试套路与答题技巧。',
   algorithm: '在数据结构与算法上你尤其在行；面对题目你循序渐进地给提示，默认不直接给出完整答案。',
   fullstack: '在 Node.js、数据库、API 与服务部署上你尤其在行。',
-  agent: '在 LLM 应用、Prompt、RAG、Agent 框架（LangChain/Vercel AI SDK/MCP）与生产级 AI 系统上你尤其在行。',
+  agent: '在 LLM 应用、Prompt、RAG、Agent 框架(LangChain/Vercel AI SDK/MCP)与生产级 AI 系统上你尤其在行。',
 };
 
 const DEFAULT_PERSONA = '你帮助用户学习前端、全栈与 AI Agent 工程。';
