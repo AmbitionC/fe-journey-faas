@@ -388,9 +388,8 @@ export class ArticleService {
         if (!Array.isArray(nodes)) return 0;
         let count = 0;
         for (const node of nodes) {
-          if (node.isLeaf === true) {
-            count += 1;
-          } else if (Array.isArray(node.children) && node.children.length) {
+          if (node.isLeaf === true) count += 1;
+          if (Array.isArray(node.children) && node.children.length) {
             count += flattenLeaves(node.children);
           }
         }
