@@ -53,4 +53,9 @@ jobs:
           LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          # 内容管理(content)模块运行时凭证(GitHub secret 名不能以 GITHUB_ 开头,故用 GH_TOKEN)
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
         run: s deploy -y --access aliyun
