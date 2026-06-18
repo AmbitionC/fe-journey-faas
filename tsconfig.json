@@ -1,5 +1,8 @@
 {
   "compileOnSave": true,
+  "ts-node": {
+    "transpileOnly": true
+  },
   "compilerOptions": {
     "target": "ES2018",
     "module": "commonjs",

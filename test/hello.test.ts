@@ -1,12 +1,11 @@
 import { createHttpRequest } from '@midwayjs/mock';
-import { Application } from '@midwayjs/faas';
 import { getApp } from './setup';
 import * as assert from 'assert';
 
 describe('test/index.test.ts', () => {
 
   it('should get result from http trigger', async () => {
-    const app: Application = getApp();
+    const app = getApp();
     const result = await createHttpRequest(app).get('/').query({
       name: 'Midway.js'
     })
