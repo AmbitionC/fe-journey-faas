@@ -27,11 +27,6 @@ import {
   repoDir,
 } from './modules';
 
-/** GitHub raw 内容基础 URL */
-const GH_RAW_BASE =
-  process.env.GITHUB_RAW_BASE ||
-  'https://raw.githubusercontent.com/Chen-Hao-190408/front-end-journey/main';
-
 /** GitHub API 基础 URL */
 const GH_API_BASE =
   process.env.GITHUB_API_BASE ||
@@ -119,13 +114,13 @@ export interface ChangedFile {
  *  GitHub 请求辅助
  * -------------------------------------------------------------------------*/
 
+// 取文件文本内容。改走 api.github.com Contents API(base64 解码),
+// 不用 raw.githubusercontent.com —— 后者从阿里云 FC(国内)经常连不通。
 async function ghRaw(path: string): Promise<string> {
-  const url = `${GH_RAW_BASE}/${path}`;
-  const res = await fetch(url, {
-    headers: GH_TOKEN ? { Authorization: `token ${GH_TOKEN}` } : {},
-  });
-  if (!res.ok) throw new Error(`GitHub raw fetch failed: ${url} → ${res.status}`);
-  return res.text();
+  const json = await ghApiGet(`contents/${path}`);
+  return Buffer.from(String(json.content).replace(/\n/g, ''), 'base64').toString(
+    'utf8'
+  );
 }
 
 async function ghApiGet(path: string): Promise<any> {
