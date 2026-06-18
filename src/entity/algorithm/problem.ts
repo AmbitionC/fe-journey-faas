@@ -60,4 +60,7 @@ export class AlgorithmProblemEntity extends BaseEntity {
 
   @Column({ comment: '提交数', default: 0 })
   submitCount: number;
+
+  @Column({ type: 'json', nullable: true, comment: '关联知识库文章' })
+  relatedArticles: any;
 }

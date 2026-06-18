@@ -129,6 +129,7 @@ export class AlgorithmService {
         expectedOutput: tc.expectedOutput,
       })),
       tags,
+      relatedArticles: problem.relatedArticles || [],
     };
   }
 
