@@ -15,6 +15,9 @@ export class UserArticleActionEntity extends BaseEntity {
   @Column({ comment: '所属模块', length: 20 })
   module: string;
 
-  @Column({ comment: '操作类型: like | bookmark', length: 10 })
+  @Column({ comment: '操作类型: like | bookmark | assess', length: 10 })
   actionType: string;
+
+  @Column({ comment: '附加值(如自评分数 1-5)', length: 32, nullable: true })
+  value?: string;
 }

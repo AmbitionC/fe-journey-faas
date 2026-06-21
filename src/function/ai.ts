@@ -13,6 +13,10 @@ import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiProxyService, ChatMessage, ChatContext } from '../service/ai/proxy';
 import { AiHistoryService } from '../service/ai/history';
+import { RetrieveService } from '../service/ai/retrieve';
+import { ArticleService } from '../service/article';
+import { GradeItem } from '../service/ai/prompts';
+import { isEntitled } from '../common/entitlement';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
 
@@ -22,6 +26,33 @@ class AIChatDTO {
   conversationId?: number;
   /** 深度思考开关（默认开启；走 DeepSeek reasoner 返回思考链） */
   deepThink?: boolean;
+}
+
+class AIHintDTO {
+  title: string;
+  description: string;
+  code?: string;
+  language?: string;
+  level: 1 | 2 | 3 | 4;
+}
+
+class AIReviewDTO {
+  title: string;
+  code: string;
+  language?: string;
+  resultSummary?: string;
+}
+
+class AIRetrieveDTO {
+  query: string;
+  module?: string;
+  topK?: number;
+}
+
+class AIQuizGradeDTO {
+  items: GradeItem[];
+  module?: string;
+  articleKey?: string;
 }
 
 class AIConversationDTO {
@@ -42,6 +73,12 @@ export class AiHTTPService {
 
   @Inject()
   aiHistoryService: AiHistoryService;
+
+  @Inject()
+  retrieveService: RetrieveService;
+
+  @Inject()
+  articleService: ArticleService;
 
   @Inject()
   redisService: RedisService;
@@ -115,6 +152,33 @@ export class AiHTTPService {
     const { userId, isMember } = await this.resolveUser();
     await this.aiProxyService.checkRateLimit(userId, isMember);
 
+    // RAG：召回站内资料注入上下文（PRD-02 F1-1/F1-2）
+    let citations: { title: string; articleKey: string; module: string }[] = [];
+    try {
+      const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user');
+      if (lastUser?.content) {
+        const hits = await this.retrieveService.retrieve(lastUser.content, {
+          module: body.context?.module,
+          topK: 3,
+        });
+        if (hits.length) {
+          citations = hits.map((h) => ({
+            title: h.title,
+            articleKey: h.articleKey,
+            module: h.module,
+          }));
+          body.context = {
+            ...body.context,
+            ragContext: hits
+              .map((h, i) => `[${i + 1}] 《${h.title}》(articleKey=${h.articleKey}, module=${h.module})`)
+              .join('\n'),
+          };
+        }
+      }
+    } catch {
+      /* 检索失败不影响回答 */
+    }
+
     const content = await this.aiProxyService.forward(
       body.messages,
       body.context,
@@ -151,7 +215,7 @@ export class AiHTTPService {
       this.ctx.logger?.warn?.('[ai] persist conversation failed', e);
     }
 
-    return { success: true, content, conversationId };
+    return { success: true, content, conversationId, citations };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -263,5 +327,86 @@ export class AiHTTPService {
       res.write('data: [DONE]\n\n');
       res.end();
     }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '算法分层提示（提示词服务端拼装，不剧透）',
+    functionName: 'aiHint',
+    name: 'aiHint',
+    path: '/api/ai/hint',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiHint(@Body(ALL) body: AIHintDTO) {
+    const { userId, isMember } = await this.resolveUser();
+    await this.aiProxyService.checkRateLimit(userId, isMember);
+    const content = await this.aiProxyService.hint(body, userId);
+    return { success: true, data: { content } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '代码点评（约束服务端拼装）',
+    functionName: 'aiReview',
+    name: 'aiReview',
+    path: '/api/ai/review',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiReview(@Body(ALL) body: AIReviewDTO) {
+    const { userId, isMember } = await this.resolveUser();
+    await this.aiProxyService.checkRateLimit(userId, isMember);
+    const content = await this.aiProxyService.review(body, userId);
+    return { success: true, data: { content } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '站内内容检索（调试/内部）',
+    functionName: 'aiRetrieve',
+    name: 'aiRetrieve',
+    path: '/api/ai/retrieve',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiRetrieve(@Body(ALL) body: AIRetrieveDTO) {
+    const items = await this.retrieveService.retrieve(body.query, {
+      module: body.module,
+      topK: body.topK,
+    });
+    return { success: true, data: { items } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '简答判分 + 定制化建议（会员含深度建议）',
+    functionName: 'aiQuizGrade',
+    name: 'aiQuizGrade',
+    path: '/api/ai/quiz/grade',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiQuizGrade(@Body(ALL) body: AIQuizGradeDTO) {
+    const { userId, isMember } = await this.resolveUser();
+    await this.aiProxyService.checkRateLimit(userId, isMember);
+    const member = isEntitled('personalized_feedback', { isMember });
+
+    let candidates: { title: string; articleKey: string }[] = [];
+    let profileSummary = '';
+    if (member) {
+      const query =
+        (body.items || []).map((i) => i.stem).join(' ') ||
+        (body.articleKey || '').replace(/[-_]/g, ' ');
+      const hits = await this.retrieveService.retrieve(query, {
+        module: body.module,
+        topK: 5,
+      });
+      candidates = hits.map((h) => ({ title: h.title, articleKey: h.articleKey }));
+      if (body.module) {
+        profileSummary = await this.articleService.getProfileSummary(userId, body.module);
+      }
+    }
+    const data = await this.aiProxyService.gradeSubmission(
+      { items: body.items || [], member, profileSummary, candidates },
+      userId
+    );
+    return { success: true, data };
   }
 }

@@ -19,6 +19,7 @@ let aiProxyService;
 let aiHistoryService;
 let redisService;
 let articleService;
+let retrieveService;
 
 // 流式分支绕过框架，手动补 CORS（公网跨域调用需要）
 function setCors(req, res) {
@@ -106,6 +107,27 @@ async function handleStream(req, res) {
 
   // 深度思考：默认开启（前端开关；缺省也视为开）
   const deepThink = body.deepThink !== false;
+
+  // RAG：用最后一条用户消息召回站内资料，注入上下文 + 先下发引用帧（PRD-02 F1-1/F1-2）
+  let citations = [];
+  try {
+    const lastUserMsg = [...messages].reverse().find((m) => m && m.role === 'user');
+    if (lastUserMsg && lastUserMsg.content && retrieveService) {
+      const hits = await retrieveService.retrieve(lastUserMsg.content, {
+        module: context.module,
+        topK: 3,
+      });
+      if (hits && hits.length) {
+        citations = hits.map((h) => ({ title: h.title, articleKey: h.articleKey, module: h.module }));
+        context.ragContext = hits
+          .map((h, i) => `[${i + 1}] 《${h.title}》(articleKey=${h.articleKey}, module=${h.module})`)
+          .join('\n');
+        res.write(`data: ${JSON.stringify({ citations })}\n\n`);
+      }
+    }
+  } catch (e) {
+    /* 检索失败不影响回答 */
+  }
 
   let full = '';
   try {
@@ -195,6 +217,8 @@ async function bootstrap() {
   redisService = await appCtx.getAsync(RedisService);
   const { ArticleService } = require('./dist/service/article');
   articleService = await appCtx.getAsync(ArticleService);
+  const { RetrieveService } = require('./dist/service/ai/retrieve');
+  retrieveService = await appCtx.getAsync(RetrieveService);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -222,6 +246,19 @@ async function bootstrap() {
           handler: async ({ module }) => {
             const p = await articleService.getLearnerProfile(userId, module);
             return { reviewDue: p.reviewDue };
+          },
+        },
+        {
+          name: 'searchKnowledge',
+          description:
+            '在站内知识库检索与问题相关的文章。回答站内技术问题前应先调用它，并据返回结果作答、在末尾用「延伸阅读」列出引用文章（标题可点击跳转）。不要编造不在结果里的文章。',
+          parameters: [
+            { name: 'query', type: 'string', description: '检索关键词或问题', required: true },
+            { name: 'module', type: 'string', description: '可选，限定模块 knowledge/interview/firstclass', required: false },
+          ],
+          handler: async ({ query, module }) => {
+            const items = await retrieveService.retrieve(query, { module, topK: 3 });
+            return { items };
           },
         },
       ];

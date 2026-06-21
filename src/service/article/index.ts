@@ -10,6 +10,7 @@ import { UserEntity } from '../../entity/user';
 import { ArticleReadingStateEntity } from '../../entity/articleReadingState';
 import { R } from '../../common/base.error.utils';
 import { buildProfile, Profile } from './learnerProfile';
+import { mergeMastery, Mastery } from '../quiz/grading';
 
 @Provide()
 export class ArticleService {
@@ -357,6 +358,56 @@ export class ArticleService {
         userId: p.userId, module: p.module, articleKey: p.articleKey,
         status: p.status, mastery: p.mastery, lastReadAt: p.lastReadAt,
       });
+    }
+  }
+
+  /**
+   * 掌握度回流（PRD-01 F1-2）。读现状 → 合并 → 写回。
+   * mode='authoritative' 本人重新测验可升可降；'atLeast' 旁路信号只升不降。
+   * 不存在记录时按「已读」建档（lastReadAt=now）。
+   */
+  async reflowMastery(
+    userId: string,
+    module: string,
+    articleKey: string,
+    target: Mastery,
+    mode: 'atLeast' | 'authoritative' = 'authoritative'
+  ): Promise<{ from?: string; to: Mastery }> {
+    const existing = await this.readingStateModel.findOne({
+      where: { userId, module, articleKey },
+    });
+    const from = existing?.mastery as Mastery | undefined;
+    const to = mergeMastery(from, target, mode);
+    if (existing) {
+      existing.mastery = to;
+      if (existing.status !== 'done') existing.status = 'done';
+      await this.readingStateModel.save(existing);
+    } else {
+      await this.readingStateModel.save({
+        userId,
+        module,
+        articleKey,
+        status: 'done',
+        mastery: to,
+        lastReadAt: Date.now(),
+      });
+    }
+    await this.redisService.del(`profile:${userId}:${module}`);
+    return { from, to };
+  }
+
+  /** 给 AI 判分/建议用的画像摘要（会员个性化）。 */
+  async getProfileSummary(userId: string, module: string): Promise<string> {
+    try {
+      const p = await this.getLearnerProfile(userId, module);
+      const cov = p.coverage;
+      return `已学 ${cov.done}/${cov.total} 篇(覆盖率 ${Math.round(
+        cov.ratio * 100
+      )}%)，最近在看 ${p.recentKeys.slice(0, 3).join('、') || '无'}，待复习 ${
+        p.reviewDue.length
+      } 篇。`;
+    } catch {
+      return '';
     }
   }
 
