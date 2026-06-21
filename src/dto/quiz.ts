@@ -87,6 +87,20 @@ export class QuizDetailQueryDTO {
   id: number;
 }
 
+export class QuizGenerateDTO {
+  @Rule(RuleType.string().valid(...MODULE_ENUM).required())
+  module: string;
+
+  @Rule(RuleType.string().max(100).required())
+  articleKey: string;
+
+  @Rule(RuleType.number().integer().min(1).max(5).optional())
+  count?: number;
+
+  @Rule(RuleType.array().items(RuleType.string()).optional())
+  types?: string[];
+}
+
 export class QuizAdminListQueryDTO {
   @Rule(RuleType.string().valid(...MODULE_ENUM).optional())
   module?: string;
@@ -110,6 +124,20 @@ export class QuizAdminListQueryDTO {
 export class ReviewDueQueryDTO {
   @Rule(RuleType.string().valid(...MODULE_ENUM).required())
   module: string;
+
+  @Rule(RuleType.string().max(64).allow('').optional())
+  userId?: string;
+}
+
+export class ReviewFeedbackDTO {
+  @Rule(RuleType.string().valid(...MODULE_ENUM).required())
+  module: string;
+
+  @Rule(RuleType.string().max(100).required())
+  articleKey: string;
+
+  @Rule(RuleType.string().valid('again', 'hard', 'good', 'easy').required())
+  result: 'again' | 'hard' | 'good' | 'easy';
 
   @Rule(RuleType.string().max(64).allow('').optional())
   userId?: string;

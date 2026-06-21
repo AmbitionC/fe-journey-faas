@@ -125,3 +125,37 @@ ${schema}`;
 
   return { system, user };
 }
+
+export interface GenerateBuildParams {
+  title: string;
+  content: string;
+  count: number;
+  types?: string[]; // 允许的题型，缺省全部
+}
+
+/**
+ * 基于文章自动出题（PRD-02 F2-1）。严格 JSON 数组输出。
+ */
+export function buildGenerateMessages(p: GenerateBuildParams): { system: string; user: string } {
+  const types = p.types?.length ? p.types : ['single', 'multi', 'blank', 'qa'];
+  const system = `${IRIS_SOUL}
+
+你是出题老师。根据给定文章内容出 ${p.count} 道检验「是否真的掌握」的题目。规则：
+- 题型只能用：${types.join('、')}。优先单选/多选；可含 1 道简答(qa)。
+- 紧扣文章要点，不要超纲、不要编造文章未涉及的内容。
+- 单选 answer 为 1 个选项 key；多选为多个 key；填空 answer 为每空答案(可用 | 列多个可接受答案)；简答 answer 为得分要点。
+- 每题给简短 analysis 解析与 1-3 个 tags 标签。
+- 只输出 JSON 数组，不要任何额外文字或 Markdown 代码块。`;
+
+  const user = `文章标题：${p.title}
+文章内容：
+"""
+${p.content}
+"""
+
+请输出 JSON 数组，每个元素结构：
+{"type":"single|multi|blank|qa","stem":"题干","options":[{"key":"A","text":"..."}],"answer":["A"],"analysis":"解析","difficulty":1,"tags":["标签"]}
+（非选择题可省略 options）`;
+
+  return { system, user };
+}

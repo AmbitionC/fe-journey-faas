@@ -9,9 +9,11 @@ import {
   buildHintPrompt,
   buildReviewPrompt,
   buildGradeMessages,
+  buildGenerateMessages,
   HintParams,
   ReviewParams,
   GradeBuildParams,
+  GenerateBuildParams,
 } from './prompts';
 
 export type AiTask =
@@ -163,6 +165,60 @@ export class AiProxyService {
   async review(p: ReviewParams, userId: string): Promise<string> {
     const { system, user } = buildReviewPrompt(p);
     return this.complete(system, user, userId, 'algorithm', 1536);
+  }
+
+  /**
+   * 基于文章自动出题（PRD-02 F2-1）。返回题目草稿数组；解析失败返回空数组。
+   */
+  async generateQuestions(
+    p: GenerateBuildParams,
+    userId: string
+  ): Promise<
+    {
+      type: string;
+      stem: string;
+      options?: { key: string; text: string }[];
+      answer?: string[];
+      analysis?: string;
+      difficulty?: number;
+      tags?: string[];
+    }[]
+  > {
+    try {
+      const { system, user } = buildGenerateMessages(p);
+      const raw = await this.complete(system, user, userId, 'quiz', 2048);
+      const arr = this.parseJsonArrayLoose<any>(raw);
+      if (!Array.isArray(arr)) return [];
+      const allowed = new Set(['single', 'multi', 'blank', 'qa']);
+      return arr
+        .filter((q) => q && allowed.has(q.type) && q.stem)
+        .slice(0, p.count)
+        .map((q) => ({
+          type: q.type,
+          stem: String(q.stem),
+          options: Array.isArray(q.options) ? q.options : undefined,
+          answer: Array.isArray(q.answer) ? q.answer.map(String) : [],
+          analysis: q.analysis ? String(q.analysis) : '',
+          difficulty: [1, 2, 3].includes(q.difficulty) ? q.difficulty : 1,
+          tags: Array.isArray(q.tags) ? q.tags.map(String) : [],
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** 从输出里抽出第一个 JSON 数组。 */
+  private parseJsonArrayLoose<T>(text: string): T[] | null {
+    if (!text) return null;
+    const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const start = cleaned.indexOf('[');
+    const end = cleaned.lastIndexOf(']');
+    if (start === -1 || end === -1 || end <= start) return null;
+    try {
+      return JSON.parse(cleaned.slice(start, end + 1)) as T[];
+    } catch {
+      return null;
+    }
   }
 
   /** 从可能含 ```json 包裹或多余文字的输出里抽出第一个 JSON 对象。 */

@@ -9,6 +9,7 @@ import { ArticleService } from '../article';
 import { gradeObjective, scoreToMastery } from './grading';
 import { GradeItem } from '../ai/prompts';
 import { isEntitled } from '../../common/entitlement';
+import { fetchArticleFromGitHub } from '../content/sync';
 
 export interface SubmitAnswer {
   questionId: number;
@@ -86,6 +87,59 @@ export class QuizService {
 
   async getById(id: number) {
     return this.questionModel.findOneBy({ id: String(id) });
+  }
+
+  /**
+   * 基于文章自动出题入库为草稿（PRD-02 F2-1）。运营校审后再发布。
+   */
+  async generate(params: {
+    userId: string;
+    module: string;
+    articleKey: string;
+    count?: number;
+    types?: string[];
+  }) {
+    const count = Math.min(Math.max(params.count || 3, 1), 5);
+    const leaf = await this.articleService.findLeafByKey(params.module, params.articleKey);
+    if (!leaf) throw new Error('未找到该文章（articleKey 与导航不匹配）');
+
+    let content = '';
+    try {
+      content = await fetchArticleFromGitHub(params.module, leaf.filePath, params.articleKey);
+    } catch {
+      throw new Error('拉取文章内容失败');
+    }
+    if (!content.trim()) throw new Error('文章内容为空，无法出题');
+
+    const drafts = await this.aiProxyService.generateQuestions(
+      { title: leaf.label, content: content.slice(0, 6000), count, types: params.types },
+      params.userId
+    );
+    if (!drafts.length) throw new Error('AI 未能生成题目，请重试');
+
+    const saved = [];
+    for (let i = 0; i < drafts.length; i++) {
+      const d = drafts[i];
+      saved.push(
+        await this.questionModel.save(
+          this.questionModel.create({
+            module: params.module,
+            articleKey: params.articleKey,
+            type: d.type,
+            stem: d.stem,
+            options: d.options || null,
+            answer: d.answer || null,
+            analysis: d.analysis || null,
+            difficulty: d.difficulty || 1,
+            source: 'ai',
+            status: 'draft',
+            tags: d.tags || null,
+            orderNum: i,
+          })
+        )
+      );
+    }
+    return { count: saved.length, list: saved };
   }
 
   async saveQuestion(data: Partial<QuizQuestionEntity> & { id?: number }) {
@@ -186,7 +240,7 @@ export class QuizService {
     const correctCount = perQuestion.filter((p) => p.correct).length;
     const score = totalCount ? Math.round((earned / totalCount) * 100) : 0;
 
-    // 4) 掌握度回流（本人测验，可升可降）
+    // 4) 掌握度回流（本人测验，可升可降）+ 间隔重复排程（PRD-01 F2-1）
     let masteryChange: { from?: string; to: string } | null = null;
     if (totalCount > 0) {
       masteryChange = await this.articleService.reflowMastery(
@@ -196,6 +250,11 @@ export class QuizService {
         scoreToMastery(score),
         'authoritative'
       );
+      try {
+        await this.articleService.updateScheduleByScore(userId, module, articleKey, score);
+      } catch {
+        /* 排程更新失败不阻断 */
+      }
     }
 
     // 5) 落库 attempt（尽力而为）

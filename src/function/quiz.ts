@@ -23,7 +23,9 @@ import {
   QuizDeleteDTO,
   QuizAdminListQueryDTO,
   QuizDetailQueryDTO,
+  QuizGenerateDTO,
   ReviewDueQueryDTO,
+  ReviewFeedbackDTO,
 } from '../dto/quiz';
 
 @Provide()
@@ -133,6 +135,30 @@ export class QuizHTTPService {
     return { success: true, data: { list: profile.reviewDueDetail } };
   }
 
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '复习反馈（更新间隔重复排程）',
+    functionName: 'reviewFeedback',
+    name: 'reviewFeedback',
+    path: '/article/review/feedback',
+    method: 'post',
+  })
+  @NoAuth()
+  async reviewFeedback(@Body(ALL) body: ReviewFeedbackDTO) {
+    const { userId } = await this.resolveUser();
+    const uid = userId || body.userId || '';
+    if (!uid) return { success: true, data: {} };
+    const data = await this.articleService.updateSchedule(
+      uid,
+      body.module,
+      body.articleKey,
+      body.result
+    );
+    // 复习反馈也回流掌握度：again→review，其余→至少 review/mastered
+    const target = body.result === 'again' ? 'review' : body.result === 'easy' ? 'mastered' : 'review';
+    await this.articleService.reflowMastery(uid, body.module, body.articleKey, target as any, 'atLeast');
+    return { success: true, data };
+  }
+
   // ========== 管理端（需登录 token） ==========
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -158,6 +184,25 @@ export class QuizHTTPService {
   async detail(@Query(ALL) query: QuizDetailQueryDTO) {
     this.requireLogin();
     const data = await this.quizService.getById(query.id);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'AI 基于文章自动出题（入库为草稿）',
+    functionName: 'generateQuiz',
+    name: 'generateQuiz',
+    path: '/article/quiz/generate',
+    method: 'post',
+  })
+  async generate(@Body(ALL) body: QuizGenerateDTO) {
+    const userId = this.requireLogin();
+    const data = await this.quizService.generate({
+      userId,
+      module: body.module,
+      articleKey: body.articleKey,
+      count: body.count,
+      types: body.types,
+    });
     return { success: true, data };
   }
 

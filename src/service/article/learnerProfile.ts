@@ -18,13 +18,20 @@ export interface ProfileInput {
   now: number;
   rule?: ReviewRule;
 }
+export interface WeakTagVO {
+  tag: string;
+  score: number;
+  evidenceCount: number;
+}
+
 export interface Profile {
   coverage: { done: number; total: number; ratio: number };
   recentKeys: string[];
   reviewDue: string[]; // 到期待复习的文章 key（按优先级排序）
   reviewDueDetail: ReviewDueItem[]; // 到期明细：原因/上次得分/优先级（PRD-01 F1-3）
-  interests: string[]; // 预留(P2 接收藏/标签)
-  streak: number; // 预留(可复用前端 deriveStreak 思路)
+  interests: string[]; // 兴趣标签（PRD-01 F2-3）
+  streak: number; // 连续学习天数（PRD-01 F2-3）
+  weakTags: WeakTagVO[]; // 弱点诊断 Top-N（PRD-01 F2-2）
 }
 
 export function buildProfile(input: ProfileInput): Profile {
@@ -49,5 +56,6 @@ export function buildProfile(input: ProfileInput): Profile {
     reviewDueDetail,
     interests: [],
     streak: 0,
+    weakTags: [],
   };
 }

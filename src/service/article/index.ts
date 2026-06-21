@@ -8,9 +8,15 @@ import { UserArticleActionEntity } from '../../entity/userArticleAction';
 import { ArticleViewLogEntity } from '../../entity/articleViewLog';
 import { UserEntity } from '../../entity/user';
 import { ArticleReadingStateEntity } from '../../entity/articleReadingState';
+import { ReviewScheduleEntity } from '../../entity/reviewSchedule';
+import { QuizAttemptEntity } from '../../entity/quizAttempt';
+import { QuizQuestionEntity } from '../../entity/quizQuestion';
 import { R } from '../../common/base.error.utils';
 import { buildProfile, Profile } from './learnerProfile';
 import { mergeMastery, Mastery } from '../quiz/grading';
+import { sm2, scoreToGrade, ReviewGrade, SrsState } from './sm2';
+import { deriveStreak, topTags, aggregateWeak, WeakTag } from './insights';
+import { computeReviewDue, ReviewDueItem } from './reviewSchedule';
 
 @Provide()
 export class ArticleService {
@@ -31,6 +37,15 @@ export class ArticleService {
 
   @InjectEntityModel(ArticleReadingStateEntity)
   readingStateModel: Repository<ArticleReadingStateEntity>;
+
+  @InjectEntityModel(ReviewScheduleEntity)
+  reviewScheduleModel: Repository<ReviewScheduleEntity>;
+
+  @InjectEntityModel(QuizAttemptEntity)
+  quizAttemptModel: Repository<QuizAttemptEntity>;
+
+  @InjectEntityModel(QuizQuestionEntity)
+  quizQuestionModel: Repository<QuizQuestionEntity>;
 
   @Inject()
   redisService: RedisService;
@@ -396,6 +411,111 @@ export class ArticleService {
     return { from, to };
   }
 
+  /**
+   * 更新间隔重复排程（PRD-01 F2-1）。grade 由测验得分或复习反馈给出。
+   */
+  async updateSchedule(
+    userId: string,
+    module: string,
+    articleKey: string,
+    grade: ReviewGrade
+  ): Promise<{ dueAt: number }> {
+    const existing = await this.reviewScheduleModel.findOne({
+      where: { userId, module, articleKey },
+    });
+    const prev: SrsState = existing
+      ? { ease: existing.ease, interval: existing.interval, reps: existing.reps }
+      : { ease: 2.5, interval: 0, reps: 0 };
+    const next = sm2(prev, grade, Date.now());
+    if (existing) {
+      existing.ease = next.ease;
+      existing.interval = next.interval;
+      existing.reps = next.reps;
+      existing.dueAt = next.dueAt;
+      existing.lastResult = grade;
+      await this.reviewScheduleModel.save(existing);
+    } else {
+      await this.reviewScheduleModel.save({
+        userId,
+        module,
+        articleKey,
+        ease: next.ease,
+        interval: next.interval,
+        reps: next.reps,
+        dueAt: next.dueAt,
+        lastResult: grade,
+      });
+    }
+    await this.redisService.del(`profile:${userId}:${module}`);
+    return { dueAt: next.dueAt };
+  }
+
+  /** 由测验得分更新排程（封装 score→grade）。 */
+  async updateScheduleByScore(
+    userId: string,
+    module: string,
+    articleKey: string,
+    score: number
+  ): Promise<void> {
+    await this.updateSchedule(userId, module, articleKey, scoreToGrade(score));
+  }
+
+  /** 弱点诊断（PRD-01 F2-2）：从近期测验错题的题目标签聚合 Top-N。 */
+  private async computeWeakTags(userId: string, module: string): Promise<WeakTag[]> {
+    try {
+      const attempts = await this.quizAttemptModel.find({
+        where: { userId, module },
+        order: { id: 'DESC' },
+        take: 50,
+      });
+      const wrongQids: number[] = [];
+      for (const a of attempts) {
+        const answers = Array.isArray(a.answers) ? a.answers : [];
+        for (const it of answers) {
+          if (it && it.correct === false && it.questionId) wrongQids.push(Number(it.questionId));
+        }
+      }
+      if (!wrongQids.length) return [];
+      const questions = await this.quizQuestionModel.find({
+        where: { id: In(wrongQids.map(String)) },
+      });
+      const tagMap = new Map<number, string[]>();
+      for (const q of questions) tagMap.set(Number(q.id), Array.isArray(q.tags) ? q.tags : []);
+      const evidence: { tag: string; weight: number }[] = [];
+      for (const qid of wrongQids) {
+        for (const tag of tagMap.get(qid) || []) evidence.push({ tag, weight: 1 });
+      }
+      return aggregateWeak(evidence, 5);
+    } catch {
+      return [];
+    }
+  }
+
+  /** 在导航树中按 key 找叶子的 filePath 与 label（用于按文章定位内容）。 */
+  async findLeafByKey(
+    module: string,
+    key: string
+  ): Promise<{ filePath: string; label: string } | null> {
+    try {
+      const { navData } = await this.getNavList(module);
+      let found: { filePath: string; label: string } | null = null;
+      const walk = (nodes: any[]) => {
+        if (!Array.isArray(nodes) || found) return;
+        for (const node of nodes) {
+          if (node.isLeaf === true && node.key === key) {
+            found = { filePath: node.filePath || '', label: node.label || key };
+            return;
+          }
+          if (Array.isArray(node.children)) walk(node.children);
+        }
+      };
+      walk(navData || []);
+      return found;
+    } catch {
+      return null;
+    }
+  }
+
   /** 给 AI 判分/建议用的画像摘要（会员个性化）。 */
   async getProfileSummary(userId: string, module: string): Promise<string> {
     try {
@@ -431,28 +551,71 @@ export class ArticleService {
 
     const reading = await this.listReadingState(userId, module);
 
-    // 拍平叶子节点求 totalArticles
+    // 拍平叶子节点：求 totalArticles + 建 key→tags 映射（用于兴趣推导）
     let totalArticles = 0;
+    const keyTags = new Map<string, string[]>();
     try {
       const { navData } = await this.getNavList(module);
-      const flattenLeaves = (nodes: any[]): number => {
-        if (!Array.isArray(nodes)) return 0;
-        let count = 0;
+      const walk = (nodes: any[]): void => {
+        if (!Array.isArray(nodes)) return;
         for (const node of nodes) {
-          if (node.isLeaf === true) count += 1;
-          if (Array.isArray(node.children) && node.children.length) {
-            count += flattenLeaves(node.children);
+          if (node.isLeaf === true) {
+            totalArticles += 1;
+            if (Array.isArray(node.tags)) keyTags.set(node.key, node.tags);
           }
+          if (Array.isArray(node.children) && node.children.length) walk(node.children);
         }
-        return count;
       };
-      totalArticles = flattenLeaves(navData || []);
+      walk(navData || []);
     } catch {
-      // navData 不存在时不影响画像其余字段
       totalArticles = 0;
     }
 
-    const profile = buildProfile({ reading, totalArticles, now: Date.now() });
+    const now = Date.now();
+    const profile = buildProfile({ reading, totalArticles, now });
+
+    // F2-3 连续天数：按 lastReadAt 自然日
+    profile.streak = deriveStreak(reading.map((r) => r.lastReadAt), now);
+
+    // F2-3 兴趣：已读/在学文章的标签频次 Top-N
+    const readTags: string[] = [];
+    for (const r of reading) {
+      if (r.status === 'done' || r.status === 'reading') {
+        for (const t of keyTags.get(r.articleKey) || []) readTags.push(t);
+      }
+    }
+    profile.interests = topTags(readTags, 6);
+
+    // F2-2 弱点诊断
+    profile.weakTags = await this.computeWeakTags(userId, module);
+
+    // F2-1 间隔重复：有排程的按 dueAt 取，其余回退按掌握度规则
+    try {
+      const schedules = await this.reviewScheduleModel.find({ where: { userId, module } });
+      const schedKeys = new Set(schedules.map((s) => s.articleKey));
+      const schedDue: ReviewDueItem[] = schedules
+        .filter((s) => Number(s.dueAt) <= now)
+        .map((s) => ({
+          articleKey: s.articleKey,
+          reason: `间隔重复到期（第 ${s.reps} 次）`,
+          mastery: reading.find((r) => r.articleKey === s.articleKey)?.mastery || 'new',
+          priority: 25 + Math.min(30, Math.floor((now - Number(s.dueAt)) / 86400000)),
+          dueAt: Number(s.dueAt),
+        }));
+      // 无排程的文章仍用掌握度规则兜底
+      const masteryDue = computeReviewDue(
+        reading.filter((r) => !schedKeys.has(r.articleKey)),
+        now
+      );
+      const merged = [...schedDue, ...masteryDue].sort(
+        (a, b) => b.priority - a.priority || a.dueAt - b.dueAt
+      );
+      profile.reviewDueDetail = merged;
+      profile.reviewDue = merged.map((d) => d.articleKey);
+    } catch {
+      /* 排程读取失败则保留 buildProfile 的掌握度兜底 */
+    }
+
     await this.redisService.set(cacheKey, JSON.stringify(profile), 'EX', 60);
     return profile;
   }
