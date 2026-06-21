@@ -14,6 +14,10 @@ import {
   GradeBuildParams,
 } from './prompts';
 
+export type AiTask =
+  | ({ kind: 'hint' } & HintParams)
+  | ({ kind: 'review' } & ReviewParams);
+
 export type Verdict = '对' | '部分对' | '错';
 
 export interface GradeResult {
@@ -357,15 +361,20 @@ export class AiProxyService {
     return content;
   }
 
-  async *forwardStream(
+  /**
+   * 流式核心：给定已拼好的 systemPrompt + messages，向上游真流式拉取并逐帧产出
+   * { content?, reasoning? }。被 forwardStream / forwardTaskStream / Copilot 适配器复用，
+   * 统一身份/计量/思考链透传。
+   */
+  async *streamCore(
+    systemPrompt: string,
     messages: ChatMessage[],
-    context: ChatContext,
+    module: string,
     userId: string,
     deepThink = false
   ): AsyncGenerator<{ content?: string; reasoning?: string }> {
     if (!this.aiConfig.apiKey) throw R.error('AI 服务未配置，请联系管理员');
 
-    const systemPrompt = this.buildSystemPrompt(context);
     const { url, headers } = this.getRequestConfig(true);
     const body = this.buildRequestBody(messages, systemPrompt, true, deepThink);
 
@@ -410,7 +419,7 @@ export class AiProxyService {
           if (usage?.total_tokens) totalTokens = usage.total_tokens;
 
           if (done) {
-            await this.logUsage(userId, context.module, totalTokens);
+            await this.logUsage(userId, module, totalTokens);
             return;
           }
         } catch {
@@ -419,6 +428,43 @@ export class AiProxyService {
       }
     }
 
-    await this.logUsage(userId, context.module, totalTokens);
+    await this.logUsage(userId, module, totalTokens);
+  }
+
+  async *forwardStream(
+    messages: ChatMessage[],
+    context: ChatContext,
+    userId: string,
+    deepThink = false
+  ): AsyncGenerator<{ content?: string; reasoning?: string }> {
+    const systemPrompt = this.buildSystemPrompt(context);
+    yield* this.streamCore(systemPrompt, messages, context.module, userId, deepThink);
+  }
+
+  /**
+   * 结构化任务流式（PRD-02 F1-3）：算法分层提示 / 代码点评。
+   * 提示词与「不剧透」约束在服务端拼装，前端只传结构化参数，无法绕过。
+   * hint 不走深度思考（短、快）；review 可深度思考。
+   */
+  async *forwardTaskStream(
+    task: AiTask,
+    userId: string,
+    deepThink = false
+  ): AsyncGenerator<{ content?: string; reasoning?: string }> {
+    let system: string;
+    let user: string;
+    if (task.kind === 'hint') {
+      ({ system, user } = buildHintPrompt(task));
+      deepThink = false;
+    } else {
+      ({ system, user } = buildReviewPrompt(task));
+    }
+    yield* this.streamCore(
+      system,
+      [{ role: 'user', content: user }],
+      'algorithm',
+      userId,
+      deepThink
+    );
   }
 }

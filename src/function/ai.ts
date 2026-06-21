@@ -11,7 +11,7 @@ import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
-import { AiProxyService, ChatMessage, ChatContext } from '../service/ai/proxy';
+import { AiProxyService, ChatMessage, ChatContext, AiTask } from '../service/ai/proxy';
 import { AiHistoryService } from '../service/ai/history';
 import { RetrieveService } from '../service/ai/retrieve';
 import { ArticleService } from '../service/article';
@@ -26,6 +26,8 @@ class AIChatDTO {
   conversationId?: number;
   /** 深度思考开关（默认开启；走 DeepSeek reasoner 返回思考链） */
   deepThink?: boolean;
+  /** 结构化任务（算法提示/点评）：存在时提示词由服务端拼装 */
+  task?: AiTask;
 }
 
 class AIHintDTO {
@@ -304,12 +306,14 @@ export class AiHTTPService {
       // 限流放在流内：超限时以 SSE error 帧返回，前端可识别 RATE_LIMIT
       await this.aiProxyService.checkRateLimit(userId, isMember);
 
-      const gen = this.aiProxyService.forwardStream(
-        body.messages,
-        body.context,
-        userId,
-        body.deepThink !== false
-      );
+      const gen = body.task
+        ? this.aiProxyService.forwardTaskStream(body.task, userId, body.deepThink !== false)
+        : this.aiProxyService.forwardStream(
+            body.messages,
+            body.context,
+            userId,
+            body.deepThink !== false
+          );
 
       for await (const chunk of gen) {
         if (chunk && chunk.reasoning) {

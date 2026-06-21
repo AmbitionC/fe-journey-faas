@@ -108,11 +108,14 @@ async function handleStream(req, res) {
   // 深度思考：默认开启（前端开关；缺省也视为开）
   const deepThink = body.deepThink !== false;
 
+  // 结构化任务（算法提示/点评）：提示词服务端拼装，走 forwardTaskStream（PRD-02 F1-3）
+  const task = body.task && body.task.kind ? body.task : null;
+
   // RAG：用最后一条用户消息召回站内资料，注入上下文 + 先下发引用帧（PRD-02 F1-1/F1-2）
   let citations = [];
   try {
     const lastUserMsg = [...messages].reverse().find((m) => m && m.role === 'user');
-    if (lastUserMsg && lastUserMsg.content && retrieveService) {
+    if (!task && lastUserMsg && lastUserMsg.content && retrieveService) {
       const hits = await retrieveService.retrieve(lastUserMsg.content, {
         module: context.module,
         topK: 3,
@@ -132,7 +135,9 @@ async function handleStream(req, res) {
   let full = '';
   try {
     await aiProxyService.checkRateLimit(userId, isMember);
-    const gen = aiProxyService.forwardStream(messages, context, userId, deepThink);
+    const gen = task
+      ? aiProxyService.forwardTaskStream(task, userId, deepThink)
+      : aiProxyService.forwardStream(messages, context, userId, deepThink);
     for await (const chunk of gen) {
       if (chunk && chunk.reasoning) {
         res.write(`data: ${JSON.stringify({ reasoning: chunk.reasoning })}\n\n`);
@@ -227,7 +232,16 @@ async function bootstrap() {
       const { makeServiceAdapter } = require('./dist/copilot/deepseekAdapter');
       setCors(req, res);
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-      const { userId } = await resolveUser(req);
+      const { userId, isMember } = await resolveUser(req);
+      // 共用限流：游客按 IP 限额（与 SSE 链路一致）；超限直接 429
+      try {
+        await aiProxyService.checkRateLimit(userId, isMember);
+      } catch (e) {
+        res.statusCode = 429;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: (e && e.message) || 'RATE_LIMIT' }));
+        return;
+      }
       const actions = [
         {
           name: 'getLearnerProfile',
