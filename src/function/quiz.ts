@@ -13,6 +13,8 @@ import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { QuizService } from '../service/quiz';
 import { ArticleService } from '../service/article';
+import { RetrieveService } from '../service/ai/retrieve';
+import { AgentService } from '../service/ai/agent';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
@@ -38,6 +40,12 @@ export class QuizHTTPService {
 
   @Inject()
   articleService: ArticleService;
+
+  @Inject()
+  retrieveService: RetrieveService;
+
+  @Inject()
+  agentService: AgentService;
 
   @Inject()
   redisService: RedisService;
@@ -156,6 +164,64 @@ export class QuizHTTPService {
     // 复习反馈也回流掌握度：again→review，其余→至少 review/mastered
     const target = body.result === 'again' ? 'review' : body.result === 'easy' ? 'mastered' : 'review';
     await this.articleService.reflowMastery(uid, body.module, body.articleKey, target as any, 'atLeast');
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '能力雷达（按一级分类的掌握度）',
+    functionName: 'capabilityRadar',
+    name: 'capabilityRadar',
+    path: '/article/radar',
+    method: 'get',
+  })
+  @NoAuth()
+  async radar(@Query(ALL) query: ReviewDueQueryDTO) {
+    const { userId } = await this.resolveUser();
+    const uid = userId || query.userId || '';
+    if (!uid) return { success: true, data: { dimensions: [] } };
+    const dimensions = await this.articleService.getCapabilityRadar(uid, query.module);
+    return { success: true, data: { dimensions } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '跨模块补学推荐（薄弱点 → 知识库文章）',
+    functionName: 'crossRecommend',
+    name: 'crossRecommend',
+    path: '/article/recommendations',
+    method: 'get',
+  })
+  @NoAuth()
+  async recommendations(@Query(ALL) query: ReviewDueQueryDTO) {
+    const { userId } = await this.resolveUser();
+    const uid = userId || query.userId || '';
+    if (!uid) return { success: true, data: { list: [] } };
+    const profile = await this.articleService.getLearnerProfile(uid, query.module);
+    const weak = (profile?.weakTags || []).slice(0, 3);
+    const list = [];
+    for (const w of weak) {
+      const articles = await this.retrieveService.retrieve(w.tag, {
+        module: 'knowledge',
+        topK: 2,
+      });
+      if (articles.length) list.push({ tag: w.tag, articles });
+    }
+    return { success: true, data: { list } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '编排式 Agent：查→出题→记录→提醒 小闭环',
+    functionName: 'agentStudyPlan',
+    name: 'agentStudyPlan',
+    path: '/article/agent/studyPlan',
+    method: 'post',
+  })
+  async agentStudyPlan(@Body(ALL) body: QuizListQueryDTO) {
+    const userId = this.requireLogin();
+    const data = await this.agentService.runStudyPlan({
+      userId,
+      module: body.module,
+      articleKey: body.articleKey,
+    });
     return { success: true, data };
   }
 

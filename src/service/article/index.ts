@@ -17,6 +17,7 @@ import { mergeMastery, Mastery } from '../quiz/grading';
 import { sm2, scoreToGrade, ReviewGrade, SrsState } from './sm2';
 import { deriveStreak, topTags, aggregateWeak, WeakTag } from './insights';
 import { computeReviewDue, ReviewDueItem } from './reviewSchedule';
+import { computeRadar, RadarDim, RadarInput } from './radar';
 
 @Provide()
 export class ArticleService {
@@ -489,6 +490,34 @@ export class ArticleService {
     } catch {
       return [];
     }
+  }
+
+  /** 能力雷达（PRD-01 F3-2）：按导航一级分类聚合掌握度为能力分。 */
+  async getCapabilityRadar(userId: string, module: string): Promise<RadarDim[]> {
+    const reading = await this.listReadingState(userId, module);
+    const map = new Map(
+      reading.map((r) => [r.articleKey, { status: r.status, mastery: r.mastery }])
+    );
+    let navData: any[] = [];
+    try {
+      ({ navData } = await this.getNavList(module));
+    } catch {
+      return [];
+    }
+    const inputs: RadarInput[] = [];
+    for (const top of navData || []) {
+      const leaves: string[] = [];
+      const collect = (n: any) => {
+        if (!n) return;
+        if (n.isLeaf === true) leaves.push(n.key);
+        if (Array.isArray(n.children)) n.children.forEach(collect);
+      };
+      collect(top);
+      if (!leaves.length) continue;
+      const states = leaves.filter((k) => map.has(k)).map((k) => map.get(k)!);
+      inputs.push({ category: top.label || top.key, total: leaves.length, states });
+    }
+    return computeRadar(inputs);
   }
 
   /** 在导航树中按 key 找叶子的 filePath 与 label（用于按文章定位内容）。 */
