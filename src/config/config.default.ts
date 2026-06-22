@@ -30,6 +30,12 @@ import { AiCallLogEntity } from '../entity/aiCallLog';
 import { UserGoalEntity } from '../entity/userGoal';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
+import {
+  OpsTaskEntity,
+  ContentHealthReportEntity,
+  OpsAuditLogEntity,
+  SamplingCheckEntity,
+} from '../entity/ops';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 
@@ -89,6 +95,7 @@ export default {
           QuizQuestionEntity, QuizAttemptEntity, ReviewScheduleEntity,
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
           NotifySubscriptionEntity,
+          OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
         ],
       },
     },
