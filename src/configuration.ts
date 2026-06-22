@@ -7,7 +7,6 @@ import * as swagger from '@midwayjs/swagger';
 import * as orm from '@midwayjs/typeorm';
 import * as crossDomain from '@midwayjs/cross-domain';
 import * as defaultConfig from './config/config.default';
-import * as prodConfig from './config/config.prod';
 import { AuthMiddleware } from './middleware/auth';
 import { CommonErrorFilter } from './filter/common';
 import { DefaultErrorFilter } from './filter/default';
@@ -29,7 +28,6 @@ import { ValidateErrorFilter } from './filter/validate';
   importConfigs: [
     {
       default: defaultConfig,
-      prod: prodConfig,
     },
   ],
   conflictCheck: true,

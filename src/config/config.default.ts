@@ -57,11 +57,13 @@ import { readFileSync } from 'fs';
   }
 })();
 
-const DB_HOST = process.env.DB_HOST || 'rm-bp18fm5u5c7uk47558o.mysql.rds.aliyuncs.com';
-const DB_USER = process.env.DB_USER || 'ch17394940726';
-const DB_PASS = process.env.DB_PASS || 'Ch823147833';
-const REDIS_HOST = process.env.REDIS_HOST || 'r-bp1bwq5o4hpvnfwfbzpd.redis.rds.aliyuncs.com';
-const REDIS_PASS = process.env.REDIS_PASS || 'Ch823147833';
+// PRD-07：数据库/Redis 凭证只从环境变量读取，不在代码中保留任何明文兜底。
+// 本地开发：在 .env.local 配置（见 .env.example）；生产：FC 函数环境变量注入。
+const DB_HOST = process.env.DB_HOST || '';
+const DB_USER = process.env.DB_USER || '';
+const DB_PASS = process.env.DB_PASS || '';
+const REDIS_HOST = process.env.REDIS_HOST || '';
+const REDIS_PASS = process.env.REDIS_PASS || '';
 
 export default {
   cors: {
