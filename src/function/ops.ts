@@ -9,6 +9,7 @@ import {
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { OpsService } from '../service/ops';
+import { OpsExecutorService } from '../service/ops/executor';
 import { R } from '../common/base.error.utils';
 
 @Provide()
@@ -18,6 +19,9 @@ export class OpsHTTPService {
 
   @Inject()
   opsService: OpsService;
+
+  @Inject()
+  opsExecutorService: OpsExecutorService;
 
   private requireLogin() {
     const userId = this.ctx.userInfo?.userId;
@@ -84,6 +88,36 @@ export class OpsHTTPService {
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 20,
     });
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'AI 自动出题→审→自动发布（带熔断/审计/可回滚）',
+    functionName: 'opsAutoQuiz',
+    name: 'opsAutoQuiz',
+    path: '/ops/execute/autoQuiz',
+    method: 'post',
+  })
+  async autoQuiz(@Body(ALL) body: { module: string; articleKey: string }) {
+    const userId = this.requireLogin();
+    const data = await this.opsExecutorService.autoQuiz({
+      userId,
+      module: body.module,
+      articleKey: body.articleKey,
+    });
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '回滚某次自动操作',
+    functionName: 'opsRollback',
+    name: 'opsRollback',
+    path: '/ops/rollback',
+    method: 'post',
+  })
+  async rollback(@Body(ALL) body: { auditId: number }) {
+    this.requireLogin();
+    const data = await this.opsExecutorService.rollback(body.auditId);
     return { success: true, data };
   }
 

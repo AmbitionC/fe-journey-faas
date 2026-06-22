@@ -61,6 +61,26 @@ export class OpsAuditLogEntity extends BaseEntity {
   status: string;
 }
 
+/** AI 审 AI 复核记录（PRD-08）。执行 agent 产出 → 审查 agent 复核。 */
+@Entity({ name: 'ops_review' })
+@Index('idx_ops_review_task', ['taskId'])
+export class OpsReviewEntity extends BaseEntity {
+  @Column({ comment: '任务ID', nullable: true })
+  taskId: number;
+
+  @Column({ comment: '审查模型', length: 32, nullable: true })
+  reviewerModel: string;
+
+  @Column({ comment: '结论 pass/fail', length: 16 })
+  verdict: string;
+
+  @Column({ comment: '置信度 0-1', type: 'float', default: 0 })
+  confidence: number;
+
+  @Column({ comment: '问题列表', type: 'json', nullable: true })
+  issues: any;
+}
+
 /** 人工抽检记录（PRD-08）。反哺评测。 */
 @Entity({ name: 'sampling_check' })
 @Index('idx_sampling_task', ['taskId'])

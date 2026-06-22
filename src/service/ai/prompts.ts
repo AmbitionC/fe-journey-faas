@@ -4,6 +4,7 @@
  * 前端只传结构化参数，无法绕过「不剧透/不编造」约束。
  */
 import { IRIS_SOUL } from './proxy';
+import { sanitizeForPrompt } from './sanitize';
 
 const HINT_LEVEL_DESC: Record<number, string> = {
   1: '只点出从哪一类思路或数据结构入手，不要展开，不要写任何代码。',
@@ -100,7 +101,9 @@ ${
   const itemsText = p.items
     .map(
       (it, i) =>
-        `【第${i + 1}题】题干：${it.stem}\n标准要点：${(it.keyPoints || []).join('；')}\n用户作答：${it.userAnswer || '(未作答)'}`
+        `【第${i + 1}题】题干：${it.stem}\n标准要点：${(it.keyPoints || []).join('；')}\n用户作答：${
+          sanitizeForPrompt(it.userAnswer, 2000) || '(未作答)'
+        }`
     )
     .join('\n\n');
 
@@ -150,13 +153,38 @@ export function buildGenerateMessages(p: GenerateBuildParams): { system: string;
   const user = `文章标题：${p.title}
 文章内容：
 """
-${p.content}
+${sanitizeForPrompt(p.content, 6000)}
 """
 
 请输出 JSON 数组，每个元素结构：
 {"type":"single|multi|blank|qa","stem":"题干","options":[{"key":"A","text":"..."}],"answer":["A"],"analysis":"解析","difficulty":1,"tags":["标签"]}
 （非选择题可省略 options）`;
 
+  return { system, user };
+}
+
+export interface QuizReviewParams {
+  title: string;
+  questions: { type: string; stem: string; answer?: string[]; analysis?: string }[];
+}
+
+/**
+ * AI 审 AI：复核自动生成的题目（PRD-08）。严格 JSON 输出。
+ */
+export function buildQuizReviewMessages(p: QuizReviewParams): { system: string; user: string } {
+  const system = `${IRIS_SOUL}
+
+你是出题质检员，复核另一个 AI 生成的题目质量。检查：
+- 题干是否清晰、无歧义；答案是否正确；是否紧扣《${p.title}》主题、未超纲；解析是否合理。
+- 给出结论 verdict（pass/fail）与 confidence（0-1）。任一题有明显错误则 fail。
+- 只输出 JSON：{"verdict":"pass|fail","confidence":0.0,"issues":["..."]}`;
+  const body = p.questions
+    .map(
+      (q, i) =>
+        `【${i + 1}】[${q.type}] ${q.stem}\n答案：${(q.answer || []).join('；')}\n解析：${q.analysis || ''}`
+    )
+    .join('\n\n');
+  const user = `待复核题目：\n${body}\n\n请输出 JSON。`;
   return { system, user };
 }
 
@@ -202,7 +230,12 @@ export function buildInterviewMessages(p: InterviewParams): { system: string; us
 - ${p.mode === 'ask' ? '现在开始：直接给出第一道面试题。' : '根据下面的对话，先点评候选人最后一次回答，再给出下一道题。'}`;
 
   const convo = p.history
-    .map((h) => `${h.role === 'interviewer' ? '面试官' : '候选人'}：${h.content}`)
+    .map(
+      (h) =>
+        `${h.role === 'interviewer' ? '面试官' : '候选人'}：${
+          h.role === 'candidate' ? sanitizeForPrompt(h.content, 2000) : h.content
+        }`
+    )
     .join('\n');
   const user = convo || '（面试开始）';
   return { system, user };

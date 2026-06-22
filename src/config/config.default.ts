@@ -35,6 +35,7 @@ import {
   ContentHealthReportEntity,
   OpsAuditLogEntity,
   SamplingCheckEntity,
+  OpsReviewEntity,
 } from '../entity/ops';
 import { join } from 'path';
 import { readFileSync } from 'fs';
@@ -96,6 +97,7 @@ export default {
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
+          OpsReviewEntity,
         ],
       },
     },

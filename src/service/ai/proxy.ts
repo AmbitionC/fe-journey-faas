@@ -14,6 +14,8 @@ import {
   buildCoachTipMessages,
   buildWeeklyReportMessages,
   buildInterviewMessages,
+  buildQuizReviewMessages,
+  QuizReviewParams,
   HintParams,
   ReviewParams,
   GradeBuildParams,
@@ -233,6 +235,27 @@ export class AiProxyService {
       return (text || '').trim();
     } catch {
       return '';
+    }
+  }
+
+  /** AI 审 AI：复核自动生成的题目（PRD-08）。返回 {verdict, confidence, issues}。 */
+  async reviewQuiz(
+    p: QuizReviewParams,
+    userId: string
+  ): Promise<{ verdict: 'pass' | 'fail'; confidence: number; issues: string[] }> {
+    const fallback = { verdict: 'fail' as const, confidence: 0, issues: ['复核失败'] };
+    try {
+      const { system, user } = buildQuizReviewMessages(p);
+      const raw = await this.complete(system, user, userId, 'ops-review', 1024);
+      const parsed = this.parseJsonLoose<any>(raw);
+      if (!parsed || (parsed.verdict !== 'pass' && parsed.verdict !== 'fail')) return fallback;
+      return {
+        verdict: parsed.verdict,
+        confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
+        issues: Array.isArray(parsed.issues) ? parsed.issues.map(String) : [],
+      };
+    } catch {
+      return fallback;
     }
   }
 
