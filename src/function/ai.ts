@@ -483,8 +483,10 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiCoachWeekly(@Body(ALL) body: AICoachWeeklyDTO) {
-    const { userId } = await this.resolveUser();
-    if (!userId) return { success: true, data: { report: '' } };
+    const { userId, isMember } = await this.resolveUser();
+    // 游客不生成（无学习数据）；登录用户占用 AI 配额
+    if (!userId || userId.startsWith('guest:')) return { success: true, data: { report: '' } };
+    await this.aiProxyService.checkRateLimit(userId, isMember);
     const profile = await this.articleService.getLearnerProfile(userId, body.module);
     const summary = await this.articleService.getProfileSummary(userId, body.module);
     const report = await this.aiProxyService.weeklyReport(

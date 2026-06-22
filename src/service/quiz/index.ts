@@ -192,32 +192,41 @@ export class QuizService {
         credit: objective === true ? 1 : 0,
         correct: objective === true,
         verdict: undefined as Verdict | undefined,
+        // 是否可计分：客观题有标准答案即可；简答需 AI 判分成功后才置 true
+        scored: objective !== null,
       };
     });
 
     // 2) 简答 AI 判分 + 汇总建议（整次一调）
+    // 配额保护：仅简答 AI 判分占用配额；超限时降级为「客观题计分 + 简答不评分」，不阻断闭环
     let feedback: { diagnosis: string; suggestions?: any } = { diagnosis: '' };
-    if (qaItems.length || questions.length) {
-      const member = isEntitled('personalized_feedback', { isMember });
-      let candidates: { title: string; articleKey: string }[] = [];
-      let profileSummary = '';
-      if (member) {
-        const query =
-          qaItems.map((q) => q.stem).join(' ') || articleKey.replace(/[-_]/g, ' ');
-        const hits = await this.retrieveService.retrieve(query, { module, topK: 5 });
-        candidates = hits.map((h) => ({ title: h.title, articleKey: h.articleKey }));
-        profileSummary = await this.articleService.getProfileSummary(userId, module);
+    if (qaItems.length) {
+      let aiAllowed = true;
+      try {
+        await this.aiProxyService.checkRateLimit(userId, isMember);
+      } catch {
+        aiAllowed = false;
       }
-      const objectiveSummary = `客观题 ${
-        perQuestion.filter((p) => p.objective !== null).length
-      } 道`;
 
-      if (qaItems.length) {
+      if (aiAllowed) {
+        const member = isEntitled('personalized_feedback', { isMember });
+        let candidates: { title: string; articleKey: string }[] = [];
+        let profileSummary = '';
+        if (member) {
+          const query =
+            qaItems.map((q) => q.stem).join(' ') || articleKey.replace(/[-_]/g, ' ');
+          const hits = await this.retrieveService.retrieve(query, { module, topK: 5 });
+          candidates = hits.map((h) => ({ title: h.title, articleKey: h.articleKey }));
+          profileSummary = await this.articleService.getProfileSummary(userId, module);
+        }
+        const objectiveSummary = `客观题 ${
+          perQuestion.filter((p) => p.objective !== null).length
+        } 道`;
         const result = await this.aiProxyService.gradeSubmission(
           { items: qaItems, objectiveSummary, member, profileSummary, candidates },
           userId
         );
-        // 回填简答 verdict
+        // 回填简答 verdict（并标记为已计分）
         for (const v of result.itemVerdicts || []) {
           const qid = qaIndexToQid[v.index];
           const pq = perQuestion.find((p) => Number(p.question.id) === qid);
@@ -225,19 +234,22 @@ export class QuizService {
             pq.verdict = v.verdict;
             pq.credit = VERDICT_CREDIT[v.verdict] ?? 0;
             pq.correct = v.verdict === '对';
+            pq.scored = true;
           }
         }
         feedback = { diagnosis: result.diagnosis || '', suggestions: result.suggestions };
-      } else if (member) {
-        // 全客观题也给会员一句建议（基于检索）
-        feedback = { diagnosis: '' };
+      } else {
+        feedback = {
+          diagnosis: '今日 AI 判分次数已用完，简答题本次未评分；客观题成绩已记录。开通会员可无限使用。',
+        };
       }
     }
 
-    // 3) 计分
-    const totalCount = perQuestion.length;
-    const earned = perQuestion.reduce((s, p) => s + p.credit, 0);
-    const correctCount = perQuestion.filter((p) => p.correct).length;
+    // 3) 计分：仅统计「可判定」的题（客观题 + 已 AI 判分的简答）
+    const scoredItems = perQuestion.filter((p) => p.scored);
+    const totalCount = scoredItems.length;
+    const earned = scoredItems.reduce((s, p) => s + p.credit, 0);
+    const correctCount = scoredItems.filter((p) => p.correct).length;
     const score = totalCount ? Math.round((earned / totalCount) * 100) : 0;
 
     // 4) 掌握度回流（本人测验，可升可降）+ 间隔重复排程（PRD-01 F2-1）

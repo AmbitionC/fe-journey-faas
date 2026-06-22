@@ -178,6 +178,10 @@ export class AiProxyService {
       false
     ) as Record<string, unknown>;
     if (typeof body.max_tokens === 'number') body.max_tokens = maxTokens;
+    // DashScope 形态：max_tokens 在 parameters 下
+    if (body.parameters && typeof body.parameters === 'object') {
+      (body.parameters as Record<string, unknown>).max_tokens = maxTokens;
+    }
 
     try {
       const response = await fetch(url, {
