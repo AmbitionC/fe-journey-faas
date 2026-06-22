@@ -9,6 +9,7 @@ import {
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
+import { Config } from '@midwayjs/core';
 import { NotifyService } from '../service/notify';
 import { NoAuth } from '../decorator/noAuth';
 
@@ -29,6 +30,9 @@ export class NotifyHTTPService {
 
   @Inject()
   redisService: RedisService;
+
+  @Config('syncSecret')
+  syncSecret: string;
 
   private async resolveUserId(fallback?: string): Promise<string | undefined> {
     const header = (this.ctx.header || {}) as any;
@@ -92,6 +96,24 @@ export class NotifyHTTPService {
     const userId = await this.resolveUserId(query.userId);
     if (!userId) return { success: true, data: { subscriptions: [] } };
     const data = await this.notifyService.status(userId);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '定时投递学习简报（FC 定时触发，需 secret）',
+    functionName: 'notifyCronRun',
+    name: 'notifyCronRun',
+    path: '/notify/cron/run',
+    method: 'post',
+  })
+  @NoAuth()
+  async cronRun(@Query(ALL) query: { secret?: string }) {
+    // 仅允许带正确 secret 的调用（FC 定时触发器配置同一 secret）
+    if (!this.syncSecret || query.secret !== this.syncSecret) {
+      this.ctx.status = 403;
+      return { success: false, message: 'forbidden' };
+    }
+    const data = await this.notifyService.runDigestCron();
     return { success: true, data };
   }
 

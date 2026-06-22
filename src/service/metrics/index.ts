@@ -1,4 +1,4 @@
-import { Provide } from '@midwayjs/core';
+import { Provide, Inject } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../../entity/user';
@@ -7,6 +7,9 @@ import { QuizAttemptEntity } from '../../entity/quizAttempt';
 import { AiUsageLogEntity } from '../../entity/aiUsageLog';
 import { AiCallLogEntity } from '../../entity/aiCallLog';
 import { EventLogEntity } from '../../entity/eventLog';
+import { EvalReportEntity } from '../../entity/evalReport';
+import { AiProxyService } from '../ai/proxy';
+import { runEval } from '../../eval/runner';
 
 @Provide()
 export class MetricsService {
@@ -27,6 +30,32 @@ export class MetricsService {
 
   @InjectEntityModel(EventLogEntity)
   eventLogModel: Repository<EventLogEntity>;
+
+  @InjectEntityModel(EvalReportEntity)
+  evalReportModel: Repository<EvalReportEntity>;
+
+  @Inject()
+  aiProxyService: AiProxyService;
+
+  /** 在线跑一次评测集并存档（PRD-02 F2-3 → PRD-04）。 */
+  async runEval() {
+    const report = await runEval((system, user) =>
+      this.aiProxyService.completeRaw(system, user, 'eval-bot')
+    );
+    const saved = await this.evalReportModel.save(
+      this.evalReportModel.create({
+        metrics: report,
+        spoilerRate: report.spoiler.rate,
+        gradeAccuracy: report.gradeAccuracy.rate,
+      })
+    );
+    return saved;
+  }
+
+  async latestEval() {
+    const rows = await this.evalReportModel.find({ order: { id: 'DESC' }, take: 1 });
+    return rows[0] || null;
+  }
 
   async track(p: { userId?: string; event: string; props?: any; ua?: string; ip?: string }) {
     try {

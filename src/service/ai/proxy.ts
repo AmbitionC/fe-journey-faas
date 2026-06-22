@@ -238,6 +238,11 @@ export class AiProxyService {
     }
   }
 
+  /** 给离线评测用的原始补全（复用统一调用与计量）。 */
+  async completeRaw(system: string, user: string, userId = 'eval-bot'): Promise<string> {
+    return this.complete(system, user, userId, 'eval', 1024);
+  }
+
   /** AI 审 AI：复核自动生成的题目（PRD-08）。返回 {verdict, confidence, issues}。 */
   async reviewQuiz(
     p: QuizReviewParams,

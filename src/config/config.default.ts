@@ -27,6 +27,7 @@ import { QuizAttemptEntity } from '../entity/quizAttempt';
 import { ReviewScheduleEntity } from '../entity/reviewSchedule';
 import { EventLogEntity } from '../entity/eventLog';
 import { AiCallLogEntity } from '../entity/aiCallLog';
+import { EvalReportEntity } from '../entity/evalReport';
 import { UserGoalEntity } from '../entity/userGoal';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
@@ -97,7 +98,7 @@ export default {
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
-          OpsReviewEntity,
+          OpsReviewEntity, EvalReportEntity,
         ],
       },
     },

@@ -93,6 +93,32 @@ export class MetricsHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '在线跑评测集并存档',
+    functionName: 'metricsEvalRun',
+    name: 'metricsEvalRun',
+    path: '/metrics/eval/run',
+    method: 'post',
+  })
+  async evalRun() {
+    this.requireLogin();
+    const data = await this.metricsService.runEval();
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '最新评测报告',
+    functionName: 'metricsEvalLatest',
+    name: 'metricsEvalLatest',
+    path: '/metrics/eval/latest',
+    method: 'get',
+  })
+  async evalLatest() {
+    this.requireLogin();
+    const data = await this.metricsService.latestEval();
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: 'AI 调用查询',
     functionName: 'metricsAiCalls',
     name: 'metricsAiCalls',
