@@ -41,6 +41,12 @@ resources:
         OSS_BUCKET: font-end-journey-resources
         OSS_REGION: oss-cn-hangzhou
         SYNC_SECRET: ${env('SYNC_SECRET')}
+        # 数据库/Redis 凭证（PRD-07：移出代码，改由环境变量注入）
+        DB_HOST: ${env('DB_HOST')}
+        DB_USER: ${env('DB_USER')}
+        DB_PASS: ${env('DB_PASS')}
+        REDIS_HOST: ${env('REDIS_HOST')}
+        REDIS_PASS: ${env('REDIS_PASS')}
       triggers:
         - triggerName: httpTrigger
           triggerType: http
