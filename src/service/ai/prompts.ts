@@ -159,3 +159,52 @@ ${p.content}
 
   return { system, user };
 }
+
+export interface CoachTipParams {
+  profileSummary: string;
+  weakTags?: string[];
+  articleTitle?: string;
+}
+
+/**
+ * 主动教练——进入文章时的一句「针对你的提示」（PRD-02 F2-2）。
+ */
+export function buildCoachTipMessages(p: CoachTipParams): { system: string; user: string } {
+  const system = `${IRIS_SOUL}
+
+你在用户打开一篇文章时，给一句「针对他个人」的简短提示（最多两句话、不超过 60 字）。
+- 结合他的学情与薄弱点，提醒他读这篇时重点关注什么，或与他薄弱处的关联。
+- 口吻温暖、克制，像向导随口点一句；不要寒暄、不要列表、不要 Markdown。
+- 只输出这句提示本身。`;
+  const user = `学习者画像：${p.profileSummary || '（暂无学习记录）'}
+${p.weakTags?.length ? `薄弱点：${p.weakTags.join('、')}\n` : ''}${p.articleTitle ? `正在打开的文章：${p.articleTitle}` : ''}
+
+请给出这一句提示。`;
+  return { system, user };
+}
+
+export interface WeeklyReportParams {
+  profileSummary: string;
+  weakTags?: string[];
+  reviewDueCount?: number;
+  streak?: number;
+}
+
+/**
+ * 主动教练——学习周报文案（PRD-02 F2-2，供 PRD-06 触达）。
+ */
+export function buildWeeklyReportMessages(p: WeeklyReportParams): { system: string; user: string } {
+  const system = `${IRIS_SOUL}
+
+你为用户写一段简短的「本周学习周报」文案（120 字以内）：
+- 先肯定本周进展（连续天数/已学），再点出待复习与薄弱点，最后给一句鼓励性的下一步建议。
+- 口吻温暖、具体、不空洞；用中文，可用 1-2 个 emoji，不要 Markdown 标题。
+- 直接输出周报正文。`;
+  const user = `学习者画像：${p.profileSummary || '（暂无学习记录）'}
+连续学习：${p.streak ?? 0} 天
+待复习：${p.reviewDueCount ?? 0} 篇
+${p.weakTags?.length ? `薄弱点：${p.weakTags.join('、')}` : ''}
+
+请写这段周报。`;
+  return { system, user };
+}

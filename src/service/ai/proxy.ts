@@ -10,10 +10,14 @@ import {
   buildReviewPrompt,
   buildGradeMessages,
   buildGenerateMessages,
+  buildCoachTipMessages,
+  buildWeeklyReportMessages,
   HintParams,
   ReviewParams,
   GradeBuildParams,
   GenerateBuildParams,
+  CoachTipParams,
+  WeeklyReportParams,
 } from './prompts';
 
 export type AiTask =
@@ -153,6 +157,28 @@ export class AiProxyService {
     const usage = result?.usage as { total_tokens?: number };
     await this.logUsage(userId, module, usage?.total_tokens || 0);
     return this.extractContent(result);
+  }
+
+  /** 主动教练：进入文章时的个性化一句提示（PRD-02 F2-2）。失败返回空串。 */
+  async coachTip(p: CoachTipParams, userId: string): Promise<string> {
+    try {
+      const { system, user } = buildCoachTipMessages(p);
+      const text = await this.complete(system, user, userId, 'coach', 256);
+      return (text || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /** 主动教练：学习周报文案（PRD-02 F2-2）。失败返回空串。 */
+  async weeklyReport(p: WeeklyReportParams, userId: string): Promise<string> {
+    try {
+      const { system, user } = buildWeeklyReportMessages(p);
+      const text = await this.complete(system, user, userId, 'coach', 512);
+      return (text || '').trim();
+    } catch {
+      return '';
+    }
   }
 
   /** 算法分层提示（服务端拼装提示词，不剧透）。 */

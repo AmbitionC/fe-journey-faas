@@ -57,6 +57,16 @@ class AIQuizGradeDTO {
   articleKey?: string;
 }
 
+class AICoachTipDTO {
+  module: string;
+  articleKey?: string;
+  title?: string;
+}
+
+class AICoachWeeklyDTO {
+  module: string;
+}
+
 class AIConversationDTO {
   action: 'list' | 'messages' | 'rename' | 'delete';
   conversationId?: number;
@@ -412,5 +422,56 @@ export class AiHTTPService {
       userId
     );
     return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '主动教练：进入文章的个性化一句提示',
+    functionName: 'aiCoachTip',
+    name: 'aiCoachTip',
+    path: '/api/ai/coach/tip',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiCoachTip(@Body(ALL) body: AICoachTipDTO) {
+    const { userId } = await this.resolveUser();
+    // 游客或零学习记录不打扰
+    if (!userId || userId.startsWith('guest:')) return { success: true, data: { tip: '' } };
+    const profile = await this.articleService.getLearnerProfile(userId, body.module);
+    if (!profile || profile.coverage.done <= 0) return { success: true, data: { tip: '' } };
+    const summary = await this.articleService.getProfileSummary(userId, body.module);
+    const tip = await this.aiProxyService.coachTip(
+      {
+        profileSummary: summary,
+        weakTags: (profile.weakTags || []).map((w) => w.tag),
+        articleTitle: body.title,
+      },
+      userId
+    );
+    return { success: true, data: { tip } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '主动教练：学习周报文案',
+    functionName: 'aiCoachWeekly',
+    name: 'aiCoachWeekly',
+    path: '/api/ai/coach/weekly',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiCoachWeekly(@Body(ALL) body: AICoachWeeklyDTO) {
+    const { userId } = await this.resolveUser();
+    if (!userId) return { success: true, data: { report: '' } };
+    const profile = await this.articleService.getLearnerProfile(userId, body.module);
+    const summary = await this.articleService.getProfileSummary(userId, body.module);
+    const report = await this.aiProxyService.weeklyReport(
+      {
+        profileSummary: summary,
+        weakTags: (profile?.weakTags || []).map((w) => w.tag),
+        reviewDueCount: profile?.reviewDue?.length || 0,
+        streak: profile?.streak || 0,
+      },
+      userId
+    );
+    return { success: true, data: { report } };
   }
 }

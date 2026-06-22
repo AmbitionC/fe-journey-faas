@@ -19,7 +19,8 @@
     "ci": "npm run cov",
     "build": "mwtsc --cleanOutDir",
     "generate": "serverless-yaml-generator",
-    "deploy": "sh deploy.sh"
+    "deploy": "sh deploy.sh",
+    "eval": "ts-node src/eval/cli.ts"
   },
   "dependencies": {
     "@copilotkit/runtime": "1.60.2",
