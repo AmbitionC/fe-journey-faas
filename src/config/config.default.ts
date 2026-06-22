@@ -29,6 +29,7 @@ import { EventLogEntity } from '../entity/eventLog';
 import { AiCallLogEntity } from '../entity/aiCallLog';
 import { UserGoalEntity } from '../entity/userGoal';
 import { LearningPathEntity } from '../entity/learningPath';
+import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 
@@ -87,6 +88,7 @@ export default {
           AiConversationEntity, AiMessageEntity, ArticleReadingStateEntity,
           QuizQuestionEntity, QuizAttemptEntity, ReviewScheduleEntity,
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
+          NotifySubscriptionEntity,
         ],
       },
     },
