@@ -67,6 +67,12 @@ class AICoachWeeklyDTO {
   module: string;
 }
 
+class AIInterviewDTO {
+  topic: string;
+  history?: { role: 'interviewer' | 'candidate'; content: string }[];
+  mode?: 'ask' | 'evaluate';
+}
+
 class AIConversationDTO {
   action: 'list' | 'messages' | 'rename' | 'delete';
   conversationId?: number;
@@ -473,5 +479,31 @@ export class AiHTTPService {
       userId
     );
     return { success: true, data: { report } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'AI 模拟面试（会员）',
+    functionName: 'aiInterview',
+    name: 'aiInterview',
+    path: '/api/ai/interview',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiInterview(@Body(ALL) body: AIInterviewDTO) {
+    const { userId, isMember } = await this.resolveUser();
+    // 会员权益网关：非会员返回付费入口标记
+    if (!isEntitled('mock_interview', { isMember })) {
+      return { success: true, data: { paywall: true, message: '开通会员解锁 AI 模拟面试' } };
+    }
+    await this.aiProxyService.checkRateLimit(userId, isMember);
+    const reply = await this.aiProxyService.interview(
+      {
+        topic: body.topic || '前端综合',
+        history: body.history || [],
+        mode: body.mode || (body.history?.length ? 'evaluate' : 'ask'),
+      },
+      userId
+    );
+    return { success: true, data: { reply } };
   }
 }

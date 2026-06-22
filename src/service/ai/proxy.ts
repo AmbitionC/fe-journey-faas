@@ -13,12 +13,14 @@ import {
   buildGenerateMessages,
   buildCoachTipMessages,
   buildWeeklyReportMessages,
+  buildInterviewMessages,
   HintParams,
   ReviewParams,
   GradeBuildParams,
   GenerateBuildParams,
   CoachTipParams,
   WeeklyReportParams,
+  InterviewParams,
 } from './prompts';
 
 export type AiTask =
@@ -232,6 +234,12 @@ export class AiProxyService {
     } catch {
       return '';
     }
+  }
+
+  /** AI 模拟面试（PRD-05 P2）：返回面试官的下一句（点评+追问/出题）。 */
+  async interview(p: InterviewParams, userId: string): Promise<string> {
+    const { system, user } = buildInterviewMessages(p);
+    return this.complete(system, user, userId, 'interview', 1024);
   }
 
   /** 算法分层提示（服务端拼装提示词，不剧透）。 */

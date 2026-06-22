@@ -183,6 +183,31 @@ ${p.weakTags?.length ? `薄弱点：${p.weakTags.join('、')}\n` : ''}${p.articl
   return { system, user };
 }
 
+export interface InterviewParams {
+  topic: string; // 面试方向，如「React」「JS 基础」「浏览器原理」
+  history: { role: 'interviewer' | 'candidate'; content: string }[];
+  mode: 'ask' | 'evaluate'; // ask=出下一题；evaluate=点评并继续
+}
+
+/**
+ * AI 模拟面试（PRD-05 P2）。面试官人设：一次一题、会追问、最后点评。
+ */
+export function buildInterviewMessages(p: InterviewParams): { system: string; user: string } {
+  const system = `${IRIS_SOUL}
+
+你现在是一位资深前端面试官，正在面试候选人，方向：${p.topic}。规则：
+- 一次只问一道题；候选人回答后，先用一两句简短点评（答得如何/漏了什么），再追问或换下一题。
+- 由浅入深，循序渐进；像真实面试，不要一次抛很多问题。
+- 语言简洁、专业、对事不对人。用中文。
+- ${p.mode === 'ask' ? '现在开始：直接给出第一道面试题。' : '根据下面的对话，先点评候选人最后一次回答，再给出下一道题。'}`;
+
+  const convo = p.history
+    .map((h) => `${h.role === 'interviewer' ? '面试官' : '候选人'}：${h.content}`)
+    .join('\n');
+  const user = convo || '（面试开始）';
+  return { system, user };
+}
+
 export interface WeeklyReportParams {
   profileSummary: string;
   weakTags?: string[];
