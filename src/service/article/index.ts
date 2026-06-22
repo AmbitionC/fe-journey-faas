@@ -18,6 +18,7 @@ import { sm2, scoreToGrade, ReviewGrade, SrsState } from './sm2';
 import { deriveStreak, topTags, aggregateWeak, WeakTag } from './insights';
 import { computeReviewDue, ReviewDueItem } from './reviewSchedule';
 import { computeRadar, RadarDim, RadarInput } from './radar';
+import { LearningService } from '../learning';
 
 @Provide()
 export class ArticleService {
@@ -50,6 +51,9 @@ export class ArticleService {
 
   @Inject()
   redisService: RedisService;
+
+  @Inject()
+  learningService: LearningService;
 
   async getNavList(module: string) {
     const config = await this.navConfigModel.findOneBy({ module });
@@ -550,7 +554,8 @@ export class ArticleService {
     try {
       const p = await this.getLearnerProfile(userId, module);
       const cov = p.coverage;
-      return `已学 ${cov.done}/${cov.total} 篇(覆盖率 ${Math.round(
+      const goal = await this.learningService.goalSummary(userId).catch(() => '');
+      return `${goal ? goal + '。' : ''}已学 ${cov.done}/${cov.total} 篇(覆盖率 ${Math.round(
         cov.ratio * 100
       )}%)，最近在看 ${p.recentKeys.slice(0, 3).join('、') || '无'}，待复习 ${
         p.reviewDue.length
