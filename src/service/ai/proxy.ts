@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import fetch from 'node-fetch';
 import { R } from '../../common/base.error.utils';
 import { AiUsageLogEntity } from '../../entity/aiUsageLog';
+import { AiCallLogEntity } from '../../entity/aiCallLog';
 import {
   buildHintPrompt,
   buildReviewPrompt,
@@ -94,6 +95,35 @@ export class AiProxyService {
   @InjectEntityModel(AiUsageLogEntity)
   aiUsageLogModel: Repository<AiUsageLogEntity>;
 
+  @InjectEntityModel(AiCallLogEntity)
+  aiCallLogModel: Repository<AiCallLogEntity>;
+
+  private async logCall(p: {
+    userId: string;
+    route: string;
+    inputSummary: string;
+    latencyMs: number;
+    tokenUsed: number;
+    status: string;
+    errorMsg?: string;
+  }): Promise<void> {
+    try {
+      await this.aiCallLogModel.save(
+        this.aiCallLogModel.create({
+          userId: p.userId,
+          route: p.route,
+          inputSummary: (p.inputSummary || '').slice(0, 500),
+          latencyMs: p.latencyMs,
+          tokenUsed: p.tokenUsed,
+          status: p.status,
+          errorMsg: p.errorMsg ? String(p.errorMsg).slice(0, 500) : null,
+        })
+      );
+    } catch {
+      /* 记录失败不影响主流程 */
+    }
+  }
+
   async checkRateLimit(userId: string, isMember: boolean): Promise<void> {
     if (isMember) return; // members have no limit
     const limit = this.aiConfig.rateLimit.freeUserPerDay;
@@ -136,6 +166,7 @@ export class AiProxyService {
     maxTokens = 2048
   ): Promise<string> {
     if (!this.aiConfig.apiKey) throw R.error('AI 服务未配置，请联系管理员');
+    const started = Date.now();
     const { url, headers } = this.getRequestConfig(false);
     const body = this.buildRequestBody(
       [{ role: 'user', content: userPrompt }],
@@ -144,19 +175,41 @@ export class AiProxyService {
     ) as Record<string, unknown>;
     if (typeof body.max_tokens === 'number') body.max_tokens = maxTokens;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw R.error(`AI 服务请求失败 (${response.status})${text ? ': ' + text : ''}`);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw R.error(`AI 服务请求失败 (${response.status})${text ? ': ' + text : ''}`);
+      }
+      const result = (await response.json()) as Record<string, unknown>;
+      const usage = result?.usage as { total_tokens?: number };
+      const tokenUsed = usage?.total_tokens || 0;
+      await this.logUsage(userId, module, tokenUsed);
+      await this.logCall({
+        userId,
+        route: module,
+        inputSummary: userPrompt,
+        latencyMs: Date.now() - started,
+        tokenUsed,
+        status: 'success',
+      });
+      return this.extractContent(result);
+    } catch (err: any) {
+      await this.logCall({
+        userId,
+        route: module,
+        inputSummary: userPrompt,
+        latencyMs: Date.now() - started,
+        tokenUsed: 0,
+        status: 'error',
+        errorMsg: err?.message,
+      });
+      throw err;
     }
-    const result = (await response.json()) as Record<string, unknown>;
-    const usage = result?.usage as { total_tokens?: number };
-    await this.logUsage(userId, module, usage?.total_tokens || 0);
-    return this.extractContent(result);
   }
 
   /** 主动教练：进入文章时的个性化一句提示（PRD-02 F2-2）。失败返回空串。 */
