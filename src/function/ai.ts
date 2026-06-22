@@ -442,6 +442,18 @@ export class AiHTTPService {
     const { userId } = await this.resolveUser();
     // 游客或零学习记录不打扰
     if (!userId || userId.startsWith('guest:')) return { success: true, data: { tip: '' } };
+
+    // 缓存：同一用户同一文章每天最多生成一次，避免每次打开都调用 LLM
+    const cacheKey = `coachtip:${userId}:${body.module}:${body.articleKey || ''}`;
+    try {
+      const cached = await this.redisService.get(cacheKey);
+      if (cached !== null && cached !== undefined) {
+        return { success: true, data: { tip: cached } };
+      }
+    } catch {
+      /* 缓存读失败则照常生成 */
+    }
+
     const profile = await this.articleService.getLearnerProfile(userId, body.module);
     if (!profile || profile.coverage.done <= 0) return { success: true, data: { tip: '' } };
     const summary = await this.articleService.getProfileSummary(userId, body.module);
@@ -453,6 +465,12 @@ export class AiHTTPService {
       },
       userId
     );
+    try {
+      // 即使为空串也缓存，避免反复空跑（TTL 1 天）
+      await this.redisService.set(cacheKey, tip || '', 'EX', 86400);
+    } catch {
+      /* ignore */
+    }
     return { success: true, data: { tip } };
   }
 
