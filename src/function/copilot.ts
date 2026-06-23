@@ -139,11 +139,10 @@ export class CopilotHTTPService {
         body: JSON.stringify(parsedBody),
       });
       const response: any = await (handler as any)(request);
-      const buf = Buffer.from(await response.arrayBuffer());
+      const text = await response.text();
       this.ctx.status = response.status || 200;
-      const ct = response.headers.get('content-type');
-      if (ct) this.ctx.set('Content-Type', ct);
-      this.ctx.body = buf;
+      this.ctx.type = response.headers.get('content-type') || 'application/json';
+      this.ctx.body = text;
     } catch (err: any) {
       handlerPromise = null; // 失败不缓存，下次重试
       this.ctx.status = 500;
