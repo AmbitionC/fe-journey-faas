@@ -11,19 +11,19 @@ import { NoAuth } from '../decorator/noAuth';
 
 /**
  * CopilotKit v2 runtime 端点。前端 <CopilotKit runtimeUrl=".../copilotkit"> 接入此处。
- *
  * 单路由协议：POST JSON 信封 { method, params, body }；响应为 SSE 事件流。
  *
- * ⚠️ 全部 copilotkit / ai-sdk 依赖仅在首次请求时**动态加载**，且不拆出独立模块——
- * 因为 Midway 启动会 require dist 下所有文件，任何顶层 `import '@copilotkit/*'`
- * 都会在 bootstrap 期触发 ERR_REQUIRE_ESM（node-fetch-handler 内部 require ESM-only
- * 包，Node<22.12 不支持），从而拖垮整个应用。内联+动态加载把风险隔离在本端点内。
- * 运行时需 Node ≥ 22.12（见 deploy.yml）。
+ * 踩坑记录（FC3 web 函数 + Midway FaaS）：
+ *  1. copilotkit 内部 require() ESM-only 包，需 Node ≥ 22.12（见 deploy.yml）；且
+ *     不能顶层 import（Midway 启动 require 全部文件会在 bootstrap 期触发 ERR_REQUIRE_ESM
+ *     拖垮全站），故仅首次请求时动态 import。
+ *  2. 在 Midway FaaS 里设 ctx.status/ctx.type/ctx.body 会让响应适配器崩溃（Process exited）。
+ *     唯一可用的自定义/流式响应方式是 respond=false + 裸 ctx.res（与 aiChatStream 同款）。
+ *  3. 必须 @Body(ALL) 消费请求体，否则未读的 POST 流也会让 FC 杀实例。
  */
 const ENDPOINT = '/copilotkit';
 
-let handlerPromise: Promise<(req: any, res: any, next?: any) => Promise<void>> | null =
-  null;
+let handlerPromise: Promise<(reqOrRequest: any, res?: any) => any> | null = null;
 
 function getHandler() {
   if (!handlerPromise) {
@@ -34,7 +34,7 @@ function getHandler() {
       const { BuiltInAgent } = await import('@copilotkit/runtime/v2');
       const { createOpenAI } = await import('@ai-sdk/openai');
 
-      // DeepSeek（OpenAI 兼容 Chat Completions）。必须用 .chat() 强制 Chat Completions——
+      // DeepSeek（OpenAI 兼容）。必须用 .chat() 强制 Chat Completions——
       // 默认 provider(model) 走 Responses API，DeepSeek 无该端点 → 404。
       const deepseek = createOpenAI({
         apiKey: process.env.LLM_API_KEY,
@@ -44,10 +44,7 @@ function getHandler() {
         model: deepseek.chat(process.env.LLM_MODEL || 'deepseek-chat'),
       });
       const runtime = new CopilotRuntime({ agents: { default: agent } } as any);
-      return copilotRuntimeNodeHttpEndpoint({
-        endpoint: ENDPOINT,
-        runtime,
-      }) as any;
+      return copilotRuntimeNodeHttpEndpoint({ endpoint: ENDPOINT, runtime }) as any;
     })();
   }
   return handlerPromise;
@@ -59,74 +56,6 @@ export class CopilotHTTPService {
   ctx: Context;
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: 'copilot ping (隔离探针：纯 vanilla)',
-    functionName: 'copilotping',
-    name: 'copilotping',
-    path: '/copilotping',
-    method: 'post',
-  })
-  @NoAuth()
-  async copilotPing(@Body(ALL) body: any) {
-    return { pong: 1, got: body?.x ?? null };
-  }
-
-  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: 'copilot load (隔离探针：仅动态 import copilotkit)',
-    functionName: 'copilotload',
-    name: 'copilotload',
-    path: '/copilotload',
-    method: 'post',
-  })
-  @NoAuth()
-  async copilotLoad(@Body(ALL) body: any) {
-    const step = Number(body?.step ?? 1);
-    try {
-      const cp: any = await import('@copilotkit/runtime');
-      const v2: any = await import('@copilotkit/runtime/v2');
-      const ai: any = await import('@ai-sdk/openai');
-      if (step <= 1) return { step: 1, ok: true };
-
-      const deepseek = ai.createOpenAI({
-        apiKey: process.env.LLM_API_KEY,
-        baseURL: 'https://api.deepseek.com',
-      });
-      const agent = new v2.BuiltInAgent({
-        model: deepseek.chat(process.env.LLM_MODEL || 'deepseek-chat'),
-      });
-      if (step === 2) return { step: 2, ok: true };
-
-      const runtime = new cp.CopilotRuntime({ agents: { default: agent } });
-      if (step === 3) return { step: 3, ok: true };
-
-      const handler = cp.copilotRuntimeNodeHttpEndpoint({ endpoint: ENDPOINT, runtime });
-      if (step === 4) return { step: 4, ok: true, typ: typeof handler };
-
-      const request = new Request('http://fc.local/copilotkit', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ method: 'info', params: {}, body: {} }),
-      });
-      const response = await handler(request);
-      const text = await response.text();
-      if (step === 6) {
-        // 反证：用 ctx.body 而非 return，看是否因此崩溃
-        this.ctx.status = 200;
-        this.ctx.type = 'application/json';
-        this.ctx.body = text;
-        return;
-      }
-      return { step: 5, ok: true, status: response.status, body: text.slice(0, 300) };
-    } catch (e: any) {
-      return {
-        step,
-        ok: false,
-        error: String(e?.message || e),
-        stack: String(e?.stack || '').split('\n').slice(0, 8).join(' | '),
-      };
-    }
-  }
-
-  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: 'CopilotKit runtime',
     functionName: 'copilotkit',
     name: 'copilotkit',
@@ -135,30 +64,45 @@ export class CopilotHTTPService {
   })
   @NoAuth()
   async copilot(@Body(ALL) body: any) {
-    // 经 Midway 正常响应通道（ctx.body）返回，不劫持 ctx.res、不 respond=false。
-    // copilotkit 响应整体缓冲后返回（首版不做真流式；前端 SSE 解析可一次性吃完整 body）。
     const parsedBody = body ?? {};
+    // 设头 + respond=false，自己把响应流写入裸 ctx.res（同 aiChatStream，唯一可用方式）
+    this.ctx.set('Cache-Control', 'no-cache');
+    this.ctx.set('X-Accel-Buffering', 'no');
+    (this.ctx as any).respond = false;
+    const res: any = this.ctx.res;
     try {
       const handler = await getHandler();
-      const request = new Request('http://fc.local/copilotkit', {
+      // 只传 web Request、不传 res 时，handler 返回 honoApp.fetch(request) 的 web Response。
+      const request = new Request(`http://fc.local${ENDPOINT}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(parsedBody),
       });
-      const response: any = await (handler as any)(request);
-      const text = await response.text();
-      // Midway FaaS 用方法返回值作响应体：必须 return，不能设 ctx.body。
-      this.ctx.status = response.status || 200;
-      this.ctx.type = response.headers.get('content-type') || 'application/json';
-      return text;
+      const response: any = await handler(request);
+
+      this.ctx.set('Content-Type', response.headers.get('content-type') || 'application/json');
+      const reader = response.body?.getReader?.();
+      if (reader) {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) res.write(Buffer.from(value));
+        }
+      } else {
+        res.write(Buffer.from(await response.text()));
+      }
+      res.end();
     } catch (err: any) {
       handlerPromise = null; // 失败不缓存，下次重试
-      this.ctx.status = 500;
-      this.ctx.type = 'application/json';
-      return JSON.stringify({
-        error: 'copilot_error',
-        message: String(err?.message || err),
-      });
+      try {
+        if (!res.headersSent) this.ctx.set('Content-Type', 'application/json');
+        res.write(
+          JSON.stringify({ error: 'copilot_error', message: String(err?.message || err) }),
+        );
+        res.end();
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
