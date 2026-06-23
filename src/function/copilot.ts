@@ -70,6 +70,52 @@ export class CopilotHTTPService {
     const res: any = this.ctx.res;
     const reqUrl: string = this.ctx.req?.url || '/copilotkit';
     const parsedBody = (this.ctx.request as any)?.body ?? {};
+
+    // 临时分阶段诊断：body.method==='_diag' & stage A..E，定位崩溃发生在哪一步
+    if (parsedBody && parsedBody.method === '_diag') {
+      const stage = String(parsedBody.stage || 'A');
+      const done = (o: any) => {
+        try {
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(o));
+        } catch {
+          /* ignore */
+        }
+      };
+      try {
+        if (stage === 'A') return done({ ok: 'A' });
+        const cp: any = await import('@copilotkit/runtime');
+        if (stage === 'B') return done({ ok: 'B', keys: Object.keys(cp).slice(0, 6) });
+        const v2: any = await import('@copilotkit/runtime/v2');
+        const ai: any = await import('@ai-sdk/openai');
+        if (stage === 'C')
+          return done({ ok: 'C', hasBuiltIn: !!v2.BuiltInAgent, hasCreate: !!ai.createOpenAI });
+        const deepseek = ai.createOpenAI({
+          apiKey: process.env.LLM_API_KEY,
+          baseURL: 'https://api.deepseek.com',
+        });
+        const agent = new v2.BuiltInAgent({
+          model: deepseek.chat(process.env.LLM_MODEL || 'deepseek-chat'),
+        });
+        const runtime = new cp.CopilotRuntime({ agents: { default: agent } });
+        if (stage === 'D') return done({ ok: 'D' });
+        const handler = cp.copilotRuntimeNodeHttpEndpoint({ endpoint: ENDPOINT, runtime });
+        const request = new Request('http://fc.local/copilotkit', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ method: 'info', params: {}, body: {} }),
+        });
+        const response = await handler(request);
+        const text = await response.text();
+        return done({ ok: 'E', status: response.status, body: text.slice(0, 300) });
+      } catch (e: any) {
+        return done({
+          diagError: String(e?.message || e),
+          stack: String(e?.stack || '').split('\n').slice(0, 8).join(' | '),
+        });
+      }
+    }
     try {
       // handler 只传 web Request、不传 res 时，返回 honoApp.fetch(request) 的 web Response。
       // 不走 copilotkit 自带的 res.pipe（其 handler 提前 resolve 且在 FC 上会让进程异常退出），
