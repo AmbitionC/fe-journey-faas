@@ -64,20 +64,10 @@ export class CopilotHTTPService {
   })
   @NoAuth()
   async copilot(@Body(ALL) body: any) {
+    // 在 Midway FaaS 里，唯一不让响应适配器崩溃的方式是「纯 return 值」——
+    // 任何 ctx.status/type/body 或 respond=false+裸res 都会 Process exited。
+    // 故整体缓冲 copilotkit 响应后直接 return 文本（首版不做真流式）。
     const parsedBody = body ?? {};
-    // 关键：所有响应头必须在第一次 await / res.write 之前设好（与 aiChatStream 同款时序）。
-    const isStream =
-      parsedBody.method === 'agent/run' || parsedBody.method === 'agent/connect';
-    this.ctx.set(
-      'Content-Type',
-      isStream ? 'text/event-stream; charset=utf-8' : 'application/json',
-    );
-    this.ctx.set('Cache-Control', 'no-cache');
-    this.ctx.set('Connection', 'keep-alive');
-    this.ctx.set('X-Accel-Buffering', 'no');
-    (this.ctx as any).respond = false;
-    const res: any = this.ctx.res;
-    const decoder = new TextDecoder();
     try {
       const handler = await getHandler();
       const request = new Request(`http://fc.local${ENDPOINT}`, {
@@ -86,27 +76,10 @@ export class CopilotHTTPService {
         body: JSON.stringify(parsedBody),
       });
       const response: any = await handler(request);
-      const reader = response.body?.getReader?.();
-      if (reader) {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) res.write(decoder.decode(value, { stream: true }));
-        }
-      } else {
-        res.write(await response.text());
-      }
-      res.end();
+      return await response.text();
     } catch (err: any) {
       handlerPromise = null; // 失败不缓存，下次重试
-      try {
-        res.write(
-          JSON.stringify({ error: 'copilot_error', message: String(err?.message || err) }),
-        );
-        res.end();
-      } catch {
-        /* ignore */
-      }
+      return JSON.stringify({ error: 'copilot_error', message: String(err?.message || err) });
     }
   }
 }
