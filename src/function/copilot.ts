@@ -65,7 +65,21 @@ export class CopilotHTTPService {
         body: JSON.stringify(parsedBody),
       });
       const response: any = await handler(request);
-      return await response.text();
+
+      // 手动累积响应流：SSE 流的 chunk 可能是 string 也可能是 Uint8Array，
+      // response.text() 对 string chunk 会抛 "Received non-Uint8Array chunk"。
+      const reader = response.body?.getReader?.();
+      if (!reader) return await response.text();
+      const decoder = new TextDecoder();
+      let out = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (typeof value === 'string') out += value;
+        else if (value) out += decoder.decode(value, { stream: true });
+      }
+      out += decoder.decode();
+      return out;
     } catch (err: any) {
       return JSON.stringify({ error: 'copilot_error', message: String(err?.message || err) });
     }
