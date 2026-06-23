@@ -78,19 +78,44 @@ export class CopilotHTTPService {
     method: 'post',
   })
   @NoAuth()
-  async copilotLoad() {
+  async copilotLoad(@Body(ALL) body: any) {
+    const step = Number(body?.step ?? 1);
     try {
       const cp: any = await import('@copilotkit/runtime');
       const v2: any = await import('@copilotkit/runtime/v2');
       const ai: any = await import('@ai-sdk/openai');
-      return {
-        loaded: true,
-        hasRuntime: !!cp.CopilotRuntime,
-        hasBuiltIn: !!v2.BuiltInAgent,
-        hasCreate: !!ai.createOpenAI,
-      };
+      if (step <= 1) return { step: 1, ok: true };
+
+      const deepseek = ai.createOpenAI({
+        apiKey: process.env.LLM_API_KEY,
+        baseURL: 'https://api.deepseek.com',
+      });
+      const agent = new v2.BuiltInAgent({
+        model: deepseek.chat(process.env.LLM_MODEL || 'deepseek-chat'),
+      });
+      if (step === 2) return { step: 2, ok: true };
+
+      const runtime = new cp.CopilotRuntime({ agents: { default: agent } });
+      if (step === 3) return { step: 3, ok: true };
+
+      const handler = cp.copilotRuntimeNodeHttpEndpoint({ endpoint: ENDPOINT, runtime });
+      if (step === 4) return { step: 4, ok: true, typ: typeof handler };
+
+      const request = new Request('http://fc.local/copilotkit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ method: 'info', params: {}, body: {} }),
+      });
+      const response = await handler(request);
+      const text = await response.text();
+      return { step: 5, ok: true, status: response.status, body: text.slice(0, 300) };
     } catch (e: any) {
-      return { loaded: false, error: String(e?.message || e) };
+      return {
+        step,
+        ok: false,
+        error: String(e?.message || e),
+        stack: String(e?.stack || '').split('\n').slice(0, 8).join(' | '),
+      };
     }
   }
 
