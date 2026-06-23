@@ -65,41 +65,47 @@ export class CopilotHTTPService {
   })
   @NoAuth()
   async copilot() {
-    // 绕过 Midway/Koa 的响应序列化，把响应控制权交给 CopilotKit 的 handler
+    // 绕过 Midway/Koa 的响应序列化，自己把 web Response 泵到 ctx.res
     (this.ctx as any).respond = false;
-    const req: any = this.ctx.req;
     const res: any = this.ctx.res;
-    // Midway 会先把 POST body 解析到 ctx.request.body 并消费掉 req 流。
-    // CopilotKit node-http 集成在检测到流已被消费时，会改用 req.body 重建请求。
-    if (req.body === undefined) {
-      req.body = (this.ctx.request as any)?.body;
-    }
-    // 捕获 copilotkit 内部分离 promise 的 async 错误（否则 unhandledRejection 杀进程）
-    let asyncErr: any = null;
-    const onAsyncErr = (e: any) => {
-      asyncErr = e;
-    };
-    process.on('unhandledRejection', onAsyncErr);
-    process.on('uncaughtException', onAsyncErr);
+    const reqUrl: string = this.ctx.req?.url || '/copilotkit';
+    const parsedBody = (this.ctx.request as any)?.body ?? {};
     try {
+      // handler 只传 web Request、不传 res 时，返回 honoApp.fetch(request) 的 web Response。
+      // 不走 copilotkit 自带的 res.pipe（其 handler 提前 resolve 且在 FC 上会让进程异常退出），
+      // 改为手动读取 Response 流并写入 ctx.res——与已验证可用的 aiChatStream 同款写法。
       const handler = await getHandler();
-      await handler(req, res);
-      // CopilotKit 的 node-http handler 在 `pipe(res)` 后即 resolve，并不等待响应流写完。
-      if (!res.writableEnded) {
-        await new Promise<void>((resolve) => {
-          res.on('finish', () => resolve());
-          res.on('close', () => resolve());
-          res.on('error', () => resolve());
-        });
+      const request = new Request(`http://fc.local${reqUrl}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(parsedBody),
+      });
+      const response: any = await (handler as any)(request);
+
+      res.statusCode = response.status || 200;
+      response.headers.forEach((v: string, k: string) => {
+        try {
+          res.setHeader(k, v);
+        } catch {
+          /* 个别 hop-by-hop 头不可设，忽略 */
+        }
+      });
+      res.setHeader('X-Accel-Buffering', 'no');
+
+      const body = response.body;
+      if (body && typeof body.getReader === 'function') {
+        const reader = body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) res.write(Buffer.from(value));
+        }
+      } else if (body) {
+        res.write(Buffer.from(await response.text()));
       }
+      res.end();
     } catch (err: any) {
-      handlerPromise = null;
-      asyncErr = asyncErr || err;
-    } finally {
-      process.off('unhandledRejection', onAsyncErr);
-      process.off('uncaughtException', onAsyncErr);
-    }
-    if (asyncErr && !res.writableEnded) {
+      handlerPromise = null; // 失败不缓存，下次重试
       try {
         if (!res.headersSent) {
           res.statusCode = 500;
@@ -108,8 +114,8 @@ export class CopilotHTTPService {
         res.end(
           JSON.stringify({
             error: 'copilot_error',
-            message: String(asyncErr?.message || asyncErr),
-            stack: String(asyncErr?.stack || '').split('\n').slice(0, 6).join(' | '),
+            message: String(err?.message || err),
+            stack: String(err?.stack || '').split('\n').slice(0, 8).join(' | '),
           }),
         );
       } catch {
