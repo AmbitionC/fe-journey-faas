@@ -67,109 +67,30 @@ export class CopilotHTTPService {
   })
   @NoAuth()
   async copilot(@Body(ALL) body: any) {
-    // 绕过 Midway/Koa 的响应序列化，自己把 web Response 泵到 ctx.res。
-    // @Body(ALL) 必需：触发 Midway 消费请求体——否则未读的 POST 流会让 FC 杀实例。
-    (this.ctx as any).respond = false;
-    const res: any = this.ctx.res;
-    const reqUrl: string = this.ctx.req?.url || '/copilotkit';
+    // 经 Midway 正常响应通道（ctx.body）返回，不劫持 ctx.res、不 respond=false。
+    // copilotkit 响应整体缓冲后返回（首版不做真流式；前端 SSE 解析可一次性吃完整 body）。
     const parsedBody = body ?? {};
-
-    // 临时分阶段诊断：body.method==='_diag' & stage A..E，定位崩溃发生在哪一步
-    if (parsedBody && parsedBody.method === '_diag') {
-      const stage = String(parsedBody.stage || 'A');
-      const done = (o: any) => {
-        try {
-          // 用 ctx.set（Koa）设头，与可用的 aiChatStream 同款，避免裸 res.setHeader
-          this.ctx.set('Content-Type', 'application/json');
-          res.end(JSON.stringify(o));
-        } catch {
-          /* ignore */
-        }
-      };
-      try {
-        if (stage === 'A') return done({ ok: 'A' });
-        const cp: any = await import('@copilotkit/runtime');
-        if (stage === 'B') return done({ ok: 'B', keys: Object.keys(cp).slice(0, 6) });
-        const v2: any = await import('@copilotkit/runtime/v2');
-        const ai: any = await import('@ai-sdk/openai');
-        if (stage === 'C')
-          return done({ ok: 'C', hasBuiltIn: !!v2.BuiltInAgent, hasCreate: !!ai.createOpenAI });
-        const deepseek = ai.createOpenAI({
-          apiKey: process.env.LLM_API_KEY,
-          baseURL: 'https://api.deepseek.com',
-        });
-        const agent = new v2.BuiltInAgent({
-          model: deepseek.chat(process.env.LLM_MODEL || 'deepseek-chat'),
-        });
-        const runtime = new cp.CopilotRuntime({ agents: { default: agent } });
-        if (stage === 'D') return done({ ok: 'D' });
-        const handler = cp.copilotRuntimeNodeHttpEndpoint({ endpoint: ENDPOINT, runtime });
-        const request = new Request('http://fc.local/copilotkit', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ method: 'info', params: {}, body: {} }),
-        });
-        const response = await handler(request);
-        const text = await response.text();
-        return done({ ok: 'E', status: response.status, body: text.slice(0, 300) });
-      } catch (e: any) {
-        return done({
-          diagError: String(e?.message || e),
-          stack: String(e?.stack || '').split('\n').slice(0, 8).join(' | '),
-        });
-      }
-    }
     try {
-      // handler 只传 web Request、不传 res 时，返回 honoApp.fetch(request) 的 web Response。
-      // 不走 copilotkit 自带的 res.pipe（其 handler 提前 resolve 且在 FC 上会让进程异常退出），
-      // 改为手动读取 Response 流并写入 ctx.res——与已验证可用的 aiChatStream 同款写法。
       const handler = await getHandler();
-      const request = new Request(`http://fc.local${reqUrl}`, {
+      const request = new Request('http://fc.local/copilotkit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(parsedBody),
       });
       const response: any = await (handler as any)(request);
-
+      const buf = Buffer.from(await response.arrayBuffer());
       this.ctx.status = response.status || 200;
-      response.headers.forEach((v: string, k: string) => {
-        try {
-          this.ctx.set(k, v);
-        } catch {
-          /* 个别 hop-by-hop 头不可设，忽略 */
-        }
-      });
-      this.ctx.set('X-Accel-Buffering', 'no');
-
-      const body = response.body;
-      if (body && typeof body.getReader === 'function') {
-        const reader = body.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) res.write(Buffer.from(value));
-        }
-      } else if (body) {
-        res.write(Buffer.from(await response.text()));
-      }
-      res.end();
+      const ct = response.headers.get('content-type');
+      if (ct) this.ctx.set('Content-Type', ct);
+      this.ctx.body = buf;
     } catch (err: any) {
       handlerPromise = null; // 失败不缓存，下次重试
-      try {
-        if (!res.headersSent) {
-          this.ctx.status = 500;
-          this.ctx.set('Content-Type', 'application/json');
-        }
-        res.end(
-          JSON.stringify({
-            error: 'copilot_error',
-            message: String(err?.message || err),
-            stack: String(err?.stack || '').split('\n').slice(0, 8).join(' | '),
-          }),
-        );
-      } catch {
-        /* ignore */
-      }
+      this.ctx.status = 500;
+      this.ctx.body = {
+        error: 'copilot_error',
+        message: String(err?.message || err),
+        stack: String(err?.stack || '').split('\n').slice(0, 8).join(' | '),
+      };
     }
   }
 }
