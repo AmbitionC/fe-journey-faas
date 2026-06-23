@@ -10,7 +10,7 @@ import { Context } from '@midwayjs/faas';
 import { NoAuth } from '../decorator/noAuth';
 
 /**
- * CopilotKit v2 runtime 端点。前端 <CopilotKit runtimeUrl=".../copilotkit"> 接入此处。
+ * CopilotKit v2 runtime 端点。前端 <CopilotKit runtimeUrl=".../iris-runtime"> 接入此处。
  * 单路由协议：POST JSON 信封 { method, params, body }。
  *
  * 踩坑记录（FC3 web 函数 + Midway FaaS，逐条都验证过）：
@@ -19,21 +19,35 @@ import { NoAuth } from '../decorator/noAuth';
  *     故所有依赖仅在请求内动态 import。
  *  2. 必须 @Body(ALL) 消费请求体，否则未读的 POST 流会让 FC 杀实例。
  *  3. 响应只能用「纯 return 值」交给 FaaS——ctx.status/type/body 或 respond=false+裸res
- *     都会让响应适配器 Process exited。故整体缓冲后 return 文本（首版不做真流式）。
- *  4. runtime/handler 不能跨请求缓存复用（模块级缓存会崩），每次请求内联新建。
+ *     都会 Process exited。故整体缓冲后 return 文本（首版不做真流式）。
+ *  4. runtime/handler 每次请求内联新建，不可跨请求模块级缓存。
+ *  5. 路径用 /iris-runtime：旧的 /copilotkit 路径被首次崩溃部署污染，FC 上残留坏资源，
+ *     换全新路径规避。
  */
-const ENDPOINT = '/copilotkit';
+const ENDPOINT = '/iris-runtime';
 
 @Provide()
 export class CopilotHTTPService {
   @Inject()
   ctx: Context;
 
-  private async run(parsedBody: any): Promise<string> {
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'CopilotKit runtime (Iris)',
+    functionName: 'irisruntime',
+    name: 'irisruntime',
+    path: '/iris-runtime',
+    method: 'post',
+  })
+  @NoAuth()
+  async irisRuntime(@Body(ALL) body: any) {
+    const parsedBody = body ?? {};
     try {
       const cp: any = await import('@copilotkit/runtime');
       const v2: any = await import('@copilotkit/runtime/v2');
       const ai: any = await import('@ai-sdk/openai');
+
+      // DeepSeek（OpenAI 兼容）。必须 .chat() 强制 Chat Completions——
+      // 默认 provider(model) 走 Responses API，DeepSeek 无该端点 → 404。
       const deepseek = ai.createOpenAI({
         apiKey: process.env.LLM_API_KEY,
         baseURL: 'https://api.deepseek.com',
@@ -43,51 +57,17 @@ export class CopilotHTTPService {
       });
       const runtime = new cp.CopilotRuntime({ agents: { default: agent } });
       const handler = cp.copilotRuntimeNodeHttpEndpoint({ endpoint: ENDPOINT, runtime });
+
+      // 只传 web Request、不传 res 时，handler 返回 honoApp.fetch(request) 的 web Response。
       const request = new Request(`http://fc.local${ENDPOINT}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(parsedBody ?? {}),
+        body: JSON.stringify(parsedBody),
       });
       const response: any = await handler(request);
       return await response.text();
     } catch (err: any) {
       return JSON.stringify({ error: 'copilot_error', message: String(err?.message || err) });
     }
-  }
-
-  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: 'CopilotKit runtime',
-    functionName: 'copilotkit',
-    name: 'copilotkit',
-    path: '/copilotkit',
-    method: 'post',
-  })
-  @NoAuth()
-  async copilot(@Body(ALL) body: any) {
-    return this.run(body);
-  }
-
-  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: 'CopilotKit runtime (fresh path A)',
-    functionName: 'irisruntime',
-    name: 'irisruntime',
-    path: '/iris-runtime',
-    method: 'post',
-  })
-  @NoAuth()
-  async irisRuntime(@Body(ALL) body: any) {
-    return this.run(body);
-  }
-
-  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: 'copilot probe (identical code)',
-    functionName: 'copilotprobe',
-    name: 'copilotprobe',
-    path: '/copilotprobe',
-    method: 'post',
-  })
-  @NoAuth()
-  async copilotProbe(@Body(ALL) body: any) {
-    return this.run(body);
   }
 }
