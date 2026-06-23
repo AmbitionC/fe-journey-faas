@@ -74,12 +74,17 @@ export class CopilotHTTPService {
     if (req.body === undefined) {
       req.body = (this.ctx.request as any)?.body;
     }
+    // 捕获 copilotkit 内部分离 promise 的 async 错误（否则 unhandledRejection 杀进程）
+    let asyncErr: any = null;
+    const onAsyncErr = (e: any) => {
+      asyncErr = e;
+    };
+    process.on('unhandledRejection', onAsyncErr);
+    process.on('uncaughtException', onAsyncErr);
     try {
       const handler = await getHandler();
       await handler(req, res);
       // CopilotKit 的 node-http handler 在 `pipe(res)` 后即 resolve，并不等待响应流写完。
-      // 若此时函数返回，FC 会提前终结请求 → "Process exited unexpectedly"。
-      // 故显式等待响应真正结束。
       if (!res.writableEnded) {
         await new Promise<void>((resolve) => {
           res.on('finish', () => resolve());
@@ -88,14 +93,28 @@ export class CopilotHTTPService {
         });
       }
     } catch (err: any) {
-      handlerPromise = null; // 加载失败不缓存，下次重试
-      if (!res.headersSent) {
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'application/json');
+      handlerPromise = null;
+      asyncErr = asyncErr || err;
+    } finally {
+      process.off('unhandledRejection', onAsyncErr);
+      process.off('uncaughtException', onAsyncErr);
+    }
+    if (asyncErr && !res.writableEnded) {
+      try {
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+        }
+        res.end(
+          JSON.stringify({
+            error: 'copilot_error',
+            message: String(asyncErr?.message || asyncErr),
+            stack: String(asyncErr?.stack || '').split('\n').slice(0, 6).join(' | '),
+          }),
+        );
+      } catch {
+        /* ignore */
       }
-      res.end(
-        JSON.stringify({ error: 'copilot_unavailable', message: err?.message || 'error' }),
-      );
     }
   }
 }
