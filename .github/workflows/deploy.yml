@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -27,10 +27,11 @@ jobs:
         run: npm run build
 
       # custom.debian10 自定义运行时不带 node，把 node 二进制打进代码包（noderuntime/）
-      # 版本与 npm ci 的 Node 大版本一致（20.x），保证原生模块 ABI 兼容
+      # 版本与 npm ci 的 Node 大版本一致（22.x），保证原生模块 ABI 兼容。
+      # 需 ≥ 22.12：CopilotKit runtime 内部 require() ESM-only 包，22.12 起 require(esm) 默认开启。
       - name: Bundle Node.js runtime
         run: |
-          curl -fsSL https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.xz -o /tmp/node.tar.xz
+          curl -fsSL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz -o /tmp/node.tar.xz
           mkdir -p noderuntime
           tar -xJf /tmp/node.tar.xz -C noderuntime --strip-components=1
           ./noderuntime/bin/node -v
