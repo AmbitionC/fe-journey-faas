@@ -65,37 +65,41 @@ export class CopilotHTTPService {
   @NoAuth()
   async copilot(@Body(ALL) body: any) {
     const parsedBody = body ?? {};
-    // 设头 + respond=false，自己把响应流写入裸 ctx.res（同 aiChatStream，唯一可用方式）
+    // 关键：所有响应头必须在第一次 await / res.write 之前设好（与 aiChatStream 同款时序）。
+    const isStream =
+      parsedBody.method === 'agent/run' || parsedBody.method === 'agent/connect';
+    this.ctx.set(
+      'Content-Type',
+      isStream ? 'text/event-stream; charset=utf-8' : 'application/json',
+    );
     this.ctx.set('Cache-Control', 'no-cache');
+    this.ctx.set('Connection', 'keep-alive');
     this.ctx.set('X-Accel-Buffering', 'no');
     (this.ctx as any).respond = false;
     const res: any = this.ctx.res;
+    const decoder = new TextDecoder();
     try {
       const handler = await getHandler();
-      // 只传 web Request、不传 res 时，handler 返回 honoApp.fetch(request) 的 web Response。
       const request = new Request(`http://fc.local${ENDPOINT}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(parsedBody),
       });
       const response: any = await handler(request);
-
-      this.ctx.set('Content-Type', response.headers.get('content-type') || 'application/json');
       const reader = response.body?.getReader?.();
       if (reader) {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (value) res.write(Buffer.from(value));
+          if (value) res.write(decoder.decode(value, { stream: true }));
         }
       } else {
-        res.write(Buffer.from(await response.text()));
+        res.write(await response.text());
       }
       res.end();
     } catch (err: any) {
       handlerPromise = null; // 失败不缓存，下次重试
       try {
-        if (!res.headersSent) this.ctx.set('Content-Type', 'application/json');
         res.write(
           JSON.stringify({ error: 'copilot_error', message: String(err?.message || err) }),
         );
