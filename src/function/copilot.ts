@@ -76,8 +76,8 @@ export class CopilotHTTPService {
       const stage = String(parsedBody.stage || 'A');
       const done = (o: any) => {
         try {
-          res.statusCode = 200;
-          res.setHeader('Content-Type', 'application/json');
+          // 用 ctx.set（Koa）设头，与可用的 aiChatStream 同款，避免裸 res.setHeader
+          this.ctx.set('Content-Type', 'application/json');
           res.end(JSON.stringify(o));
         } catch {
           /* ignore */
@@ -128,15 +128,15 @@ export class CopilotHTTPService {
       });
       const response: any = await (handler as any)(request);
 
-      res.statusCode = response.status || 200;
+      this.ctx.status = response.status || 200;
       response.headers.forEach((v: string, k: string) => {
         try {
-          res.setHeader(k, v);
+          this.ctx.set(k, v);
         } catch {
           /* 个别 hop-by-hop 头不可设，忽略 */
         }
       });
-      res.setHeader('X-Accel-Buffering', 'no');
+      this.ctx.set('X-Accel-Buffering', 'no');
 
       const body = response.body;
       if (body && typeof body.getReader === 'function') {
@@ -154,8 +154,8 @@ export class CopilotHTTPService {
       handlerPromise = null; // 失败不缓存，下次重试
       try {
         if (!res.headersSent) {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
+          this.ctx.status = 500;
+          this.ctx.set('Content-Type', 'application/json');
         }
         res.end(
           JSON.stringify({
