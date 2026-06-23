@@ -56,6 +56,40 @@ export class CopilotHTTPService {
   ctx: Context;
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'copilot probe',
+    functionName: 'copilotprobe',
+    name: 'copilotprobe',
+    path: '/copilotprobe',
+    method: 'post',
+  })
+  @NoAuth()
+  async copilotProbe(@Body(ALL) body: any) {
+    const ret = String(body?.ret || 'obj'); // 'str' | 'obj'
+    const cp: any = await import('@copilotkit/runtime');
+    const v2: any = await import('@copilotkit/runtime/v2');
+    const ai: any = await import('@ai-sdk/openai');
+    const deepseek = ai.createOpenAI({
+      apiKey: process.env.LLM_API_KEY,
+      baseURL: 'https://api.deepseek.com',
+    });
+    const agent = new v2.BuiltInAgent({
+      model: deepseek.chat(process.env.LLM_MODEL || 'deepseek-chat'),
+    });
+    const runtime = new cp.CopilotRuntime({ agents: { default: agent } });
+    const handler = cp.copilotRuntimeNodeHttpEndpoint({ endpoint: ENDPOINT, runtime });
+    const request = new Request('http://fc.local/copilotkit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method: 'info', params: {}, body: {} }),
+    });
+    const response = await handler(request);
+    const text = await response.text();
+    // ret=str → 返回字符串；ret=obj → 返回对象。判断 FaaS 是否因返回字符串而崩。
+    if (ret === 'str') return text;
+    return { ok: true, len: text.length };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: 'CopilotKit runtime',
     functionName: 'copilotkit',
     name: 'copilotkit',
