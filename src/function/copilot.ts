@@ -108,6 +108,13 @@ export class CopilotHTTPService {
       });
       const response = await handler(request);
       const text = await response.text();
+      if (step === 6) {
+        // 反证：用 ctx.body 而非 return，看是否因此崩溃
+        this.ctx.status = 200;
+        this.ctx.type = 'application/json';
+        this.ctx.body = text;
+        return;
+      }
       return { step: 5, ok: true, status: response.status, body: text.slice(0, 300) };
     } catch (e: any) {
       return {
@@ -140,17 +147,18 @@ export class CopilotHTTPService {
       });
       const response: any = await (handler as any)(request);
       const text = await response.text();
+      // Midway FaaS 用方法返回值作响应体：必须 return，不能设 ctx.body。
       this.ctx.status = response.status || 200;
       this.ctx.type = response.headers.get('content-type') || 'application/json';
-      this.ctx.body = text;
+      return text;
     } catch (err: any) {
       handlerPromise = null; // 失败不缓存，下次重试
       this.ctx.status = 500;
-      this.ctx.body = {
+      this.ctx.type = 'application/json';
+      return JSON.stringify({
         error: 'copilot_error',
         message: String(err?.message || err),
-        stack: String(err?.stack || '').split('\n').slice(0, 8).join(' | '),
-      };
+      });
     }
   }
 }
