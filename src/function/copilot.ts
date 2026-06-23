@@ -3,6 +3,8 @@ import {
   ServerlessTrigger,
   ServerlessTriggerType,
   Inject,
+  Body,
+  ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { NoAuth } from '../decorator/noAuth';
@@ -64,12 +66,13 @@ export class CopilotHTTPService {
     method: 'post',
   })
   @NoAuth()
-  async copilot() {
-    // 绕过 Midway/Koa 的响应序列化，自己把 web Response 泵到 ctx.res
+  async copilot(@Body(ALL) body: any) {
+    // 绕过 Midway/Koa 的响应序列化，自己把 web Response 泵到 ctx.res。
+    // @Body(ALL) 必需：触发 Midway 消费请求体——否则未读的 POST 流会让 FC 杀实例。
     (this.ctx as any).respond = false;
     const res: any = this.ctx.res;
     const reqUrl: string = this.ctx.req?.url || '/copilotkit';
-    const parsedBody = (this.ctx.request as any)?.body ?? {};
+    const parsedBody = body ?? {};
 
     // 临时分阶段诊断：body.method==='_diag' & stage A..E，定位崩溃发生在哪一步
     if (parsedBody && parsedBody.method === '_diag') {
