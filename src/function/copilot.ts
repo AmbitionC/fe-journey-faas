@@ -59,6 +59,42 @@ export class CopilotHTTPService {
   ctx: Context;
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'copilot ping (隔离探针：纯 vanilla)',
+    functionName: 'copilotping',
+    name: 'copilotping',
+    path: '/copilotping',
+    method: 'post',
+  })
+  @NoAuth()
+  async copilotPing(@Body(ALL) body: any) {
+    return { pong: 1, got: body?.x ?? null };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'copilot load (隔离探针：仅动态 import copilotkit)',
+    functionName: 'copilotload',
+    name: 'copilotload',
+    path: '/copilotload',
+    method: 'post',
+  })
+  @NoAuth()
+  async copilotLoad() {
+    try {
+      const cp: any = await import('@copilotkit/runtime');
+      const v2: any = await import('@copilotkit/runtime/v2');
+      const ai: any = await import('@ai-sdk/openai');
+      return {
+        loaded: true,
+        hasRuntime: !!cp.CopilotRuntime,
+        hasBuiltIn: !!v2.BuiltInAgent,
+        hasCreate: !!ai.createOpenAI,
+      };
+    } catch (e: any) {
+      return { loaded: false, error: String(e?.message || e) };
+    }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: 'CopilotKit runtime',
     functionName: 'copilotkit',
     name: 'copilotkit',
