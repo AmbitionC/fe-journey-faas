@@ -23,7 +23,6 @@
     "eval": "ts-node src/eval/cli.ts"
   },
   "dependencies": {
-    "@copilotkit/runtime": "1.60.2",
     "@midwayjs/cache": "^3.12.0",
     "@midwayjs/captcha": "^3.16.5",
     "@midwayjs/core": "^3.12.0",

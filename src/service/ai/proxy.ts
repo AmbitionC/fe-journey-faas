@@ -538,7 +538,7 @@ export class AiProxyService {
 
   /**
    * 流式核心：给定已拼好的 systemPrompt + messages，向上游真流式拉取并逐帧产出
-   * { content?, reasoning? }。被 forwardStream / forwardTaskStream / Copilot 适配器复用，
+   * { content?, reasoning? }。被 forwardStream / forwardTaskStream 复用，
    * 统一身份/计量/思考链透传。
    */
   async *streamCore(
