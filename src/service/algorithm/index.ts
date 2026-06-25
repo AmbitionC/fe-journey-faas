@@ -137,6 +137,11 @@ export class AlgorithmService {
     };
   }
 
+  /** 轻量存在性检查（单条唯一索引查询），供启动 seeder 幂等判断用。 */
+  async hasProblem(slug: string): Promise<boolean> {
+    return !!(await this.problemModel.findOneBy({ slug }));
+  }
+
   async getTags() {
     return this.tagModel.find({ order: { name: 'ASC' } });
   }

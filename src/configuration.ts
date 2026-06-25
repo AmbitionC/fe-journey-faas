@@ -11,6 +11,7 @@ import { AuthMiddleware } from './middleware/auth';
 import { CommonErrorFilter } from './filter/common';
 import { DefaultErrorFilter } from './filter/default';
 import { ValidateErrorFilter } from './filter/validate';
+import { seedSwordOffer } from './bootstrap/seedSwordOffer';
 
 @Configuration({
   imports: [
@@ -44,5 +45,8 @@ export class MainConfiguration implements ILifeCycle {
       DefaultErrorFilter,
       ValidateErrorFilter,
     ]);
+
+    // 幂等导入剑指 Offer 题库(仅首次冷启动实际写入；自带 try/catch，不阻断启动)。
+    await seedSwordOffer(this.app.getApplicationContext());
   }
 }
