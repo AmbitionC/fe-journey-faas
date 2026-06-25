@@ -158,5 +158,10 @@ export default {
       freeWindowSeconds: 86400,
     },
   },
+  // 限时免费开关：开启时所有人按会员对待（AI 无限、模拟面试解锁、项目实战全开、隐藏付费入口）。
+  // 将来恢复收费：设环境变量 MEMBERSHIP_FREE=false 即可，无需改代码。
+  membership: {
+    freeForAll: process.env.MEMBERSHIP_FREE !== 'false',
+  },
   syncSecret: process.env.SYNC_SECRET,
 } as MidwayConfig;

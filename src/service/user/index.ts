@@ -19,6 +19,9 @@ export class UserService {
   @Config('token')
   tokenConfig: TokenConfig;
 
+  @Config('membership')
+  membershipConfig: { freeForAll: boolean };
+
   @Inject()
   redisService: RedisService;
 
@@ -59,10 +62,20 @@ export class UserService {
       .where('user.phoneNumber = :userId', { userId })
       .getOne();
     if (userInfo) {
-      const quota = await this.aiProxyService.getQuota(userId, !!userInfo.isMember);
+      // 限时免费：所有人按会员对待，并下发远期到期日，让前端各处会员判定自动通过
+      const freeForAll = !!this.membershipConfig?.freeForAll;
+      const isMember = freeForAll || !!userInfo.isMember;
+      const quota = await this.aiProxyService.getQuota(userId, isMember);
+      const vo = userInfo.toVO();
       return {
         success: true,
-        data: { ...userInfo.toVO(), aiQuota: quota },
+        data: {
+          ...vo,
+          ...(freeForAll
+            ? { isMember: true, memberDate: '2099-12-31 23:59:59' }
+            : {}),
+          aiQuota: quota,
+        },
       };
     }
     return { success: false, message: '用户不存在' };

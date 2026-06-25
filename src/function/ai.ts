@@ -107,7 +107,12 @@ export class AiHTTPService {
   @Config('ai')
   aiConfig: { rateLimit: { freeUserPerDay: number } };
 
+  @Config('membership')
+  membershipConfig: { freeForAll: boolean };
+
   private async getIsMember(userId: string): Promise<boolean> {
+    // 限时免费：所有人按会员对待
+    if (this.membershipConfig?.freeForAll) return true;
     try {
       const user = await this.userModel.findOneBy({ phoneNumber: userId });
       if (!user?.isMember || !user?.memberDate) return false;
@@ -141,7 +146,8 @@ export class AiHTTPService {
     }
     const fwd = this.ctx.headers['x-forwarded-for'] as string;
     const ip = (fwd ? fwd.split(',')[0].trim() : '') || this.ctx.ip || 'anonymous';
-    return { userId: `guest:${ip}`, isMember: false };
+    // 限时免费：游客也按会员对待（AI 无限）
+    return { userId: `guest:${ip}`, isMember: !!this.membershipConfig?.freeForAll };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
