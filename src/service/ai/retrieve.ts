@@ -6,7 +6,7 @@ import {
   RetrievedItem,
 } from './lexicalSearch';
 
-const DEFAULT_MODULES = ['knowledge', 'interview', 'firstclass'];
+const DEFAULT_MODULES = ['knowledge', 'interview'];
 
 /**
  * 站内内容检索服务（PRD-02 F1-1/F1-2）。
