@@ -47,6 +47,8 @@ resources:
         DB_PASS: ${env('DB_PASS')}
         REDIS_HOST: ${env('REDIS_HOST')}
         REDIS_PASS: ${env('REDIS_PASS')}
+        # 投资驾驶舱：invest 库（同 RDS 实例，invest-model Python 端写入）
+        INVEST_DB_NAME: invest
       triggers:
         - triggerName: httpTrigger
           triggerType: http

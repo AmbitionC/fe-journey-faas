@@ -12,6 +12,7 @@ import { CommonErrorFilter } from './filter/common';
 import { DefaultErrorFilter } from './filter/default';
 import { ValidateErrorFilter } from './filter/validate';
 import { seedSwordOffer } from './bootstrap/seedSwordOffer';
+import { ensureInvestAdmin } from './bootstrap/ensureInvestAdmin';
 
 @Configuration({
   imports: [
@@ -48,5 +49,8 @@ export class MainConfiguration implements ILifeCycle {
 
     // 幂等导入剑指 Offer 题库(仅首次冷启动实际写入；自带 try/catch，不阻断启动)。
     await seedSwordOffer(this.app.getApplicationContext());
+
+    // 幂等提升投资驾驶舱管理员(自带 try/catch，不阻断启动)。
+    await ensureInvestAdmin(this.app.getApplicationContext());
   }
 }
