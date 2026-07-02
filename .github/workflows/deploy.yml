@@ -6,7 +6,38 @@ on:
       - master
   workflow_dispatch:
 
+# s.yaml 里的 ${env('...')} 在 s deploy 解析整份配置时取值，
+# 因此两个 job 都需要暴露全部环境变量名（缺的 secret 解析为空串，不阻断部署）。
+env:
+  # fe-journey Web 函数
+  LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+  LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+  LLM_MODEL: ${{ secrets.LLM_MODEL }}
+  # 内容管理(content)模块运行时凭证(GitHub secret 名不能以 GITHUB_ 开头,故用 GH_TOKEN)
+  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+  OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+  OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+  SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+  # 数据库/Redis 凭证（PRD-07：移出代码，改由环境变量注入；DB_* 与 invest 函数共用）
+  DB_HOST: ${{ secrets.DB_HOST }}
+  DB_USER: ${{ secrets.DB_USER }}
+  DB_PASS: ${{ secrets.DB_PASS }}
+  REDIS_HOST: ${{ secrets.REDIS_HOST }}
+  REDIS_PASS: ${{ secrets.REDIS_PASS }}
+  # invest-model 定时函数（invest-live-watch / invest-scheduler）
+  INVEST_DB_URL: ${{ secrets.INVEST_DB_URL }}
+  INVEST_DB_NAME: ${{ vars.INVEST_DB_NAME || 'invest' }}
+  TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+  TUSHARE_HTTP_URL: ${{ secrets.TUSHARE_HTTP_URL }}
+  # fine-grained PAT：仅 invest-model 仓库 Issues RW（预警/复盘/计划推 Issue→邮件）；
+  # 同时用于 CI checkout 私有仓库 invest-model。未配置时回退 GH_TOKEN。
+  INVEST_GH_PAT: ${{ secrets.INVEST_GH_PAT || secrets.GH_TOKEN }}
+  LIVE_WATCH_MENTION: ${{ vars.LIVE_WATCH_MENTION }}
+  ACCOUNT_CASH: ${{ vars.ACCOUNT_CASH || '0' }}
+  PLAN_ARGS: ${{ vars.PLAN_ARGS }}
+
 jobs:
+  # ── fe-journey Web 函数（原有部署，逻辑不变，仅收窄为只部署 fcJourneyMain）──
   deploy:
     runs-on: ubuntu-latest
     steps:
@@ -50,19 +81,61 @@ jobs:
 
       # FC 3.0 Web 函数：单函数 server.js，环境变量经 ${env('...')} 注入到函数
       - name: Deploy (FC3 web function)
-        env:
-          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          # 内容管理(content)模块运行时凭证(GitHub secret 名不能以 GITHUB_ 开头,故用 GH_TOKEN)
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
-          # 数据库/Redis 凭证（PRD-07：移出代码，改由环境变量注入）
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASS: ${{ secrets.DB_PASS }}
-          REDIS_HOST: ${{ secrets.REDIS_HOST }}
-          REDIS_PASS: ${{ secrets.REDIS_PASS }}
-        run: s deploy -y --access aliyun
+        run: s fcJourneyMain deploy -y --access aliyun
+
+  # ── invest-model 定时函数（盯盘/复盘等，独立 job：与 fe-journey 部署互不阻塞）──
+  deploy-invest-scheduler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout invest-model
+        uses: actions/checkout@v4
+        with:
+          repository: AmbitionC/invest-model
+          ref: master
+          token: ${{ secrets.INVEST_GH_PAT || secrets.GH_TOKEN }}
+          path: invest-model-src
+
+      # 迁移过渡期兜底：统一调度器尚未合入 invest-model master 时，用迁移分支。
+      # invest-model 合并后此步自动走 master，可择机删除本步骤。
+      - name: Resolve invest-model ref (transitional)
+        run: |
+          if [ ! -f invest-model-src/faas/scheduler_handler.py ]; then
+            echo "master 上还没有 faas/scheduler_handler.py，切到迁移分支"
+            git -C invest-model-src fetch origin claude/invest-model-faas-migration-wig4qi
+            git -C invest-model-src checkout FETCH_HEAD
+          fi
+          git -C invest-model-src log -1 --oneline
+
+      # 与 FC python3.10 运行时同版本，保证二进制依赖（pandas/numpy）ABI 兼容
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Package invest FaaS code
+        run: bash invest-model-src/faas/package.sh "$GITHUB_WORKSPACE/invest-dist"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure Alibaba Cloud credentials
+        run: |
+          s config add \
+            --AccountID "${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}" \
+            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access aliyun \
+            -f
+
+      - name: Deploy invest FC functions (timer triggers)
+        run: |
+          s investLiveWatch deploy -y --access aliyun
+          s investScheduler deploy -y --access aliyun

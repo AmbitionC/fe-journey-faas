@@ -59,3 +59,117 @@ resources:
               - DELETE
               - OPTIONS
               - HEAD
+
+  # ══ invest-model 定时任务（盯盘/复盘等，从 GitHub Actions 迁来）═══════════
+  # 与 fe-journey 完全解耦：独立代码包 / 独立环境变量 / 独立触发器 / 独立部署 job，
+  # 仅共用阿里云账号、地域与本仓库的部署流水线（push master 自动发布）。
+  # 代码来自 AmbitionC/invest-model 仓库（invest_model/ scripts/ faas/），
+  # CI 部署时 checkout 并执行其 faas/package.sh 打包到 ./invest-dist，
+  # 见 .github/workflows/deploy.yml 的 deploy-invest-scheduler job。
+  # FC timer 的 cronExpression 为 UTC；payload 即 faas/jobs.py 里的 job 名。
+
+  # 盯盘专用函数：调用频繁（交易时段每 3 分钟）、轻量、短超时，独立成函数
+  # 避免与长耗时的数据更新任务互相占实例/共享超时配置。
+  investLiveWatch:
+    component: fc3
+    props:
+      region: cn-hangzhou
+      functionName: invest-live-watch
+      description: 'A股盘中盯盘：无状态定时扫描，预警追评 GitHub issue → 邮件'
+      runtime: python3.10
+      handler: faas/scheduler_handler.handler
+      cpu: 0.5
+      memorySize: 512
+      diskSize: 512
+      timeout: 120
+      code: ./invest-dist
+      environmentVariables:
+        PYTHONUNBUFFERED: '1'
+        # DB：优先整串 INVEST_DB_URL；否则由 MYSQL_* 拼接（DB_* 与 fe-journey 共用同一套 RDS 凭证）
+        INVEST_DB_URL: ${env('INVEST_DB_URL', '')}
+        MYSQL_HOST: ${env('DB_HOST', '')}
+        MYSQL_USER: ${env('DB_USER', '')}
+        MYSQL_PASSWORD: ${env('DB_PASS', '')}
+        MYSQL_DATABASE: ${env('INVEST_DB_NAME', 'invest')}
+        TUSHARE_TOKEN: ${env('TUSHARE_TOKEN', '')}
+        TUSHARE_HTTP_URL: ${env('TUSHARE_HTTP_URL', '')}
+        # 预警/复盘/计划都以 Issue 评论推送 → 邮件；PAT 仅需 invest-model Issues RW
+        GITHUB_TOKEN: ${env('INVEST_GH_PAT', '')}
+        GITHUB_REPOSITORY: AmbitionC/invest-model
+        LIVE_WATCH_MENTION: ${env('LIVE_WATCH_MENTION', '')}
+        # FC 代码目录只读：日志/结果文件落 /tmp
+        INVEST_LOG_DIR: /tmp/logs
+        INVEST_RESULTS_DIR: /tmp/invest-results
+        DIGEST_WINDOW: '20'
+        ONCE_STEP: '3'
+      triggers:
+        - triggerName: market-hours
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            # 每 3 分钟，01:00-07:59 UTC = 北京 09:00-15:59 工作日；
+            # 盘前/午休/节假日由脚本守卫毫秒级退出，空转成本可忽略。
+            cronExpression: '0 0/3 1-7 ? * MON-FRI'
+            enable: true
+            payload: 'live_watch'
+
+  # 其余定时任务：快照提醒 / ETF 入库 / 盘后增量更新+操作计划 / 周六全量重建+复盘。
+  # 单函数多 timer，按 payload 分发；大内存长超时容纳周六全量重建（原 Actions 给 3h）。
+  investScheduler:
+    component: fc3
+    props:
+      region: cn-hangzhou
+      functionName: invest-scheduler
+      description: 'invest-model 定时任务：快照提醒/ETF入库/盘后更新+计划/周度重建+复盘'
+      runtime: python3.10
+      handler: faas/scheduler_handler.handler
+      cpu: 2
+      memorySize: 4096
+      diskSize: 512
+      timeout: 10800
+      code: ./invest-dist
+      environmentVariables:
+        PYTHONUNBUFFERED: '1'
+        INVEST_DB_URL: ${env('INVEST_DB_URL', '')}
+        MYSQL_HOST: ${env('DB_HOST', '')}
+        MYSQL_USER: ${env('DB_USER', '')}
+        MYSQL_PASSWORD: ${env('DB_PASS', '')}
+        MYSQL_DATABASE: ${env('INVEST_DB_NAME', 'invest')}
+        TUSHARE_TOKEN: ${env('TUSHARE_TOKEN', '')}
+        TUSHARE_HTTP_URL: ${env('TUSHARE_HTTP_URL', '')}
+        GITHUB_TOKEN: ${env('INVEST_GH_PAT', '')}
+        GITHUB_REPOSITORY: AmbitionC/invest-model
+        INVEST_LOG_DIR: /tmp/logs
+        INVEST_RESULTS_DIR: /tmp/invest-results
+        # 操作计划参数（含义与原 plan-notify workflow 的 Variables 相同）
+        ACCOUNT_CASH: ${env('ACCOUNT_CASH', '0')}
+        PLAN_ARGS: ${env('PLAN_ARGS', '')}
+      triggers:
+        - triggerName: snapshot-remind
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 20 7 ? * MON-FRI'   # 北京 15:20 持仓快照提醒
+            enable: true
+            payload: 'snapshot_remind'
+        - triggerName: ingest-etf
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 50 8 ? * MON-FRI'   # 北京 16:50 ETF 前复权日线入库
+            enable: true
+            payload: 'ingest_etf'
+        - triggerName: daily-update-plan
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 0 9 ? * MON-FRI'    # 北京 17:00 增量更新→链式出操作计划
+            enable: true
+            payload: 'daily_update_plan'
+        - triggerName: weekly-rebuild-review
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 0 10 ? * SAT'       # 北京周六 18:00 全量重建→影子回测→复盘
+            enable: true
+            payload: 'weekly_rebuild_review'
