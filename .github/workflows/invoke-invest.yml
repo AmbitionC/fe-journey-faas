@@ -88,4 +88,6 @@ jobs:
           if [ "$JOB" = "live_watch" ]; then FN=investLiveWatch; else FN=investScheduler; fi
           mkdir -p invest-dist noderuntime   # 占位：invoke 只走控制面，不需要真实代码目录
           echo "→ invoke $FN payload=$JOB"
-          s "$FN" invoke -e "{\"payload\":\"$JOB\"}" --access aliyun
+          # s invoke 对函数报错也返回 0，这里显式检查 InvocationError 让本步骤如实变红
+          s "$FN" invoke -e "{\"payload\":\"$JOB\"}" --access aliyun | tee /tmp/invoke.out
+          ! grep -q "Error Type: InvocationError" /tmp/invoke.out

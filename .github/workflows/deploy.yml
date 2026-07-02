@@ -134,4 +134,7 @@ jobs:
       # 冒烟测试：真实同步调用一次盯盘 job。非交易时段/节假日会走守卫毫秒退出
       # （返回 skipped），任何时段都无副作用风险极小；函数报错则本步骤失败。
       - name: Smoke test (invoke live_watch once)
-        run: s investLiveWatch invoke -e '{"payload":"live_watch"}' --access aliyun
+        run: |
+          # s invoke 对函数报错也返回 0，这里显式检查 InvocationError 让本步骤如实变红
+          s investLiveWatch invoke -e '{"payload":"live_watch"}' --access aliyun | tee /tmp/smoke.out
+          ! grep -q "Error Type: InvocationError" /tmp/smoke.out
