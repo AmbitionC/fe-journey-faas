@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+    paths-ignore:
+      - 'ops/**'          # 手动调用触发文件（invoke-invest.yml），不值得触发发版
   workflow_dispatch:
 
 # s.yaml 里的 ${env('...')} 在 s deploy 解析整份配置时取值，

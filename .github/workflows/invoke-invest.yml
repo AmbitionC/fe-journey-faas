@@ -18,6 +18,12 @@ on:
           - ingest_etf
           - daily_update_plan
           - weekly_rebuild_review
+  # 无 Actions 写权限的集成（如 Claude 会话）用 push 触发：
+  # 把 job 名写进 ops/invoke.trigger 第一行后 push master 即可
+  push:
+    branches: [master]
+    paths:
+      - 'ops/invoke.trigger'
 
 # s.yaml 解析需要全部 ${env('...')} 变量名存在（与 deploy.yml 相同的一套）
 env:
@@ -67,9 +73,19 @@ jobs:
             --access aliyun \
             -f
 
-      - name: Invoke ${{ inputs.job }}
+      - name: Invoke
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            JOB="${{ inputs.job }}"
+          else
+            JOB="$(head -1 ops/invoke.trigger | tr -d ' \r\n')"
+          fi
+          case "$JOB" in
+            live_watch|snapshot_remind|ingest_etf|daily_update_plan|weekly_rebuild_review) ;;
+            *) echo "未知 job: $JOB"; exit 1 ;;
+          esac
           # live_watch 跑在盯盘专用函数上，其余在 invest-scheduler
-          if [ "${{ inputs.job }}" = "live_watch" ]; then FN=investLiveWatch; else FN=investScheduler; fi
+          if [ "$JOB" = "live_watch" ]; then FN=investLiveWatch; else FN=investScheduler; fi
           mkdir -p invest-dist noderuntime   # 占位：invoke 只走控制面，不需要真实代码目录
-          s "$FN" invoke -e '{"payload":"${{ inputs.job }}"}' --access aliyun
+          echo "→ invoke $FN payload=$JOB"
+          s "$FN" invoke -e "{\"payload\":\"$JOB\"}" --access aliyun
