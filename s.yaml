@@ -83,6 +83,8 @@ resources:
       diskSize: 512
       timeout: 120
       code: ./invest-dist
+      # SLS 日志（auto 自动建 project/logstore）：函数运行中日志实时可查，排障必备
+      logConfig: auto
       environmentVariables:
         PYTHONUNBUFFERED: '1'
         # DB：优先整串 INVEST_DB_URL；否则由 MYSQL_* 拼接（DB_* 与 fe-journey 共用同一套 RDS 凭证）
@@ -128,6 +130,8 @@ resources:
       diskSize: 512
       timeout: 10800
       code: ./invest-dist
+      # SLS 日志（auto 自动建 project/logstore）：函数运行中日志实时可查，排障必备
+      logConfig: auto
       environmentVariables:
         PYTHONUNBUFFERED: '1'
         INVEST_DB_URL: ${env('INVEST_DB_URL', '')}
