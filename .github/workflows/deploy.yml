@@ -98,17 +98,6 @@ jobs:
           token: ${{ secrets.INVEST_GH_PAT || secrets.GH_TOKEN }}
           path: invest-model-src
 
-      # 迁移过渡期兜底：统一调度器尚未合入 invest-model master 时，用迁移分支。
-      # invest-model 合并后此步自动走 master，可择机删除本步骤。
-      - name: Resolve invest-model ref (transitional)
-        run: |
-          if [ ! -f invest-model-src/faas/scheduler_handler.py ]; then
-            echo "master 上还没有 faas/scheduler_handler.py，切到迁移分支"
-            git -C invest-model-src fetch origin claude/invest-model-faas-migration-wig4qi
-            git -C invest-model-src checkout FETCH_HEAD
-          fi
-          git -C invest-model-src log -1 --oneline
-
       # 与 FC python3.10 运行时同版本，保证二进制依赖（pandas/numpy）ABI 兼容
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -139,3 +128,8 @@ jobs:
         run: |
           s investLiveWatch deploy -y --access aliyun
           s investScheduler deploy -y --access aliyun
+
+      # 冒烟测试：真实同步调用一次盯盘 job。非交易时段/节假日会走守卫毫秒退出
+      # （返回 skipped），任何时段都无副作用风险极小；函数报错则本步骤失败。
+      - name: Smoke test (invoke live_watch once)
+        run: s investLiveWatch invoke -e '{"payload":"live_watch"}' --access aliyun
