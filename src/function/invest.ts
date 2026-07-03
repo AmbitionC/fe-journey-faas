@@ -175,4 +175,20 @@ export class InvestHTTPService {
   async fearSeries(@Query(ALL) q: { start?: string; end?: string }) {
     return { success: true, data: await this.insightService.fearSeries(q.start, q.end) };
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    path: '/invest/health',
+    method: 'get',
+  })
+  async health() {
+    return { success: true, data: await this.insightService.health() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    path: '/invest/shadow',
+    method: 'get',
+  })
+  async shadow() {
+    return { success: true, data: await this.insightService.shadow() };
+  }
 }

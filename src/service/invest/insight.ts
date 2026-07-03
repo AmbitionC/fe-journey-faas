@@ -136,4 +136,67 @@ export class InvestInsightService {
     );
     return rows.map(r => ({ ...r, components: parseJson(r.components) }));
   }
+
+  /** 系统健康：各数据管道的最新水位 + 影子验证摘要（自动化可观测性）。 */
+  async health() {
+    const one = async (sql: string) => {
+      try {
+        const r = await this.db.one(sql);
+        return r ? Object.values(r)[0] : null;
+      } catch {
+        return null;
+      }
+    };
+    const [market, plan, snapshot, alert, review, advisor, fear, shadowN] = await Promise.all([
+      one('SELECT MAX(trade_date) v FROM stock_daily'),
+      one('SELECT MAX(plan_date) v FROM action_plan'),
+      one('SELECT MAX(snapshot_date) v FROM holding_snapshot'),
+      one('SELECT MAX(alert_date) v FROM watch_alert'),
+      one('SELECT MAX(report_date) v FROM review_report'),
+      one('SELECT MAX(rec_date) v FROM advisor_reco'),
+      one('SELECT MAX(trade_date) v FROM fear_daily'),
+      one('SELECT COUNT(*) v FROM policy_shadow'),
+    ]);
+    return {
+      market_date: market,
+      plan_date: plan,
+      snapshot_date: snapshot,
+      alert_date: alert,
+      review_date: review,
+      advisor_date: advisor,
+      fear_date: fear,
+      shadow_signals: Number(shadowN || 0),
+    };
+  }
+
+  /** 研报速通影子验证：fast(信号次日直入) vs gate(旧严格闸门) 两条虚拟净值对比。 */
+  async shadow() {
+    let rows: any[] = [];
+    try {
+      rows = await this.db.q(
+        `SELECT signal_date, code, grade, d0_date, d0_close, gate_date, gate_close,
+                last_date, last_close, fast_ret, gate_ret
+         FROM policy_shadow ORDER BY signal_date DESC, code`
+      );
+    } catch {
+      return { rows: [], summary: null };
+    }
+    const f = rows.filter(r => r.fast_ret != null).map(r => Number(r.fast_ret));
+    const g = rows.filter(r => r.gate_ret != null).map(r => Number(r.gate_ret));
+    const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+    return {
+      rows,
+      summary: {
+        n: rows.length,
+        fast_n: f.length,
+        gate_n: g.length,
+        fast_avg: avg(f),
+        // gate 未触发按 0（踏空）计入组合口径
+        gate_avg_portfolio: rows.length
+          ? rows.reduce((x, r) => x + Number(r.gate_ret || 0), 0) / rows.length
+          : null,
+        fast_win: f.length ? f.filter(x => x > 0).length / f.length : null,
+      },
+    };
+  }
 }
