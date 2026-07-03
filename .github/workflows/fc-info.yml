@@ -55,38 +55,35 @@ jobs:
 
       - name: Query function internet URL
         run: |
-          # 只输出 URL 行，绝不打印完整 info（其中含环境变量明文）
-          s fcJourneyMain info --access aliyun -o json --silent > /tmp/info.json 2>/dev/null || true
+          # 只输出 URL/键名，绝不打印完整 info（其中含环境变量明文）
+          rc1=0; rc2=0
+          s fcJourneyMain info --access aliyun -o json > /tmp/info1.json 2>/tmp/info1.err || rc1=$?
+          s info --access aliyun -o json > /tmp/info2.json 2>/tmp/info2.err || rc2=$?
+          echo "exit codes: fcJourneyMain=$rc1 all=$rc2"
+          wc -c /tmp/info1.json /tmp/info1.err /tmp/info2.json /tmp/info2.err || true
+          echo '==== URL GREP ===='
+          grep -hoE 'https://[a-zA-Z0-9.-]*fcapp\.run[^" ]*' /tmp/info1.json /tmp/info2.json /tmp/info1.err /tmp/info2.err 2>/dev/null | sort -u || true
+          echo '==== JSON KEY STRUCTURE (键名，无值) ===='
           python3 - << 'EOF'
-          import json, re
-          try:
-              raw = open('/tmp/info.json').read()
-              # 输出可能混有非 JSON 日志行，截取首个 { 起始的 JSON
-              raw = raw[raw.index('{'):]
-              data = json.loads(raw)
-          except Exception:
-              data = None
-          urls = []
-          def walk(o):
-              if isinstance(o, dict):
-                  for k, v in o.items():
-                      if isinstance(v, str) and ('fcapp.run' in v or k in ('urlInternet', 'urlIntranet')):
-                          urls.append(f"{k}: {v}")
-                      else:
-                          walk(v)
-              elif isinstance(o, list):
-                  for it in o:
-                      walk(it)
-          if data is not None:
-              walk(data)
-          if urls:
-              print('==== FUNCTION URLS ====')
-              for u in urls:
-                  print(u)
-          else:
-              # JSON 解析失败时兜底：原始文本里 grep URL 形态（仍不打印其他内容）
-              for m in re.findall(r'https://[\w.-]*fcapp\.run[^"\s]*', raw if 'raw' in dir() else ''):
-                  print('url:', m)
-              if not urls:
-                  print('NO URL FOUND (check s info output structure)')
+          import json
+          for f in ('/tmp/info1.json', '/tmp/info2.json'):
+              try:
+                  raw = open(f).read()
+                  raw = raw[raw.index('{'):]
+                  d = json.loads(raw)
+              except Exception as e:
+                  print(f, 'parse fail:', e)
+                  continue
+              print('--', f)
+              def keys(o, p=''):
+                  if isinstance(o, dict):
+                      for k, v in o.items():
+                          print('KEY', p + k)
+                          keys(v, p + k + '.')
+                  elif isinstance(o, list):
+                      for i, x in enumerate(o[:3]):
+                          keys(x, f'{p}{i}.')
+              keys(d)
           EOF
+          echo '==== STDERR (已过滤敏感行) ===='
+          grep -hviE 'key|secret|pass|token' /tmp/info1.err /tmp/info2.err 2>/dev/null | head -20 || true
