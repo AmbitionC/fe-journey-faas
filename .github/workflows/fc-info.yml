@@ -5,6 +5,11 @@ name: FC function info (URL only)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'ops/fc-info.trigger'   # 改动此文件即触发（与 invoke-invest.yml 同模式）
 
 # s.yaml 解析需要这些 ${env('...')} 存在（值可为空，info 只读函数信息）
 env:
