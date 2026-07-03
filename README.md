@@ -15,3 +15,5 @@ A 股盯盘/复盘等定时任务，代码来自 AmbitionC/invest-model 仓库�
 
 注意：`INVEST_GH_PAT` 必须是「机器人小号」的 classic PAT（评论作者若是本人，
 GitHub 不会给本人发通知邮件）；更换 secret 后需重新部署才生效。
+
+> `INVEST_GH_PAT` 当前为机器人小号 token（2026-07-03 更换）。
