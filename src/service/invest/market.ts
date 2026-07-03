@@ -65,6 +65,38 @@ export class InvestMarketService {
     return { plans, recos };
   }
 
+  /** 资金与因子维度：北向持股 / 融资余额 / 最新因子暴露。 */
+  async extras(code: string, days = 120) {
+    const [hkHold, margin, factorDate] = await Promise.all([
+      this.db.q(
+        `SELECT trade_date, vol, ratio FROM stock_hk_hold
+         WHERE code = ? ORDER BY trade_date DESC LIMIT ?`,
+        [code, days]
+      ).catch(() => []),
+      this.db.q(
+        `SELECT trade_date, rzye FROM stock_margin
+         WHERE code = ? ORDER BY trade_date DESC LIMIT ?`,
+        [code, days]
+      ).catch(() => []),
+      this.db
+        .one('SELECT MAX(trade_date) d FROM factor_exposure WHERE code = ?', [code])
+        .catch(() => null),
+    ]);
+    const factors = factorDate?.d
+      ? await this.db.q(
+          `SELECT factor, value FROM factor_exposure
+           WHERE code = ? AND trade_date = ? ORDER BY factor`,
+          [code, factorDate.d]
+        )
+      : [];
+    return {
+      hkHold: hkHold.reverse(),
+      margin: margin.reverse(),
+      factors,
+      factorDate: factorDate?.d ?? null,
+    };
+  }
+
   /** 标的信息 + 最新估值/财务；q 为名称/代码模糊搜索。 */
   async stockInfo(code?: string, q?: string) {
     if (q) {

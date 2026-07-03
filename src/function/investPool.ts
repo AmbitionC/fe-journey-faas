@@ -72,4 +72,19 @@ export class InvestPoolHTTPService {
     if (!q?.code && !q?.q) throw R.validateError('code 或 q 必填其一');
     return { success: true, data: await this.marketService.stockInfo(q.code, q.q) };
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '资金与因子维度（北向持股/融资余额/因子暴露）',
+    functionName: 'investStockExtras',
+    name: 'investStockExtras',
+    path: '/invest/stock/extras',
+    method: 'get',
+  })
+  async stockExtras(@Query(ALL) q: { code: string; days?: string }) {
+    if (!q?.code) throw R.validateError('code 必填');
+    return {
+      success: true,
+      data: await this.marketService.extras(q.code, Number(q.days) || 120),
+    };
+  }
 }
