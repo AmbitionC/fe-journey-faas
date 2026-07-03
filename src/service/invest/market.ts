@@ -2,6 +2,9 @@ import { Provide, Inject } from '@midwayjs/core';
 import { InvestDbService } from './db';
 import { movingAverage } from './calc';
 
+// 实时行情缓存（模块级，跨请求共享；10s TTL 防止高频转发到上游）
+const quoteCache = new Map<string, { at: number; data: any }>();
+
 /** 行情：价格序列(带 MA)、K 线标记（计划动作/投顾信号）、标的信息与基本面。 */
 @Provide()
 export class InvestMarketService {
@@ -63,6 +66,54 @@ export class InvestMarketService {
       [code]
     );
     return { plans, recos };
+  }
+
+  /**
+   * 实时行情（盘中现价/涨跌幅）：腾讯免费源 qt.gtimg.cn（与 invest-model 盯盘服务同源）。
+   * 非交易时段返回最后成交价；停牌/无数据的代码自动缺席。10s 缓存。
+   * 返回 { quotes: { '600000.SH': {price, pre_close, chg, chg_pct, time} }, fetched_at }。
+   */
+  async quotes(codes: string[]) {
+    const valid = [...new Set(codes)].filter(c => /^\d{6}\.(SH|SZ|BJ)$/.test(c)).slice(0, 50);
+    if (!valid.length) return { quotes: {}, fetched_at: new Date().toISOString() };
+    const key = valid.slice().sort().join(',');
+    const hit = quoteCache.get(key);
+    if (hit && Date.now() - hit.at < 10_000) return hit.data;
+
+    const syms = valid.map(c => {
+      const [num, ex] = c.split('.');
+      return (ex === 'SH' ? 'sh' : ex === 'SZ' ? 'sz' : 'bj') + num;
+    });
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 6000);
+    let text = '';
+    try {
+      const resp = await fetch(`https://qt.gtimg.cn/q=${syms.join(',')}`, {
+        signal: ac.signal,
+      });
+      // 响应为 GBK；只取数字字段，中文名称字段忽略，用 latin1 解码不影响数字解析
+      text = Buffer.from(await resp.arrayBuffer()).toString('latin1');
+    } finally {
+      clearTimeout(timer);
+    }
+    const quotes: Record<string, any> = {};
+    for (const m of text.matchAll(/v_(sh|sz|bj)(\d{6})="([^"]*)"/g)) {
+      const f = m[3].split('~');
+      if (f.length < 33) continue;
+      const price = parseFloat(f[3]);
+      if (!price || !Number.isFinite(price)) continue; // 停牌/无价
+      quotes[`${m[2]}.${m[1].toUpperCase()}`] = {
+        price,
+        pre_close: parseFloat(f[4]) || null,
+        chg: parseFloat(f[31]) || 0,
+        chg_pct: parseFloat(f[32]) || 0, // 百分数，如 1.23 表示 +1.23%
+        time: f[30] || null, // 形如 20260703150003
+      };
+    }
+    const data = { quotes, fetched_at: new Date().toISOString() };
+    quoteCache.set(key, { at: Date.now(), data });
+    if (quoteCache.size > 100) quoteCache.clear(); // 粗暴防膨胀
+    return data;
   }
 
   /** 资金与因子维度：北向持股 / 融资余额 / 最新因子暴露。 */

@@ -87,4 +87,19 @@ export class InvestPoolHTTPService {
       data: await this.marketService.extras(q.code, Number(q.days) || 120),
     };
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '实时行情（腾讯源，盘中现价/涨跌）',
+    functionName: 'investQuote',
+    name: 'investQuote',
+    path: '/invest/quote',
+    method: 'get',
+  })
+  async quote(@Query(ALL) q: { codes: string }) {
+    if (!q?.codes) throw R.validateError('codes 必填（逗号分隔）');
+    return {
+      success: true,
+      data: await this.marketService.quotes(q.codes.split(',')),
+    };
+  }
 }
