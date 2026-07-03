@@ -1,2 +1,2 @@
-daily_update_plan
-# retry with tushare keep-alive session fix
+snapshot_remind
+# 验证机器人小号发帖 → 邮件通知恢复
