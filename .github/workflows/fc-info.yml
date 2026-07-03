@@ -1,0 +1,87 @@
+# 查询 fe-journey-main 函数的公网访问地址（fcapp.run）。
+# 用途：前端需要函数系统分配的 URL（带随机后缀，仓库内拿不到）。
+# 安全：s info 输出包含环境变量明文，这里只允许打印含 fcapp.run / url 的行。
+name: FC function info (URL only)
+
+on:
+  workflow_dispatch:
+
+# s.yaml 解析需要这些 ${env('...')} 存在（值可为空，info 只读函数信息）
+env:
+  LLM_PROVIDER: ''
+  LLM_API_KEY: ''
+  LLM_MODEL: ''
+  GITHUB_TOKEN: ''
+  OSS_ACCESS_KEY_ID: ''
+  OSS_ACCESS_KEY_SECRET: ''
+  SYNC_SECRET: ''
+  DB_HOST: ''
+  DB_USER: ''
+  DB_PASS: ''
+  REDIS_HOST: ''
+  REDIS_PASS: ''
+  INVEST_DB_URL: ''
+  INVEST_DB_NAME: invest
+  TUSHARE_TOKEN: ''
+  TUSHARE_HTTP_URL: ''
+  INVEST_GH_PAT: ''
+  LIVE_WATCH_MENTION: ''
+  ACCOUNT_CASH: '0'
+  PLAN_ARGS: ''
+
+jobs:
+  info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure Alibaba Cloud credentials
+        run: |
+          s config add \
+            --AccountID "${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}" \
+            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access aliyun \
+            -f
+
+      - name: Query function internet URL
+        run: |
+          # 只输出 URL 行，绝不打印完整 info（其中含环境变量明文）
+          s fcJourneyMain info --access aliyun -o json --silent > /tmp/info.json 2>/dev/null || true
+          python3 - << 'EOF'
+          import json, re
+          try:
+              raw = open('/tmp/info.json').read()
+              # 输出可能混有非 JSON 日志行，截取首个 { 起始的 JSON
+              raw = raw[raw.index('{'):]
+              data = json.loads(raw)
+          except Exception:
+              data = None
+          urls = []
+          def walk(o):
+              if isinstance(o, dict):
+                  for k, v in o.items():
+                      if isinstance(v, str) and ('fcapp.run' in v or k in ('urlInternet', 'urlIntranet')):
+                          urls.append(f"{k}: {v}")
+                      else:
+                          walk(v)
+              elif isinstance(o, list):
+                  for it in o:
+                      walk(it)
+          if data is not None:
+              walk(data)
+          if urls:
+              print('==== FUNCTION URLS ====')
+              for u in urls:
+                  print(u)
+          else:
+              # JSON 解析失败时兜底：原始文本里 grep URL 形态（仍不打印其他内容）
+              for m in re.findall(r'https://[\w.-]*fcapp\.run[^"\s]*', raw if 'raw' in dir() else ''):
+                  print('url:', m)
+              if not urls:
+                  print('NO URL FOUND (check s info output structure)')
+          EOF
