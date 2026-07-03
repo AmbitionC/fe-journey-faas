@@ -17,3 +17,5 @@ A 股盯盘/复盘等定时任务，代码来自 AmbitionC/invest-model 仓库�
 GitHub 不会给本人发通知邮件）；更换 secret 后需重新部署才生效。
 
 > `INVEST_GH_PAT` 当前为机器人小号 token（2026-07-03 更换）。
+
+> 2026-07-03: 推送评论统一追加 @提及（邮件不依赖 Watch 级别）。
