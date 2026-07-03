@@ -85,6 +85,31 @@ jobs:
       - name: Deploy (FC3 web function)
         run: s fcJourneyMain deploy -y --access aliyun
 
+      # 打印函数公网地址（fcapp.run，前端 getApiDomain 使用）；只输出 URL 字段
+      - name: Print function internet URL
+        env:
+          AK_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+          AK_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+          ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
+        run: |
+          pip install -q alibabacloud_fc20230330 || pip3 install -q alibabacloud_fc20230330
+          python3 - << 'EOF'
+          import os, json
+          from alibabacloud_fc20230330.client import Client
+          from alibabacloud_tea_openapi import models as open_models
+          cfg = open_models.Config(
+              access_key_id=os.environ['AK_ID'],
+              access_key_secret=os.environ['AK_SECRET'],
+              endpoint=f"{os.environ['ACCOUNT_ID']}.cn-hangzhou.fc.aliyuncs.com",
+          )
+          resp = Client(cfg).get_trigger('fe-journey-main', 'httpTrigger')
+          ht = getattr(resp.body, 'http_trigger', None)
+          print('==== FUNCTION URLS ====')
+          print(json.dumps({
+              'urlInternet': getattr(ht, 'url_internet', None) if ht else None,
+          }, ensure_ascii=False))
+          EOF
+
   # ── invest-model 定时函数（盯盘/复盘等，独立 job：与 fe-journey 部署互不阻塞）──
   deploy-invest-scheduler:
     runs-on: ubuntu-latest
