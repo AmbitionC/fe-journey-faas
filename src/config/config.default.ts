@@ -75,26 +75,19 @@ export default {
   token: {
     expire: 60 * 60 * 24 * 7,
   },
+  // 投资数据库：表结构由 invest-model(Python/SQLAlchemy) 唯一拥有。
+  // 不注册进 typeorm.dataSource——那样会在应用启动时强制连接，一旦 invest 库
+  // 不可达会拖垮整个函数（含登录/验证码等原有功能）。改由 InvestDbService
+  // 惰性初始化：首次 /invest/* 请求才连接，失败只影响当次请求。
+  investDb: {
+    host: DB_HOST,
+    port: 3306,
+    username: DB_USER,
+    password: DB_PASS,
+    database: process.env.INVEST_DB_NAME || 'invest',
+  },
   typeorm: {
     dataSource: {
-      // 投资数据库：表结构由 invest-model(Python/SQLAlchemy) 唯一拥有，
-      // 这里只读写数据，绝不让 TypeORM 建/改表（synchronize 必须 false）。
-      // 全部走原生 SQL（ds.query），不注册实体。
-      invest: {
-        type: 'mysql',
-        host: DB_HOST,
-        port: 3306,
-        allowPublicKeyRetrieval: true,
-        username: DB_USER,
-        password: DB_PASS,
-        database: process.env.INVEST_DB_NAME || 'invest',
-        charset: 'utf8mb4',
-        synchronize: false,
-        logging: false,
-        entities: [],
-        // DECIMAL 直接返回 number（够用：金额精度 <2^53），省去逐字段转换
-        extra: { decimalNumbers: true },
-      },
       default: {
         type: 'mysql',
         host: DB_HOST,
