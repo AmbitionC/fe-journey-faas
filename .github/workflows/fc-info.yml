@@ -1,6 +1,6 @@
 # 查询 fe-journey-main 函数的公网访问地址（fcapp.run）。
 # 用途：前端需要函数系统分配的 URL（带随机后缀，仓库内拿不到）。
-# 安全：s info 输出包含环境变量明文，这里只允许打印含 fcapp.run / url 的行。
+# 通过 FC OpenAPI GetTrigger 直接读取，只输出 URL 字段，不打印任何敏感信息。
 name: FC function info (URL only)
 
 on:
@@ -11,36 +11,10 @@ on:
     paths:
       - 'ops/fc-info.trigger'   # 改动此文件即触发（与 invoke-invest.yml 同模式）
 
-# s.yaml 解析需要这些 ${env('...')} 存在（值可为空，info 只读函数信息）
-env:
-  LLM_PROVIDER: ''
-  LLM_API_KEY: ''
-  LLM_MODEL: ''
-  GITHUB_TOKEN: ''
-  OSS_ACCESS_KEY_ID: ''
-  OSS_ACCESS_KEY_SECRET: ''
-  SYNC_SECRET: ''
-  DB_HOST: ''
-  DB_USER: ''
-  DB_PASS: ''
-  REDIS_HOST: ''
-  REDIS_PASS: ''
-  INVEST_DB_URL: ''
-  INVEST_DB_NAME: invest
-  TUSHARE_TOKEN: ''
-  TUSHARE_HTTP_URL: ''
-  INVEST_GH_PAT: ''
-  LIVE_WATCH_MENTION: ''
-  ACCOUNT_CASH: '0'
-  PLAN_ARGS: ''
-
 jobs:
   info:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Query trigger urlInternet via FC OpenAPI
         env:
           AK_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
@@ -61,7 +35,6 @@ jobs:
           client = Client(cfg)
           resp = client.get_trigger('fe-journey-main', 'httpTrigger')
           body = resp.body
-          # trigger_config / http_trigger 均可能带 URL；只打印 URL 字段
           urls = {}
           ht = getattr(body, 'http_trigger', None)
           if ht is not None:
