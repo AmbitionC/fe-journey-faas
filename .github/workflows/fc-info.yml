@@ -41,49 +41,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Serverless Devs
-        run: npm install -g @serverless-devs/s
-
-      - name: Configure Alibaba Cloud credentials
+      - name: Query trigger urlInternet via FC OpenAPI
+        env:
+          AK_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+          AK_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+          ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
         run: |
-          s config add \
-            --AccountID "${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}" \
-            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
-            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
-            --access aliyun \
-            -f
-
-      - name: Query function internet URL
-        run: |
-          # 只输出 URL/键名，绝不打印完整 info（其中含环境变量明文）
-          rc1=0; rc2=0
-          s fcJourneyMain info --access aliyun -o json > /tmp/info1.json 2>/tmp/info1.err || rc1=$?
-          s info --access aliyun -o json > /tmp/info2.json 2>/tmp/info2.err || rc2=$?
-          echo "exit codes: fcJourneyMain=$rc1 all=$rc2"
-          wc -c /tmp/info1.json /tmp/info1.err /tmp/info2.json /tmp/info2.err || true
-          echo '==== URL GREP ===='
-          grep -hoE 'https://[a-zA-Z0-9.-]*fcapp\.run[^" ]*' /tmp/info1.json /tmp/info2.json /tmp/info1.err /tmp/info2.err 2>/dev/null | sort -u || true
-          echo '==== JSON KEY STRUCTURE (键名，无值) ===='
+          pip install -q alibabacloud_fc20230330
           python3 - << 'EOF'
-          import json
-          for f in ('/tmp/info1.json', '/tmp/info2.json'):
-              try:
-                  raw = open(f).read()
-                  raw = raw[raw.index('{'):]
-                  d = json.loads(raw)
-              except Exception as e:
-                  print(f, 'parse fail:', e)
-                  continue
-              print('--', f)
-              def keys(o, p=''):
-                  if isinstance(o, dict):
-                      for k, v in o.items():
-                          print('KEY', p + k)
-                          keys(v, p + k + '.')
-                  elif isinstance(o, list):
-                      for i, x in enumerate(o[:3]):
-                          keys(x, f'{p}{i}.')
-              keys(d)
+          import os, json
+          from alibabacloud_fc20230330.client import Client
+          from alibabacloud_tea_openapi import models as open_models
+
+          cfg = open_models.Config(
+              access_key_id=os.environ['AK_ID'],
+              access_key_secret=os.environ['AK_SECRET'],
+              endpoint=f"{os.environ['ACCOUNT_ID']}.cn-hangzhou.fc.aliyuncs.com",
+          )
+          client = Client(cfg)
+          resp = client.get_trigger('fe-journey-main', 'httpTrigger')
+          body = resp.body
+          # trigger_config / http_trigger 均可能带 URL；只打印 URL 字段
+          urls = {}
+          ht = getattr(body, 'http_trigger', None)
+          if ht is not None:
+              urls['urlInternet'] = getattr(ht, 'url_internet', None)
+              urls['urlIntranet'] = getattr(ht, 'url_intranet', None)
+          print('==== FUNCTION URLS ====')
+          print(json.dumps(urls, ensure_ascii=False))
           EOF
-          echo '==== STDERR (已过滤敏感行) ===='
-          grep -hviE 'key|secret|pass|token' /tmp/info1.err /tmp/info2.err 2>/dev/null | head -20 || true
