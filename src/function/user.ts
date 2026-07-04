@@ -8,6 +8,7 @@ import {
   ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
+import { RedisService } from '@midwayjs/redis';
 import { UserDTO } from '../dto/user';
 import { CaptchaService } from '../service/auth/captcha';
 import { UserService } from '../service/user';
@@ -23,6 +24,34 @@ export class UserHTTPService {
 
   @Inject()
   userService: UserService;
+
+  @Inject()
+  redisService: RedisService;
+
+  /**
+   * 解析当前登录用户 userId（手机号）。优先级：
+   *   1) 中间件注入的 ctx.userInfo（聚合函数下有时不透传，故不单独依赖）
+   *   2) 直接从请求头 token 反查 Redis（与 AuthMiddleware 同源，最可靠）
+   *   3) 显式 userId 参数兜底（兼容旧前端）
+   */
+  private async resolveUserId(fallback?: string): Promise<string | undefined> {
+    const fromCtx = (this.ctx as any).userInfo?.userId;
+    if (fromCtx) return fromCtx;
+    try {
+      const h: any = (this.ctx as any).header || (this.ctx as any).headers || {};
+      const token = (h.token as string) || (h.authorization as string)?.replace('Bearer ', '');
+      if (token) {
+        const s = await this.redisService.get(`token:${token}`);
+        if (s) {
+          const uid = JSON.parse(s)?.userId;
+          if (uid) return uid;
+        }
+      }
+    } catch {
+      // 反查失败则退回显式参数
+    }
+    return fallback;
+  }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '创建账号',
@@ -46,9 +75,9 @@ export class UserHTTPService {
     method: 'get',
   })
   async getUserInfo(@Query('userId') userId: string): Promise<any> {
-    // 以登录 token 的 userId 为准（AuthMiddleware 由 Redis 注入 ctx.userInfo）；
-    // 前端不再需要显式传 userId，也堵住「传他人手机号查其资料」的越权。
-    const uid = this.ctx.userInfo?.userId || userId;
+    // 以登录 token 反查的 userId 为准（前端无需传参，也堵住越权查他人资料）。
+    const uid = await this.resolveUserId(userId);
+    if (!uid) throw R.unauthorizedError('未登录或登录已过期');
     return await this.userService.getUserById(uid);
   }
 
