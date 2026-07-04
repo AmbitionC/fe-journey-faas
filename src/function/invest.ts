@@ -191,4 +191,12 @@ export class InvestHTTPService {
   async shadow() {
     return { success: true, data: await this.insightService.shadow() };
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    path: '/invest/signal-scorecard',
+    method: 'get',
+  })
+  async signalScorecard() {
+    return { success: true, data: await this.insightService.signalScorecard() };
+  }
 }

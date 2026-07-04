@@ -199,4 +199,27 @@ export class InvestInsightService {
       },
     };
   }
+
+  /** 投顾信号实战战绩记分卡：按 来源×等级 的信号买入后真实前瞻收益（系统真实用处的度量）。 */
+  async signalScorecard() {
+    let rows: any[] = [];
+    try {
+      rows = await this.db.q(
+        `SELECT bucket, label, n, win_rate, mean_ret, median_ret, mean_excess, mean_hold_days
+         FROM signal_scorecard
+         WHERE as_of = (SELECT MAX(as_of) FROM signal_scorecard)
+         ORDER BY FIELD(bucket,'ALL','research','research/A','research/B','research/C','intraday','intraday/A','intraday/B','intraday/C')`
+      );
+    } catch {
+      return { as_of: null, rows: [] };
+    }
+    let asOf: string | null = null;
+    try {
+      const r = await this.db.one('SELECT MAX(as_of) v FROM signal_scorecard');
+      asOf = r ? (Object.values(r)[0] as string) : null;
+    } catch {
+      asOf = null;
+    }
+    return { as_of: asOf, rows };
+  }
 }
