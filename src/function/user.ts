@@ -46,7 +46,10 @@ export class UserHTTPService {
     method: 'get',
   })
   async getUserInfo(@Query('userId') userId: string): Promise<any> {
-    return await this.userService.getUserById(userId);
+    // 以登录 token 的 userId 为准（AuthMiddleware 由 Redis 注入 ctx.userInfo）；
+    // 前端不再需要显式传 userId，也堵住「传他人手机号查其资料」的越权。
+    const uid = this.ctx.userInfo?.userId || userId;
+    return await this.userService.getUserById(uid);
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
