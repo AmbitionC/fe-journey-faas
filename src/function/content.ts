@@ -40,6 +40,7 @@ import { Repository } from 'typeorm';
 import { NavConfigEntity } from '../entity/navConfig';
 import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
+import { RedisService } from '@midwayjs/redis';
 import { assertAdmin } from '../common/admin.guard';
 import {
   TreeQueryDTO,
@@ -71,6 +72,7 @@ import { assertSafeSegment, normalizeFilePath } from '../service/content/path';
 @Provide()
 export class ContentHTTPService {
   @Inject() ctx: Context;
+  @Inject() redisService: RedisService;
 
   @Config('syncSecret') syncSecret: string;
 
@@ -88,7 +90,7 @@ export class ContentHTTPService {
     method: 'get',
   })
   async getContentTree(@Query(ALL) query: TreeQueryDTO): Promise<any> {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     const config = await this.navConfigModel.findOneBy({
       module: query.module,
     });
@@ -107,7 +109,7 @@ export class ContentHTTPService {
     method: 'get',
   })
   async getContentArticle(@Query(ALL) query: ArticleQueryDTO): Promise<any> {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     // C1: 路径穿越防护
     const filePath = normalizeFilePath(query.filePath || '');
     assertSafeSegment(filePath, query.key);
@@ -136,7 +138,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async saveContentArticle(@Body(ALL) body: SaveArticleDTO): Promise<any> {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     // C1: 路径穿越防护
     const filePath = normalizeFilePath(body.filePath || '');
     assertSafeSegment(filePath, body.key);
@@ -208,7 +210,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async deleteContentArticle(@Body(ALL) body: DeleteArticleDTO): Promise<any> {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     // C1: 路径穿越防护
     const filePath = normalizeFilePath(body.filePath || '');
     assertSafeSegment(filePath, body.key);
@@ -254,7 +256,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async updateContentTree(@Body(ALL) body: TreeUpdateDTO): Promise<any> {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     let config = await this.navConfigModel.findOneBy({ module: body.module });
     if (!config) {
       config = this.navConfigModel.create({
@@ -281,7 +283,7 @@ export class ContentHTTPService {
     method: 'post',
   })
   async uploadContentImage(@Body(ALL) body: UploadImageDTO): Promise<any> {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     // C1: fileName 安全校验（不允许路径分隔符和 ..）
     assertSafeSegment('', body.fileName);
     const buf = Buffer.from(body.dataBase64, 'base64');

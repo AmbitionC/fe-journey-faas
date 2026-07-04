@@ -8,6 +8,7 @@ import {
   ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
+import { RedisService } from '@midwayjs/redis';
 import { InvestAdvisorService } from '../service/invest/advisor';
 import { assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
@@ -17,6 +18,9 @@ import { R } from '../common/base.error.utils';
 export class InvestAdvisorHTTPService {
   @Inject()
   ctx: Context;
+
+  @Inject()
+  redisService: RedisService;
 
   @Inject()
   advisorService: InvestAdvisorService;
@@ -55,7 +59,7 @@ export class InvestAdvisorHTTPService {
     method: 'post',
   })
   async saveReco(@Body(ALL) body: any) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.rec_date || !body?.code || !body?.source_type) {
       throw R.validateError('rec_date / code / source_type 必填');
     }
@@ -70,7 +74,7 @@ export class InvestAdvisorHTTPService {
     method: 'post',
   })
   async deleteReco(@Body(ALL) body: { rec_date: string; code: string; source_type: string }) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.rec_date || !body?.code || !body?.source_type) {
       throw R.validateError('rec_date / code / source_type 必填');
     }
@@ -110,7 +114,7 @@ export class InvestAdvisorHTTPService {
     method: 'post',
   })
   async saveTheme(@Body(ALL) body: any) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.rec_date || !body?.theme || !body?.source_type) {
       throw R.validateError('rec_date / theme / source_type 必填');
     }
@@ -125,7 +129,7 @@ export class InvestAdvisorHTTPService {
     method: 'post',
   })
   async deleteTheme(@Body(ALL) body: { rec_date: string; theme: string; source_type: string }) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.rec_date || !body?.theme || !body?.source_type) {
       throw R.validateError('rec_date / theme / source_type 必填');
     }

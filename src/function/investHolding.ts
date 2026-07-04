@@ -8,6 +8,7 @@ import {
   ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
+import { RedisService } from '@midwayjs/redis';
 import { InvestHoldingService } from '../service/invest/holding';
 import { SnapshotRowInput } from '../service/invest/calc';
 import { assertAdmin } from '../common/admin.guard';
@@ -18,6 +19,9 @@ import { R } from '../common/base.error.utils';
 export class InvestHoldingHTTPService {
   @Inject()
   ctx: Context;
+
+  @Inject()
+  redisService: RedisService;
 
   @Inject()
   holdingService: InvestHoldingService;
@@ -43,7 +47,7 @@ export class InvestHoldingHTTPService {
   async saveCurrent(
     @Body(ALL) body: { code: string; shares: number; cost_price: number; entry_date?: string }
   ) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.code) throw R.validateError('code 必填');
     return { success: true, data: await this.holdingService.upsertCurrent(body) };
   }
@@ -56,7 +60,7 @@ export class InvestHoldingHTTPService {
     method: 'post',
   })
   async deleteCurrent(@Body(ALL) body: { code: string }) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.code) throw R.validateError('code 必填');
     return { success: true, data: await this.holdingService.deleteCurrent(body.code) };
   }
@@ -93,7 +97,7 @@ export class InvestHoldingHTTPService {
   async saveSnapshot(
     @Body(ALL) body: { snapshot_date: string; cash: number; rows: SnapshotRowInput[] }
   ) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.snapshot_date || !Array.isArray(body.rows)) {
       throw R.validateError('snapshot_date / rows 必填');
     }
@@ -115,7 +119,7 @@ export class InvestHoldingHTTPService {
     method: 'post',
   })
   async deleteSnapshotRow(@Body(ALL) body: { snapshot_date: string; code: string }) {
-    assertAdmin(this.ctx);
+    await assertAdmin(this.ctx, this.redisService);
     if (!body?.snapshot_date || !body?.code) throw R.validateError('snapshot_date / code 必填');
     return {
       success: true,
