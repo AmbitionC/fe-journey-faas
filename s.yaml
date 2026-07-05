@@ -106,6 +106,8 @@ resources:
         INVEST_RESULTS_DIR: /tmp/invest-results
         DIGEST_WINDOW: '20'
         ONCE_STEP: '3'
+        # 套利模块开关（默认观察态 0；启用态由部署 env 注入 1）
+        ARB_ENABLED: ${env('ARB_ENABLED', '0')}
       triggers:
         - triggerName: market-hours
           triggerType: timer
@@ -150,6 +152,8 @@ resources:
         # 操作计划参数（含义与原 plan-notify workflow 的 Variables 相同）
         ACCOUNT_CASH: ${env('ACCOUNT_CASH', '0')}
         PLAN_ARGS: ${env('PLAN_ARGS', '')}
+        # 套利模块开关（默认观察态 0；启用态由部署 env 注入 1）
+        ARB_ENABLED: ${env('ARB_ENABLED', '0')}
       triggers:
         - triggerName: snapshot-remind
           triggerType: timer

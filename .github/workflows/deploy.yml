@@ -36,6 +36,8 @@ env:
   INVEST_GH_PAT: ${{ secrets.INVEST_GH_PAT || secrets.GH_TOKEN }}
   LIVE_WATCH_MENTION: ${{ vars.LIVE_WATCH_MENTION }}
   ACCOUNT_CASH: ${{ vars.ACCOUNT_CASH || '0' }}
+  # 套利模块开关（仓库变量未设时默认 1=启用态整体测；回退设仓库变量 ARB_ENABLED=0 重部署）
+  ARB_ENABLED: ${{ vars.ARB_ENABLED || '1' }}
   PLAN_ARGS: ${{ vars.PLAN_ARGS }}
 
 jobs:
