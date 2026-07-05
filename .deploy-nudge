@@ -1,2 +1,2 @@
-redeploy: 发布套利模块全部改动 + invest-model master c7cad8f（dividend_event 修复）
-2026-07-05 arb-publish
+redeploy: 三水表市场资金流自动构建（北向+两融按行业）+ invest-model master 0e0f379
+2026-07-05 arb-watermeter-auto
