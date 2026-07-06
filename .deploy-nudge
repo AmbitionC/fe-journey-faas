@@ -1,1 +1,1 @@
-redeploy trigger — 2026-07-06 发布 invest-model master P10（未盈利新仓破MA20→减半而非清仓，PR #30 / ff39c3f）
+redeploy trigger — 2026-07-06 发布 invest-model master 7c9faf4（P10 决策层+盯盘层统一：未盈利破MA20→减半而非清仓）
