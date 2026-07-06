@@ -1,3 +1,3 @@
 daily_update_plan
-# 补跑 2026-07-06 盘后计划：19:04 因 action_plan.model_view VARCHAR(32) DataError(1406) 失败，
-# schema 已加宽到 128（invest-model 30544b5）且 FC 已重部署，补跑一次即可正常出计划。
+# 重试补跑 20260706：上次(19:30)因 minitick「ip超限·多ip同时使用」数据源限流失败(SystemExit)，
+# 非代码问题（model_view DataError 已修）；停掉并发后重试一次让今日计划正常落库+推 Issue #9。
