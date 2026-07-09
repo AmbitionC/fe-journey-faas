@@ -162,6 +162,8 @@ jobs:
       # （返回 skipped），任何时段都无副作用风险极小；函数报错则本步骤失败。
       - name: Smoke test (invoke live_watch once)
         run: |
-          # s invoke 对函数报错也返回 0，这里显式检查 InvocationError 让本步骤如实变红
+          set -o pipefail   # 否则 `s invoke | tee` 的退出码取 tee(=0)，控制面报错(500)被吞成假绿
+          # 两类报错都要变红：① 控制面报错 → s invoke 非零退出，pipefail 上抛；
+          # ② 函数级报错 → s invoke 返回 0 但日志含 InvocationError，显式 grep 兜住。
           s investLiveWatch invoke -e '{"payload":"live_watch"}' --access aliyun | tee /tmp/smoke.out
-          ! grep -q "Error Type: InvocationError" /tmp/smoke.out
+          ! grep -qE "Error Type: InvocationError|InternalServerError|failed to \[invoke\]" /tmp/smoke.out

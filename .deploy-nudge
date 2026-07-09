@@ -1,2 +1,2 @@
-redeploy: 打包补齐fear_gauge等4个scripts+恐慌导入放try（invest-model master 70fea83 / PR#45）
-2026-07-09 package-missing-scripts
+redeploy: 账户快照自愈补断档（invest-model master c4112f5 / PR#47）
+2026-07-09 self-heal-snapshot-gap
