@@ -1,2 +1,2 @@
-redeploy: 财务表回填限近窗口，日更不再被首次全量回填阻塞（invest-model master f619f30）
-2026-07-09 update-backfill-window
+redeploy: 数据更新失败不再阻断账户快照/恐慌落库（invest-model master 5fea25e / PR#44）
+2026-07-09 daily-job-resilient-snapshot
