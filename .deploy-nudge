@@ -1,2 +1,2 @@
-redeploy: fear落库失败/未推进显式告警(invest-model master 92fdac2) + 恐慌值排查闭环
-2026-07-09 fear-alert-hardening
+redeploy: 打包 invest-model master 8a11736（fear告警 + 盯盘ETF去重/可读性一并上线）
+2026-07-09 live-watch-dedup
