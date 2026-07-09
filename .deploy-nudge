@@ -1,2 +1,2 @@
-redeploy: 数据更新失败不再阻断账户快照/恐慌落库（invest-model master 5fea25e / PR#44）
-2026-07-09 daily-job-resilient-snapshot
+redeploy: 打包补齐fear_gauge等4个scripts+恐慌导入放try（invest-model master 70fea83 / PR#45）
+2026-07-09 package-missing-scripts
