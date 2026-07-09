@@ -77,6 +77,7 @@ jobs:
 
       - name: Invoke
         run: |
+          set -o pipefail   # 否则 `s invoke | tee` 的退出码取 tee(=0)，控制面报错(500)被吞成假绿
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             JOB="${{ inputs.job }}"
           else
@@ -90,6 +91,7 @@ jobs:
           if [ "$JOB" = "live_watch" ]; then FN=investLiveWatch; else FN=investScheduler; fi
           mkdir -p invest-dist noderuntime   # 占位：invoke 只走控制面，不需要真实代码目录
           echo "→ invoke $FN payload=$JOB"
-          # s invoke 对函数报错也返回 0，这里显式检查 InvocationError 让本步骤如实变红
+          # 两类报错都要变红：① 控制面报错(500/超时)→ s invoke 非零退出，pipefail 上抛；
+          # ② 函数级报错 → s invoke 仍返回 0，但日志含 InvocationError，显式 grep 兜住。
           s "$FN" invoke -e "{\"payload\":\"$JOB\"}" --access aliyun | tee /tmp/invoke.out
-          ! grep -q "Error Type: InvocationError" /tmp/invoke.out
+          ! grep -qE "Error Type: InvocationError|InternalServerError|failed to \[invoke\]" /tmp/invoke.out
