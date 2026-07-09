@@ -1,4 +1,3 @@
 daily_update_plan
-# 手动触发#5：上次invoke#4遇FC控制面瞬时InternalServerError(500,"please retry")，
-# 函数未执行、非代码问题。重试一次让daily_update_plan完整跑：补齐脚本后应越过恐慌步、
-# 写account_snapshot最新交易日，把总资产从7/3解卡。
+# 手动触发#6：补洞式补断档已部署(20:30Z deploy 2f8a0f5)。跑一次把中间断掉的
+# 7/6~7/8账户快照回填，净值曲线7/3→7/9连续。旧invoke早已超时结束，Tushare应无争用。
