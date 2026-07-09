@@ -1,4 +1,4 @@
 daily_update_plan
-# 手动触发#4：invest-scheduler已于16:11Z(deploy 32e037e)打新包，补齐fear_gauge等4脚本、
-# 恐慌导入放try。这次流程应完整跑到账户快照落库。即便update因并发ip超限失败，
-# resilience兜底仍按库内收盘×持仓写account_snapshot最新交易日，把总资产从7/3解卡。
+# 手动触发#5：上次invoke#4遇FC控制面瞬时InternalServerError(500,"please retry")，
+# 函数未执行、非代码问题。重试一次让daily_update_plan完整跑：补齐脚本后应越过恐慌步、
+# 写account_snapshot最新交易日，把总资产从7/3解卡。
