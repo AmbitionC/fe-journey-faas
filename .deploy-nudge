@@ -1,2 +1,2 @@
-redeploy: 账户快照日更重估上线（invest-model master 36778fa）
-2026-07-09 account-snapshot-daily
+redeploy: 财务表回填限近窗口，日更不再被首次全量回填阻塞（invest-model master f619f30）
+2026-07-09 update-backfill-window
