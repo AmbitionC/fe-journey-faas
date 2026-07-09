@@ -1,2 +1,2 @@
-redeploy: 打包 invest-model master 8a11736（fear告警 + 盯盘ETF去重/可读性一并上线）
-2026-07-09 live-watch-dedup
+redeploy: 账户快照日更重估上线（invest-model master 36778fa）
+2026-07-09 account-snapshot-daily
