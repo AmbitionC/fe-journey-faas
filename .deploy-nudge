@@ -1,2 +1,2 @@
-redeploy: 配额恢复后统一发版——pool 分段容错(PR#16) + invest-model FC入库job/P12(默认关)/P0修复
-2026-07-10 quota-restored-batch
+redeploy: 计划发布去重决策日修复（invest-model PR#57）
+2026-07-10 plan-dedupe-fix
