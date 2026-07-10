@@ -1,2 +1,2 @@
-redeploy: 补断档MIN起点补洞式（invest-model master accc332 / PR#49）
-2026-07-09 backfill-middle-holes
+redeploy: 配额恢复后统一发版——pool 分段容错(PR#16) + invest-model FC入库job/P12(默认关)/P0修复
+2026-07-10 quota-restored-batch
