@@ -1,2 +1,2 @@
-redeploy: 美股模块 API 上线（/invest/us/*，invest-model us-update 写库）
-2026-07-12 us-module-api
+redeploy: 美股V2估值锚（watchlist联us_valuation）
+2026-07-12 us-v2-valuation

@@ -97,6 +97,7 @@ export class InvestUsService {
   }
 
   async watchlist() {
+    // V2：联最新估值锚快照（回本周期/分档/接盘价/追高旗）
     return this.db.q(
       `SELECT i.code, i.name, i.kind, i.sector, i.sleeve_hint,
               (SELECT close FROM us_stock_daily d
@@ -106,8 +107,12 @@ export class InvestUsService {
                ORDER BY plan_date DESC LIMIT 1) grade,
               (SELECT reason FROM us_action_plan p
                WHERE p.code = i.code AND p.sleeve = 'satellite'
-               ORDER BY plan_date DESC LIMIT 1) reason
+               ORDER BY plan_date DESC LIMIT 1) reason,
+              v.payback_years, v.verdict, v.anchor_price, v.chase_high
        FROM us_stock_info i
+       LEFT JOIN us_valuation v
+         ON v.code = i.code
+        AND v.asof = (SELECT MAX(asof) FROM us_valuation)
        WHERE i.code != '^VIX'
        ORDER BY FIELD(i.kind,'etf','stock'), i.code`);
   }
