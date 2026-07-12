@@ -1,2 +1,2 @@
-redeploy: 补断档MIN起点补洞式（invest-model master accc332 / PR#49）
-2026-07-09 backfill-middle-holes
+redeploy: 美股模块 API 上线（/invest/us/*，invest-model us-update 写库）
+2026-07-12 us-module-api
