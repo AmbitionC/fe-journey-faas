@@ -1,3 +1,2 @@
-redeploy: 计划发布去重决策日修复（invest-model PR#57）
-2026-07-10 plan-dedupe-fix
-1783698764
+redeploy: 美股模块 API 上线（/invest/us/*，invest-model us-update 写库）
+2026-07-12 us-module-api
