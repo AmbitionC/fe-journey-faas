@@ -161,6 +161,25 @@ jobs:
           grep -qi '^access-control-allow-credentials: true' /tmp/nav-list-browser.headers
           node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/nav-list-browser.out','utf8')); if (!body || body.success !== true || !Array.isArray(body.data?.navData)) throw new Error('invalid browser navList response')"
 
+          # 投资站与知识站共用同一个 fe-journey-main。任何全局 CORS 变更都必须
+          # 验证投资站 Origin，避免登录、验证码和 /invest/* 被整体拦截。
+          invest_preflight_code=$(curl -sS -o /dev/null -D /tmp/invest-preflight.headers \
+            -w '%{http_code}' -X OPTIONS \
+            -H 'Origin: https://invest-journey.cn' \
+            -H 'Access-Control-Request-Method: GET' \
+            -H 'Access-Control-Request-Headers: token' \
+            "$FUNCTION_URL/invest/health")
+          test "$invest_preflight_code" = "204"
+          grep -qi '^access-control-allow-origin: https://invest-journey.cn' /tmp/invest-preflight.headers
+          grep -qi '^access-control-allow-credentials: true' /tmp/invest-preflight.headers
+
+          curl -sS -o /tmp/invest-captcha.out -D /tmp/invest-captcha.headers \
+            -H 'Origin: https://invest-journey.cn' \
+            "$FUNCTION_URL/auth/queryCaptcha"
+          grep -qi '^access-control-allow-origin: https://invest-journey.cn' /tmp/invest-captcha.headers
+          grep -qi '^access-control-allow-credentials: true' /tmp/invest-captcha.headers
+          node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/invest-captcha.out','utf8')); if (!body || body.code !== 200 || !body.data?.id || !body.data?.imageBase64) throw new Error('invalid invest captcha response')"
+
       # 内容发布金丝雀：首篇知识文章与关键配图必须已经由资源仓库 Action 同步到 OSS。
       - name: Smoke test published Transformer article
         env:
