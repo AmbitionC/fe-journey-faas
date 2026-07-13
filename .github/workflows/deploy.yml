@@ -141,6 +141,24 @@ jobs:
           fi
           node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/nav-list.out','utf8')); if (!body || body.success !== true || !body.data || !Array.isArray(body.data.navData)) throw new Error('invalid navList response')"
 
+      # 一次性修复：资源仓库此前在 FC 异常窗口漏同步，精确补传最终原子提交。
+      - name: Repair Transformer content sync
+        env:
+          FUNCTION_URL: ${{ steps.function_url.outputs.url }}
+          CONTENT_BEFORE: c84c55e9de26a35154c930bf950947082ea14fc1
+          CONTENT_AFTER: a3a6505c0fbe8a98ae52877b5dab91fa5afae013
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "$FUNCTION_URL/content/sync" \
+            -H "x-sync-secret: $SYNC_SECRET" \
+            -H 'Content-Type: application/json' \
+            -d "{\"beforeSha\":\"$CONTENT_BEFORE\",\"afterSha\":\"$CONTENT_AFTER\"}" \
+            -o /tmp/content-sync.out
+          grep -q '"success":true' /tmp/content-sync.out
+          grep -q '"articles":1' /tmp/content-sync.out
+          grep -q '"images":2' /tmp/content-sync.out
+          grep -q '"errors":\[\]' /tmp/content-sync.out
+
       # 内容发布金丝雀：首篇知识文章与关键配图必须已经由资源仓库 Action 同步到 OSS。
       - name: Smoke test published Transformer article
         env:
