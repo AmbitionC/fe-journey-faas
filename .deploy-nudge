@@ -1,2 +1,2 @@
-redeploy: 注入再次更新的 Tushare token（上次报 token不对，疑粘贴格式）
-2026-07-13 tushare-token-refresh-2
+redeploy: 切换 Tushare 镜像到 gyzcloud（token+URL 已成对更新，minitick 已废弃）
+2026-07-13 tushare-gyzcloud-switch
