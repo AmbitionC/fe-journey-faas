@@ -139,7 +139,7 @@ jobs:
             s fcJourneyMain logs --access aliyun || true
             exit 1
           fi
-          node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/nav-list.out','utf8')); if (!body || body.code !== 200 || !Array.isArray(body.data)) throw new Error('invalid navList response')"
+          node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/nav-list.out','utf8')); if (!body || body.success !== true || !body.data || !Array.isArray(body.data.navData)) throw new Error('invalid navList response')"
 
   # ── invest-model 定时函数（盯盘/复盘等，独立 job：与 fe-journey 部署互不阻塞）──
   deploy-invest-scheduler:
