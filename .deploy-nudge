@@ -1,2 +1,2 @@
-redeploy: arb 1064 修复上线（invest-model 55edd20 反引号转义 key/rank）
-2026-07-13 arb-reserved-word-fix
+redeploy: 重跑（上次 deploy 因 GitHub Service Unavailable 抖动失败，非代码问题）
+2026-07-13 arb-fix-retry
