@@ -21,14 +21,29 @@ let redisService;
 let articleService;
 let retrieveService;
 
-// 流式分支绕过框架，手动补 CORS（公网跨域调用需要）
+// FC Web 入口统一补 CORS。普通路由也必须在这里处理：浏览器携带 token 等
+// 自定义请求头时会先发 OPTIONS，而自定义 server.js 不会自动经过 Midway 的
+// cross-domain 中间件；只依赖 config.default.ts 会导致 curl 正常、浏览器失败。
+const CORS_ORIGINS = new Set([
+  'https://fe-journey.cn',
+  'http://localhost:8000',
+  'http://localhost:8001',
+  'http://127.0.0.1:8000',
+  'http://127.0.0.1:8001',
+]);
+
 function setCors(req, res) {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  const origin = req.headers.origin;
+  const allowed = !origin || CORS_ORIGINS.has(origin);
+  if (origin && allowed) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,DELETE,PATCH,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,token');
-  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return allowed;
 }
 
 function readBody(req) {
@@ -173,6 +188,12 @@ async function handleStream(req, res) {
 
 // 其余路由走 Midway 框架（缓冲响应）
 async function handleFramework(req, res, url) {
+  const corsAllowed = setCors(req, res);
+  if ((req.method || '').toUpperCase() === 'OPTIONS') {
+    res.statusCode = corsAllowed ? 204 : 403;
+    return res.end();
+  }
+
   try {
     const method = (req.method || 'GET').toLowerCase();
     if (['post', 'put', 'delete', 'patch'].includes(method)) {
@@ -188,6 +209,8 @@ async function handleFramework(req, res, url) {
     const { statusCode, headers, body, isBase64Encoded } = result;
     if (res.headersSent) return;
     for (const key in headers || {}) res.setHeader(key, headers[key]);
+    // 框架响应头可能覆盖入口层设置；以入口白名单重新落一次最终值。
+    setCors(req, res);
     res.statusCode = statusCode || 200;
     if (isBase64Encoded && typeof body === 'string') {
       res.end(Buffer.from(body, 'base64'));
@@ -195,6 +218,7 @@ async function handleFramework(req, res, url) {
       res.end(body);
     }
   } catch (err) {
+    setCors(req, res);
     if (!res.headersSent) res.statusCode = (err && err.status) || 500;
     res.end((err && err.message) || 'Internal Server Error');
   }
