@@ -1,2 +1,2 @@
-redeploy: 恐慌未推进告警改判据，消除周末/重跑/盘中误报（invest-model master 76803f2）
-2026-07-13 fear-alert-false-positive-fix
+redeploy: 注入更新后的 Tushare token（旧 token 已过期，7/13 数据卡在 7/10）
+2026-07-13 tushare-token-refresh
