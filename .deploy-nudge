@@ -1,2 +1,2 @@
-redeploy: 重跑（上次 deploy 因 GitHub Service Unavailable 抖动失败，非代码问题）
-2026-07-13 arb-fix-retry
+redeploy: P16 v2 顶部特征自动减半（invest-model action_plan 4f6d451）
+2026-07-13 p16-auto-halve
