@@ -1,1 +1,2 @@
-盘中恐慌小时级：s.yaml 加 fear-intraday timer(北京10/11/13/14/15) + insight.fearLatest 透出盘中值 2026-07-13T07:08:45Z
+redeploy: 恐慌未推进告警改判据，消除周末/重跑/盘中误报（invest-model master 76803f2）
+2026-07-13 fear-alert-false-positive-fix
