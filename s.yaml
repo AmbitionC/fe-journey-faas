@@ -20,8 +20,13 @@ resources:
       diskSize: 512
       timeout: 120
       instanceConcurrency: 100
-      # 开启函数日志，部署后冒烟失败时 Actions 可直接回捞启动错误。
-      logConfig: auto
+      # 部署后冒烟失败时 Actions 可直接回捞启动错误。
+      logConfig:
+        enableInstanceMetrics: true
+        enableRequestMetrics: true
+        logBeginRule: DefaultRegex
+        logstore: default-logs
+        project: serverless-cn-hangzhou-11097e09-08a3-5424-9d4d-873e01988b5d
       # 以 Web 函数方式启动：FC3 运行 node server.js，监听 9000，转发 HTTP 并支持流式
       customRuntimeConfig:
         # custom.debian10 不带 node，用代码包里打入的 node 二进制（workflow 下载到 noderuntime/）
