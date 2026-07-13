@@ -26,6 +26,8 @@ let retrieveService;
 // cross-domain 中间件；只依赖 config.default.ts 会导致 curl 正常、浏览器失败。
 const CORS_ORIGINS = new Set([
   'https://fe-journey.cn',
+  'https://invest-journey.cn',
+  'https://www.invest-journey.cn',
   'http://localhost:8000',
   'http://localhost:8001',
   'http://127.0.0.1:8000',
