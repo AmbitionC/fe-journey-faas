@@ -89,6 +89,7 @@ jobs:
 
       # 打印函数公网地址（fcapp.run，前端 getApiDomain 使用）；只输出 URL 字段
       - name: Print function internet URL
+        id: function_url
         env:
           AK_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
           AK_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
@@ -107,10 +108,38 @@ jobs:
           resp = Client(cfg).get_trigger('fe-journey-main', 'httpTrigger')
           ht = getattr(resp.body, 'http_trigger', None)
           print('==== FUNCTION URLS ====')
-          print(json.dumps({
-              'urlInternet': getattr(ht, 'url_internet', None) if ht else None,
-          }, ensure_ascii=False))
+          url = getattr(ht, 'url_internet', None) if ht else None
+          if not url:
+              raise RuntimeError('FC httpTrigger has no public internet URL')
+          print(json.dumps({'urlInternet': url}, ensure_ascii=False))
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f"url={url}\n")
           EOF
+
+      # s deploy 只代表控制面更新成功；必须等待运行时真正启动并能响应核心只读接口。
+      - name: Smoke test deployed web function
+        env:
+          FUNCTION_URL: ${{ steps.function_url.outputs.url }}
+        run: |
+          set -o pipefail
+          ok=0
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /tmp/nav-list.out -w '%{http_code}' \
+              --connect-timeout 10 --max-time 30 \
+              "$FUNCTION_URL/article/navList?module=knowledge") || code=000
+            if [ "$code" = "200" ]; then
+              ok=1
+              break
+            fi
+            echo "Smoke attempt $attempt failed with HTTP $code"
+            sleep 10
+          done
+          if [ "$ok" != "1" ]; then
+            echo 'Web function did not become ready; recent FC logs follow:'
+            s fcJourneyMain logs --access aliyun || true
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/nav-list.out','utf8')); if (!body || body.code !== 200 || !Array.isArray(body.data)) throw new Error('invalid navList response')"
 
   # ── invest-model 定时函数（盯盘/复盘等，独立 job：与 fe-journey 部署互不阻塞）──
   deploy-invest-scheduler:
