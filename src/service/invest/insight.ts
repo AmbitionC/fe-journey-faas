@@ -121,7 +121,26 @@ export class InvestInsightService {
     const row = await this.db.one(
       'SELECT trade_date, score, level, components, raw FROM fear_daily ORDER BY trade_date DESC LIMIT 1');
     if (!row) return null;
-    return { ...row, components: parseJson(row.components), raw: parseJson(row.raw) };
+    const daily = { ...row, components: parseJson(row.components), raw: parseJson(row.raw) };
+    // 盘中(近似)：若 fear_intraday 有「同一交易日或更新」的快照，则透出为当前值，
+    // 并带 intraday=true + snapshot_ts 供前端标注；表缺失/无数据静默回退日频。
+    try {
+      const intra = await this.db.one(
+        'SELECT trade_date, snapshot_ts, score, level, components, raw FROM fear_intraday ' +
+        'ORDER BY trade_date DESC, snapshot_ts DESC LIMIT 1');
+      if (intra && String(intra.trade_date) >= String(daily.trade_date)) {
+        return {
+          ...intra,
+          components: parseJson(intra.components),
+          raw: parseJson(intra.raw),
+          intraday: true,
+          daily_score: daily.score,       // 保留当日已定格的收盘官方值供对照（可能为空）
+        };
+      }
+    } catch {
+      // fear_intraday 表尚未建/无数据 → 回退日频，不影响总览
+    }
+    return daily;
   }
 
   async fearSeries(start?: string, end?: string) {

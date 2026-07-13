@@ -176,6 +176,15 @@ resources:
             cronExpression: '0 0 9 ? * MON-FRI'    # 北京 17:00 增量更新→链式出操作计划
             enable: true
             payload: 'daily_update_plan'
+        - triggerName: fear-intraday
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            # 北京 10/11/13/14/15 点（UTC 2/3/5/6/7）盘中恐慌(近似)全市场快照；
+            # 任务内含交易时段/交易日守卫，非时段毫秒退出；日频收盘值不受影响。
+            cronExpression: '0 0 2,3,5,6,7 ? * MON-FRI'
+            enable: true
+            payload: 'fear_intraday'
         - triggerName: weekly-rebuild-review
           triggerType: timer
           qualifier: LATEST
