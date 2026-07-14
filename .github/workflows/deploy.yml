@@ -253,11 +253,11 @@ jobs:
             "$OSS_BASE/knowledge/llm/basics/transformer-arch.md" \
             -o /tmp/transformer-arch.md
           grep -q 'Transformer 可以先理解为' /tmp/transformer-arch.md
-          grep -q 'transformer-arch-modern-decoder-block-v3.png' /tmp/transformer-arch.md
-          grep -q 'transformer-arch-causal-attention-v3.png' /tmp/transformer-arch.md
+          grep -q 'transformer-arch-modern-decoder-block-v4.webp' /tmp/transformer-arch.md
+          grep -q 'transformer-arch-causal-attention-v4.webp' /tmp/transformer-arch.md
           for image in \
-            transformer-arch-modern-decoder-block-v3.png \
-            transformer-arch-causal-attention-v3.png; do
+            transformer-arch-modern-decoder-block-v4.webp \
+            transformer-arch-causal-attention-v4.webp; do
             curl -fsS --retry 6 --retry-delay 10 --retry-all-errors \
               "$OSS_BASE/images/$image" -o "/tmp/$image"
             test "$(wc -c < "/tmp/$image")" -gt 100000
