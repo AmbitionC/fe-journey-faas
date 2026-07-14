@@ -47,8 +47,8 @@ env:
   LIVE_WATCH_MENTION: ${{ vars.LIVE_WATCH_MENTION }}
   ACCOUNT_CASH: ${{ vars.ACCOUNT_CASH || '0' }}
   PLAN_ARGS: ${{ vars.PLAN_ARGS }}
-  # 套利模块开关（仓库变量未设时默认 1=启用态整体测；回退设仓库变量 ARB_ENABLED=0）
-  ARB_ENABLED: ${{ vars.ARB_ENABLED || '1' }}
+  # 套利模块开关（默认 0=观察态：不发防御 sleeve 行，计划=纯投顾主导引擎B）。整体测再设仓库变量 ARB_ENABLED=1。
+  ARB_ENABLED: ${{ vars.ARB_ENABLED || '0' }}
 
 jobs:
   invoke:
