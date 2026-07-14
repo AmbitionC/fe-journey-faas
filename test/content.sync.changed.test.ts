@@ -279,6 +279,46 @@ describe('syncChanged() — 路由逻辑', () => {
     assert.strictEqual(oss.puts.length, 0);
   });
 
+  it('图片重同步清单 → 上传列出的存量图片并去重', async () => {
+    const io = makeIO({
+      '.codex/image-resync.txt': [
+        '# repair missing OSS objects',
+        'images/a.png',
+        'images/b.png',
+        'images/a.png',
+      ].join('\n'),
+    }, {
+      'images/a.png': Buffer.from('image-a'),
+      'images/b.png': Buffer.from('image-b'),
+    });
+    const oss = makeOssMock();
+    const nav = makeNavDbMock();
+
+    const result = await syncChanged(
+      [{ path: '.codex/image-resync.txt', status: 'modified' }],
+      nav.saveNavToDb, oss, io
+    );
+
+    assert.strictEqual(result.images, 2);
+    assert.deepStrictEqual(oss.images.map(item => item.name), ['a.png', 'b.png']);
+    assert.deepStrictEqual(result.errors, []);
+  });
+
+  it('应同步的 GitHub 图片不存在 → 记录错误而不再静默成功', async () => {
+    const io = makeIO({});
+    const oss = makeOssMock();
+    const nav = makeNavDbMock();
+
+    const result = await syncChanged(
+      [{ path: 'images/missing.png', status: 'modified' }],
+      nav.saveNavToDb, oss, io
+    );
+
+    assert.strictEqual(result.images, 0);
+    assert.strictEqual(result.errors.length, 1);
+    assert.match(result.errors[0], /GitHub 图片不存在或无法读取/);
+  });
+
   // -------------------------------------------------------------------------
   // 不认识的路径 → 静默忽略
   // -------------------------------------------------------------------------
