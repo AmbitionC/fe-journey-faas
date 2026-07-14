@@ -117,6 +117,68 @@ jobs:
               output.write(f"url={url}\n")
           EOF
 
+      # 资源仓库的 Actions 被停用时，可通过一次带 [resync-content] 的发布提交
+      # 使用本仓库已配置的运行时凭证，分批恢复 OSS 图片与最新知识目录。
+      - name: Repair published knowledge content
+        if: contains(github.event.head_commit.message, '[resync-content]')
+        env:
+          FUNCTION_URL: ${{ steps.function_url.outputs.url }}
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/AmbitionC/front-end-journey-resource/contents/.codex/image-resync.txt" \
+            -o /tmp/image-resync.txt
+
+          node - << 'NODE'
+          const fs = require('fs');
+          const manifest = fs.readFileSync('/tmp/image-resync.txt', 'utf8');
+          const images = manifest
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('#'));
+
+          if (!images.length || images.some(path => !path.startsWith('images/'))) {
+            throw new Error('invalid or empty image repair manifest');
+          }
+
+          const paths = ['knowledge/_tree.json', ...images];
+          const endpoint = process.env.FUNCTION_URL.replace(/\/+$/, '') + '/content/sync';
+
+          (async () => {
+            for (let index = 0; index < paths.length; index += 5) {
+              const batch = paths.slice(index, index + 5);
+              const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  'x-sync-secret': process.env.SYNC_SECRET,
+                },
+                body: JSON.stringify({
+                  files: batch.map(path => ({ path, status: 'modified' })),
+                }),
+              });
+              const text = await response.text();
+              let payload;
+              try { payload = JSON.parse(text); } catch {
+                throw new Error('content sync returned non-JSON: ' + text.slice(0, 500));
+              }
+              const errors = payload && payload.data && payload.data.errors;
+              if (!response.ok || payload.success !== true || !Array.isArray(errors) || errors.length) {
+                throw new Error('content sync failed for ' + batch.join(', ') + ': ' + text);
+              }
+              console.log('Synced ' + Math.min(index + batch.length, paths.length) + '/' + paths.length);
+            }
+          })().catch(error => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
       # s deploy 只代表控制面更新成功；必须等待运行时真正启动并能响应核心只读接口。
       - name: Smoke test deployed web function
         env:
