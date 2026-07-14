@@ -1,2 +1,2 @@
-redeploy: 0714 持仓+现金同步 + 计划现金回退读快照(invest-model cb6d265)
-2026-07-14 holdings-cash-sync
+redeploy: 红利carry B股/ST硬闸进FC影子链路（invest-model 26c4314）
+2026-07-14 arb-bshare-guard
