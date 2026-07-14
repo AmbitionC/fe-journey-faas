@@ -1,2 +1,2 @@
-redeploy: ARB_ENABLED 默认改 0（关套利防御sleeve行）+ arb 真实股名生效
-2026-07-14 arb-disable-clean-plan
+redeploy: 0714 持仓+现金同步 + 计划现金回退读快照(invest-model cb6d265)
+2026-07-14 holdings-cash-sync
