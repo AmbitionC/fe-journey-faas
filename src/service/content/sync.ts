@@ -207,16 +207,52 @@ export async function listChangedSince(
  */
 export async function getRawBuffer(path: string): Promise<Buffer | null> {
   const url = `${GH_API_BASE}/contents/${path}`;
+
+  // Contents API 的 JSON/base64 content 字段只适用于小文件。图片超过
+  // 1 MB 时必须使用 raw media type，否则可能得到空内容或被截断的数据。
+  // 这里仍访问 api.github.com，避免依赖 FC 网络中不稳定的
+  // raw.githubusercontent.com。
+  const metadataRes = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github.object+json',
+      ...(GH_TOKEN ? { Authorization: `token ${GH_TOKEN}` } : {}),
+    },
+  });
+  if (metadataRes.status === 404) return null;
+  if (!metadataRes.ok) {
+    throw new Error(`GitHub getRawBuffer metadata ${path} 失败: ${metadataRes.status}`);
+  }
+  const metadata: any = await metadataRes.json();
+
   const res = await fetch(url, {
     headers: {
-      Accept: 'application/vnd.github+json',
+      Accept: 'application/vnd.github.raw+json',
       ...(GH_TOKEN ? { Authorization: `token ${GH_TOKEN}` } : {}),
     },
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitHub getRawBuffer ${path} 失败: ${res.status}`);
-  const json: any = await res.json();
-  return Buffer.from(String(json.content).replace(/\n/g, ''), 'base64');
+  const buf = await res.buffer();
+  assertBufferSize(path, Number(metadata.size), buf.length);
+  return buf;
+}
+
+/**
+ * 防止二进制文件在 GitHub 读取链路中被静默截断。
+ */
+export function assertBufferSize(
+  path: string,
+  expectedSize: number,
+  actualSize: number
+): void {
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 0) {
+    throw new Error(`GitHub ${path} 缺少有效的文件大小`);
+  }
+  if (actualSize !== expectedSize) {
+    throw new Error(
+      `GitHub ${path} 二进制内容不完整: 期望 ${expectedSize} bytes，实际 ${actualSize} bytes`
+    );
+  }
 }
 
 export interface SyncChangedResult {
