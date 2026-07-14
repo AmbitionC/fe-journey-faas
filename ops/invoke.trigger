@@ -1,2 +1,2 @@
 daily_update_plan
-# arb 修复验证·重试2（上次 invoke 撞 GitHub Service Unavailable 未起来）。
+# 补跑0714盘后计划：17:00例行触发疑被同时段FC重部署吞掉（issue #9无0714计划、#11无告警）。
