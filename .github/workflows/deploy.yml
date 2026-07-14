@@ -146,7 +146,11 @@ jobs:
             throw new Error('invalid or empty image repair manifest');
           }
 
-          const paths = ['knowledge/_tree.json', ...images];
+          const paths = [
+            'knowledge/_tree.json',
+            'knowledge/llm/basics/transformer-arch.md',
+            ...images,
+          ];
           const endpoint = process.env.FUNCTION_URL.replace(/\/+$/, '') + '/content/sync';
 
           (async () => {
