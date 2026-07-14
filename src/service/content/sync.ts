@@ -263,6 +263,32 @@ export interface SyncChangedResult {
   errors: string[];
 }
 
+/** 修复存量 OSS 图片时使用的可审计清单。 */
+export const IMAGE_RESYNC_MANIFEST = '.codex/image-resync.txt';
+
+/**
+ * 每行一个仓库图片路径；空行和 # 注释会被忽略。
+ */
+export function parseImageResyncManifest(content: string): string[] {
+  const paths = content
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'));
+
+  for (const path of paths) {
+    if (
+      !path.startsWith('images/') ||
+      path === 'images/' ||
+      path.includes('..') ||
+      path.includes('\\')
+    ) {
+      throw new Error(`非法的图片重同步路径: ${path}`);
+    }
+  }
+
+  return [...new Set(paths)];
+}
+
 /** 可注入的 I/O 依赖（便于单元测试时 mock） */
 export interface SyncChangedIO {
   /** 从仓库读取文本内容（raw URL）*/
@@ -295,9 +321,29 @@ export async function syncChanged(
   io: SyncChangedIO = defaultSyncIO,
 ): Promise<SyncChangedResult> {
   const result: SyncChangedResult = { manifests: 0, articles: 0, images: 0, deleted: 0, errors: [] };
+  const syncFiles = [...files];
+  const queuedPaths = new Set(syncFiles.map(file => file.path));
 
+  // 普通 push 无法让内容未变的二进制图片重新出现在 diff 中。
+  // 当重同步清单变更时，将其列出的图片显式加入本次队列。
   for (const file of files) {
+    if (file.path !== IMAGE_RESYNC_MANIFEST || file.status === 'removed') continue;
     try {
+      const content = await io.fetchText(file.path);
+      for (const imagePath of parseImageResyncManifest(content)) {
+        if (queuedPaths.has(imagePath)) continue;
+        syncFiles.push({ path: imagePath, status: 'modified' });
+        queuedPaths.add(imagePath);
+      }
+    } catch (e: any) {
+      result.errors.push(`${file.path}: ${e?.message || String(e)}`);
+    }
+  }
+
+  for (const file of syncFiles) {
+    try {
+      if (file.path === IMAGE_RESYNC_MANIFEST) continue;
+
       // ---- manifest ----
       if (isTreeManifest(file.path)) {
         const module = ALL_MODULES.find(m => file.path === manifestPath(m));
@@ -323,11 +369,10 @@ export async function syncChanged(
           result.deleted++;
         } else {
           const buf = await io.fetchBuffer(file.path);
-          if (buf) {
-            const fileName = file.path.replace(/^images\//, '');
-            await oss.putImage(fileName, buf);
-            result.images++;
-          }
+          if (!buf) throw new Error('GitHub 图片不存在或无法读取');
+          const fileName = file.path.replace(/^images\//, '');
+          await oss.putImage(fileName, buf);
+          result.images++;
         }
         continue;
       }
