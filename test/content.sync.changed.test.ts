@@ -12,7 +12,12 @@
  * - 错误捕获：单条文件处理失败不阻断整批，收入 result.errors
  */
 import * as assert from 'assert';
-import { syncChanged, ChangedFile, SyncChangedIO } from '../src/service/content/sync';
+import {
+  assertBufferSize,
+  syncChanged,
+  ChangedFile,
+  SyncChangedIO,
+} from '../src/service/content/sync';
 
 // ---------------------------------------------------------------------------
 // Mock 工厂
@@ -76,6 +81,17 @@ function makeIO(textMap: Record<string, string>, bufMap: Record<string, Buffer> 
 // ---------------------------------------------------------------------------
 
 describe('syncChanged() — 路由逻辑', () => {
+
+  it('GitHub 二进制文件大小一致 → 通过完整性校验', () => {
+    assert.doesNotThrow(() => assertBufferSize('images/photo.png', 1_200_000, 1_200_000));
+  });
+
+  it('GitHub 二进制文件被截断 → 拒绝继续上传', () => {
+    assert.throws(
+      () => assertBufferSize('images/photo.png', 1_200_000, 786_432),
+      /期望 1200000 bytes，实际 786432 bytes/
+    );
+  });
 
   // -------------------------------------------------------------------------
   // firstclass 扁平文章 added / modified
