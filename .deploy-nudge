@@ -1,2 +1,2 @@
-redeploy: ETF实时取价自检降噪（invest-model live_check e0703f5，全取到不打扰用户）
-2026-07-14 etf-selfcheck-quiet
+redeploy: 盯盘转盈持有状态补「无需操作」前缀（invest-model d5c26f2）
+2026-07-14 watch-wording
