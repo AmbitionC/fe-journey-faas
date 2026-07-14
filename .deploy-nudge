@@ -1,5 +1,2 @@
-redeploy: P16 v2 顶部特征自动减半（invest-model action_plan 4f6d451）
-2026-07-13 p16-auto-halve
-
-redeploy: retry clean web deployment after GitHub runner stall
-2026-07-13 transformer-production-verify
+redeploy: ARB_ENABLED 默认改 0（关套利防御sleeve行）+ arb 真实股名生效
+2026-07-14 arb-disable-clean-plan

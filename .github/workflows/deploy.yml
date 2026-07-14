@@ -36,8 +36,9 @@ env:
   INVEST_GH_PAT: ${{ secrets.INVEST_GH_PAT || secrets.GH_TOKEN }}
   LIVE_WATCH_MENTION: ${{ vars.LIVE_WATCH_MENTION }}
   ACCOUNT_CASH: ${{ vars.ACCOUNT_CASH || '0' }}
-  # 套利模块开关（仓库变量未设时默认 1=启用态整体测；回退设仓库变量 ARB_ENABLED=0 重部署）
-  ARB_ENABLED: ${{ vars.ARB_ENABLED || '1' }}
+  # 套利模块开关（默认 0=观察态：不发红利/可转债/盲区α 防御 sleeve 行，计划=纯投顾主导引擎B）。
+  # 想整体测再把仓库变量 ARB_ENABLED 设 1 重部署（届时前端需给套利行单独分区、勿混入观察池）。
+  ARB_ENABLED: ${{ vars.ARB_ENABLED || '0' }}
   PLAN_ARGS: ${{ vars.PLAN_ARGS }}
 
 jobs:
