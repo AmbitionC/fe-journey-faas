@@ -1,10 +1,31 @@
 import * as OSS from 'ali-oss';
+import { createHash } from 'crypto';
 import { articlePath } from './modules';
 
 /** OSS bucket 名称 */
 const BUCKET = process.env.OSS_BUCKET || 'font-end-journey-resources';
 /** OSS 所在地域 */
 const REGION = process.env.OSS_REGION || 'oss-cn-hangzhou';
+
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+  '.avif': 'image/avif',
+  '.gif': 'image/gif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+};
+
+export function imageContentType(fileName: string): string {
+  const dot = fileName.lastIndexOf('.');
+  const extension = dot >= 0 ? fileName.slice(dot).toLowerCase() : '';
+  return IMAGE_CONTENT_TYPES[extension] || 'application/octet-stream';
+}
+
+export function md5Base64(buf: Buffer): string {
+  return createHash('md5').update(buf).digest('base64');
+}
 
 /**
  * 构建 OSS 对象 key
@@ -82,7 +103,23 @@ export class OssService {
   async putImage(fileName: string, buf: Buffer): Promise<string> {
     this.assertClient();
     const objKey = `images/${fileName}`;
-    await this.client!.put(objKey, buf);
+    await this.client!.put(objKey, buf, {
+      headers: {
+        'Content-Type': imageContentType(fileName),
+        'Content-Disposition': 'inline',
+        'Content-MD5': md5Base64(buf),
+      },
+    });
+
+    // PUT 成功不等于业务上的完整：再读取对象元数据，防止
+    // Content-Length 错误或上游 Buffer 截断被当成成功发布。
+    const metadata: any = await this.client!.getObjectMeta(objKey);
+    const storedSize = Number(metadata?.res?.headers?.['content-length']);
+    if (!Number.isSafeInteger(storedSize) || storedSize !== buf.length) {
+      throw new Error(
+        `OSS ${objKey} 大小校验失败: 期望 ${buf.length} bytes，实际 ${String(storedSize)} bytes`
+      );
+    }
     return objKey;
   }
 }
