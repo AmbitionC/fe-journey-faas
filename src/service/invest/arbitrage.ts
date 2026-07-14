@@ -95,7 +95,7 @@ export class InvestArbitrageService {
       : (await this.db.one('SELECT MAX(trade_date) t FROM flow_score'))?.t;
     if (!d) return { trade_date: null, list: [] };
     const list = await this.db.q(
-      `SELECT trade_date, dimension, key, credit, fiscal, policy, composite, z
+      `SELECT trade_date, dimension, \`key\`, credit, fiscal, policy, composite, z
        FROM flow_score WHERE trade_date = ? ORDER BY composite DESC LIMIT 200`,
       [d]
     );
