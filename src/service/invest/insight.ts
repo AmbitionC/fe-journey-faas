@@ -87,9 +87,16 @@ export class InvestInsightService {
   }
 
   async backtest(runId?: number) {
+    // 「量化引擎·历史自检」要的是 CS 因子模型自检回测（name 形如 cs_<version>）。
+    // 套利账本/各 sleeve 回测（arb_repo / arb_ledger / arb_offense…）也按 version 落
+    // 同一张 backtest_run（下游零改动的设计），若直接取 created_at 最新，会被这些
+    // 未持仓的 arb run（top_k=0、nav 恒为 1）盖住，导致组合净值看起来一直是平的。
+    // 故未指定 runId 时，优先取最新的 cs_ 模型 run；兜底再退回最新任意 run。
     const run = runId
       ? await this.db.one('SELECT * FROM backtest_run WHERE run_id = ?', [runId])
-      : await this.db.one('SELECT * FROM backtest_run ORDER BY created_at DESC LIMIT 1');
+      : (await this.db.one(
+          "SELECT * FROM backtest_run WHERE name LIKE 'cs%' ORDER BY created_at DESC LIMIT 1"
+        )) ?? (await this.db.one('SELECT * FROM backtest_run ORDER BY created_at DESC LIMIT 1'));
     if (!run) return { run: null, nav: [], benchmark: [] };
     run.metrics = parseJson(run.metrics);
     run.params = parseJson(run.params);
