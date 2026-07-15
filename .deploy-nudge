@@ -1,2 +1,2 @@
-redeploy: P18突破v2上线 + 重建invest-scheduler定时器（daily 17:00连续两日静默丢失）
-2026-07-15 p18v2-and-trigger-rebuild
+redeploy: 盯盘新增恐慌抄底窗口盘中提醒（小时级fear_intraday≥75即时推送）
+2026-07-15 fear-window-live-alert
