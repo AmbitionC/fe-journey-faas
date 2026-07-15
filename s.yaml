@@ -56,6 +56,14 @@ resources:
         REDIS_PASS: ${env('REDIS_PASS')}
         # 投资驾驶舱：invest 库（同 RDS 实例，invest-model Python 端写入）
         INVEST_DB_NAME: invest
+        # 个人健康管理模块（/health/*）：独立 health 库 + 独立访问令牌。
+        # HEALTH_API_TOKEN 未配置时模块拒绝所有请求，不影响其他功能。
+        HEALTH_DB_NAME: ${env('HEALTH_DB_NAME', 'health')}
+        HEALTH_API_TOKEN: ${env('HEALTH_API_TOKEN', '')}
+        # 拍照识别热量的视觉模型（OpenAI 兼容，如 dashscope qwen-vl-max）；未配置则该功能降级
+        HEALTH_VISION_BASE_URL: ${env('HEALTH_VISION_BASE_URL', '')}
+        HEALTH_VISION_API_KEY: ${env('HEALTH_VISION_API_KEY', '')}
+        HEALTH_VISION_MODEL: ${env('HEALTH_VISION_MODEL', '')}
       triggers:
         - triggerName: httpTrigger
           triggerType: http

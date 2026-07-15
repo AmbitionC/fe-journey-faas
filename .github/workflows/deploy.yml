@@ -40,6 +40,12 @@ env:
   # 想整体测再把仓库变量 ARB_ENABLED 设 1 重部署（届时前端需给套利行单独分区、勿混入观察池）。
   ARB_ENABLED: ${{ vars.ARB_ENABLED || '0' }}
   PLAN_ARGS: ${{ vars.PLAN_ARGS }}
+  # 个人健康管理模块（/health/*）。缺 secret 解析为空串：模块拒绝请求，不影响其他功能。
+  HEALTH_DB_NAME: ${{ vars.HEALTH_DB_NAME || 'health' }}
+  HEALTH_API_TOKEN: ${{ secrets.HEALTH_API_TOKEN }}
+  HEALTH_VISION_BASE_URL: ${{ vars.HEALTH_VISION_BASE_URL }}
+  HEALTH_VISION_API_KEY: ${{ secrets.HEALTH_VISION_API_KEY }}
+  HEALTH_VISION_MODEL: ${{ vars.HEALTH_VISION_MODEL }}
 
 jobs:
   # ── fe-journey Web 函数（原有部署，逻辑不变，仅收窄为只部署 fcJourneyMain）──
