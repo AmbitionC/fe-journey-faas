@@ -17,6 +17,7 @@ class TrackDTO {
   event: string;
   props?: any;
   userId?: string;
+  channel?: string;
 }
 
 @Provide()
@@ -62,7 +63,14 @@ export class MetricsHTTPService {
     const ip =
       this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() || this.ctx.ip || '';
     const ua = this.ctx.get('user-agent') || '';
-    await this.metricsService.track({ userId, event: body.event, props: body.props, ua, ip });
+    await this.metricsService.track({
+      userId,
+      event: body.event,
+      props: body.props,
+      channel: body.channel,
+      ua,
+      ip,
+    });
     return { success: true, data: {} };
   }
 

@@ -5,9 +5,13 @@ import { BaseEntity } from './base';
 @Entity({ name: 'event_log' })
 @Index('idx_event_name_time', ['event', 'createTime'])
 @Index('idx_event_user', ['userId'])
+@Index('idx_event_channel', ['channel'])
 export class EventLogEntity extends BaseEntity {
   @Column({ comment: '用户标识(手机号 或 guest:ip)', length: 64, nullable: true })
   userId: string;
+
+  @Column({ comment: '首触渠道(如 xhs / xhs-note123 / wechat)', length: 64, nullable: true })
+  channel: string;
 
   @Column({ comment: '事件名 {模块}_{对象}_{动作}', length: 64 })
   event: string;

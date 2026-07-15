@@ -57,13 +57,21 @@ export class MetricsService {
     return rows[0] || null;
   }
 
-  async track(p: { userId?: string; event: string; props?: any; ua?: string; ip?: string }) {
+  async track(p: {
+    userId?: string;
+    event: string;
+    props?: any;
+    channel?: string;
+    ua?: string;
+    ip?: string;
+  }) {
     try {
       await this.eventLogModel.save(
         this.eventLogModel.create({
           userId: p.userId,
           event: p.event,
           props: p.props ?? null,
+          channel: p.channel ? String(p.channel).slice(0, 64) : undefined,
           ua: (p.ua || '').slice(0, 256),
           ip: p.ip,
         })
