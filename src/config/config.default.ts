@@ -28,6 +28,8 @@ import { ReviewScheduleEntity } from '../entity/reviewSchedule';
 import { EventLogEntity } from '../entity/eventLog';
 import { AiCallLogEntity } from '../entity/aiCallLog';
 import { EvalReportEntity } from '../entity/evalReport';
+import { GrowthStatEntity } from '../entity/growthStat';
+import { GrowthReviewEntity } from '../entity/growthReview';
 import { UserGoalEntity } from '../entity/userGoal';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
@@ -112,6 +114,7 @@ export default {
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,
+          GrowthStatEntity, GrowthReviewEntity,
         ],
       },
     },
