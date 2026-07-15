@@ -34,16 +34,37 @@ const CORS_ORIGINS = new Set([
   'http://127.0.0.1:8001',
 ]);
 
+// 追加额外域名（如 health-journey 前端的 Vercel 域名），逗号分隔，
+// 经环境变量 EXTRA_CORS_ORIGINS 注入，不必改代码重发版。
+for (const extra of (process.env.EXTRA_CORS_ORIGINS || '').split(',')) {
+  const o = extra.trim();
+  if (o) CORS_ORIGINS.add(o);
+}
+
+// health-journey 前端部署在 Vercel（*.vercel.app），域名随部署变化，按后缀放行。
+function isAllowedOrigin(origin) {
+  if (CORS_ORIGINS.has(origin)) return true;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return protocol === 'https:' && hostname.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+}
+
 function setCors(req, res) {
   const origin = req.headers.origin;
-  const allowed = !origin || CORS_ORIGINS.has(origin);
+  const allowed = !origin || isAllowedOrigin(origin);
   if (origin && allowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,DELETE,PATCH,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,token');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type,Authorization,Accept,token,X-Health-Token'
+  );
   res.setHeader('Access-Control-Max-Age', '86400');
   return allowed;
 }

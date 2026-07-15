@@ -72,7 +72,7 @@ export default {
     credentials: true,
     origin: (ctx) => ctx.get('origin') || '*',
     allowMethods: 'GET,HEAD,PUT,POST,DELETE,PATCH,OPTIONS',
-    allowHeaders: 'Content-Type,Authorization,Accept,token',
+    allowHeaders: 'Content-Type,Authorization,Accept,token,X-Health-Token',
   },
   token: {
     expire: 60 * 60 * 24 * 7,
@@ -87,6 +87,37 @@ export default {
     username: DB_USER,
     password: DB_PASS,
     database: process.env.INVEST_DB_NAME || 'invest',
+  },
+  // 个人健康管理模块（/health/*）：独立库 + 惰性连接（HealthDbService），
+  // 与 investDb 同一解耦模式——不注册全局数据源，库不可达只影响 /health/* 请求。
+  healthDb: {
+    host: DB_HOST,
+    port: 3306,
+    username: DB_USER,
+    password: DB_PASS,
+    database: process.env.HEALTH_DB_NAME || 'health',
+  },
+  health: {
+    // 独立访问令牌（前端 + iOS 快捷指令共用）。为空时模块拒绝所有请求。
+    apiToken: process.env.HEALTH_API_TOKEN || '',
+    // 拍照识别热量：OpenAI 兼容的视觉模型（如 qwen-vl-max / gpt-4o）。未配置则该功能降级。
+    vision: {
+      baseUrl:
+        process.env.HEALTH_VISION_BASE_URL ||
+        'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: process.env.HEALTH_VISION_API_KEY || '',
+      model: process.env.HEALTH_VISION_MODEL || '',
+    },
+    // 饮食建议文本模型：默认复用全站 LLM 配置（deepseek）。
+    chat: {
+      baseUrl:
+        process.env.HEALTH_CHAT_BASE_URL ||
+        (process.env.LLM_PROVIDER === 'openai'
+          ? 'https://api.openai.com/v1'
+          : 'https://api.deepseek.com'),
+      apiKey: process.env.HEALTH_CHAT_API_KEY || process.env.LLM_API_KEY || '',
+      model: process.env.HEALTH_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-chat',
+    },
   },
   typeorm: {
     dataSource: {
