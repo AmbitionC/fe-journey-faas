@@ -1,2 +1,2 @@
-redeploy: 数据口径页脚+CSP跨财报标注（invest-model 492ce63）
-2026-07-14 data-footer
+redeploy: 盯盘当天信号即时进池（invest-model 025364f）；上午部署避开17:00窗口
+2026-07-15 sameday-signal-watch
