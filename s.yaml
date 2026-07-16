@@ -191,6 +191,20 @@ resources:
             cronExpression: '0 0 9 ? * MON-FRI'    # 北京 17:00 增量更新→链式出操作计划
             enable: true
             payload: 'daily_update_plan'
+        - triggerName: plan-watchdog-1
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 40 9 ? * MON-FRI'   # 北京 17:40 计划兜底哨兵①（daily 定时器三连丢后 owner 批准）
+            enable: true
+            payload: 'plan_watchdog'
+        - triggerName: plan-watchdog-2
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 30 10 ? * MON-FRI'  # 北京 18:30 计划兜底哨兵②（双保险；已有计划则毫秒退出）
+            enable: true
+            payload: 'plan_watchdog'
         - triggerName: fear-intraday
           triggerType: timer
           qualifier: LATEST
