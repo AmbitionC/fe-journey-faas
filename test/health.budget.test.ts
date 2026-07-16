@@ -27,7 +27,11 @@ function makeService(opts: {
     latest: async () => opts.body ?? null,
   };
   (svc as any).db = {
-    q: async () => opts.activityRows ?? [],
+    calls: [] as Array<{ sql: string; params: any[] }>,
+    async q(sql: string, params: any[] = []) {
+      this.calls.push({ sql, params });
+      return opts.activityRows ?? [];
+    },
   };
   return svc;
 }
@@ -87,6 +91,25 @@ describe('health/budget.ts 预算引擎', () => {
     const b = await svc.current();
     assert.ok(b.intakeKcal >= 1500);
     assert.ok(b.intakeKcal >= Math.round(b.basis.bmr * 0.9));
+  });
+
+  it('TDEE 实测窗口排除当天（盘中多次同步的不完整数据不得污染均值）', async () => {
+    const svc = makeService({ body: { weightKg: 88, bodyFatPct: 26 } });
+    await svc.current();
+    const db = (svc as any).db;
+    const tdeeQuery = db.calls.find((c: any) => c.sql.includes('activity_daily'));
+    assert.ok(tdeeQuery, '应查询 activity_daily');
+    assert.ok(
+      /record_date\s*<\s*\?/.test(tdeeQuery.sql),
+      'SQL 应包含 record_date < ?（排除当天）'
+    );
+    const todayCN = new Date(Date.now() + 8 * 3600 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    assert.ok(
+      tdeeQuery.params.includes(todayCN),
+      '参数应为北京时间的今天'
+    );
   });
 
   it('宏量拆分：蛋白4+脂肪9+碳水4 卡路里合计不超过预算', async () => {
