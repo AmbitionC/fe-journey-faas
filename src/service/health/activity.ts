@@ -13,6 +13,8 @@ export interface ActivityRecord {
   sleepHours: number | null;
   weightKg: number | null;
   source: string;
+  /** 最近一次同步时间（ISO），盘中多次推送时用于展示数据新鲜度 */
+  updatedAt: string | null;
 }
 
 function toDateStr(v: any): string {
@@ -34,6 +36,7 @@ function rowToActivity(row: any): ActivityRecord {
     sleepHours: row.sleep_hours == null ? null : Number(row.sleep_hours),
     weightKg: row.weight_kg == null ? null : Number(row.weight_kg),
     source: row.source,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
 }
 

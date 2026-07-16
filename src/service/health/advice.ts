@@ -156,6 +156,19 @@ ${hint ? `用户补充说明：${hint}` : ''}
       0,
       budget.proteinG - day.summary.proteinG
     );
+    // 快捷指令白天多次推送，今天的盘中活动数据可直接用于建议
+    const todayAct = activities.find(a => a.date === date) || null;
+    const todayActLine = todayAct
+      ? `今日实时：步数 ${todayAct.steps ?? '-'}、活动消耗 ${
+          todayAct.activeKcal ?? '-'
+        } kcal、锻炼 ${todayAct.exerciseMinutes ?? '-'} 分钟${
+          todayAct.updatedAt
+            ? `（更新于 ${new Date(todayAct.updatedAt)
+                .toISOString()
+                .slice(11, 16)} UTC）`
+            : ''
+        }`
+      : '今日暂无活动同步数据';
 
     const ep = this.healthConfig.chat;
     if (ep?.apiKey && ep?.model) {
@@ -190,6 +203,7 @@ ${hint ? `用户补充说明：${hint}` : ''}
         }%，内脏脂肪 ${
           body?.visceralFatLevel ?? '未知'
         }（目标：减脂保肌肉，内脏脂肪偏高优先改善）
+- ${todayActLine}
 - 近7天活动：${
           activities.length
             ? activities
@@ -197,7 +211,7 @@ ${hint ? `用户补充说明：${hint}` : ''}
                 .join('，')
             : '无同步数据'
         }
-原则：高蛋白优先、粗粮碳水、少油炸、晚餐提前减量、不建议夜宵。若剩余额度不足 300 kcal 提醒轻食收尾。`;
+原则：高蛋白优先、粗粮碳水、少油炸、晚餐提前减量、不建议夜宵。若剩余额度不足 300 kcal 提醒轻食收尾；今日活动量明显偏低时建议饭后快走补足。`;
         const advice = await this.chatCompletion(
           ep,
           [{ role: 'user', content: prompt }],
@@ -225,7 +239,14 @@ ${hint ? `用户补充说明：${hint}` : ''}
         `蛋白质还差约 ${remainingProtein} g，优先安排：鸡胸肉/鱼虾/瘦牛肉 150–200g，搭配粗粮主食一拳、蔬菜两拳。`
       );
     }
-    lines.push('少油炸、晚餐尽量 19 点前吃完，饭后快走 30 分钟以上。');
+    if (todayAct?.steps != null) {
+      lines.push(
+        todayAct.steps < 6000
+          ? `今日已走 ${todayAct.steps} 步，偏少，建议晚饭后快走 30–45 分钟补足。`
+          : `今日已走 ${todayAct.steps} 步，继续保持。`
+      );
+    }
+    lines.push('少油炸、晚餐尽量 19 点前吃完。');
     return { source: 'rule', advice: lines.join('') };
   }
 }
