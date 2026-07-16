@@ -1,2 +1,2 @@
-redeploy: 盯盘新增恐慌抄底窗口盘中提醒（小时级fear_intraday≥75即时推送）
-2026-07-15 fear-window-live-alert
+redeploy: 计划兜底哨兵 plan_watchdog 上线（17:40/18:30 双 timer）+ ETF现价失真修复
+2026-07-16 plan-watchdog
