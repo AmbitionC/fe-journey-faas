@@ -1,2 +1,2 @@
-redeploy: 哨兵v2（ETF行情兜底+快照自愈，invest-model#127）
-2026-07-17 watchdog-v2-etf
+redeploy: invest-model 去掉白名单硬止损豁免（2026-07-17 owner 定）——FC scheduler/live-watch 重打包生效
+2026-07-17 no-whitelist
