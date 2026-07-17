@@ -1,2 +1,2 @@
-redeploy: invest-model 去掉白名单硬止损豁免（2026-07-17 owner 定）——FC scheduler/live-watch 重打包生效
-2026-07-17 no-whitelist
+redeploy: P20 投顾风向环境闸+计划可读性（invest-model#135）
+2026-07-17 p20-advisor-stance
