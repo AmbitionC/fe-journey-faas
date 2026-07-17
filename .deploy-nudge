@@ -1,2 +1,2 @@
-redeploy: 计划兜底哨兵 plan_watchdog 上线（17:40/18:30 双 timer）+ ETF现价失真修复
-2026-07-16 plan-watchdog
+redeploy: 哨兵v2（ETF行情兜底+快照自愈，invest-model#127）
+2026-07-17 watchdog-v2-etf
