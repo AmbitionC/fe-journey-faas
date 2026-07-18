@@ -196,10 +196,14 @@ export class GrowthService {
   async channels(days = 30) {
     const since = new Date(Date.now() - days * 86400000);
     const CONVERSION_EVENTS = [
+      'group_hint_click',
       'group_qr_view',
-      'member_cta_click',
+      'wechat_qr_view',
+      'pay_flow_start',
+      'pay_qr_show',
+      'pay_done_click',
       'member_purchase',
-      'paywall_show',
+      'signup_success',
     ];
     try {
       const uvRows = await this.eventLogModel

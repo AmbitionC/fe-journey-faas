@@ -62,6 +62,7 @@ export class BookHTTPService {
       bookTitle: string;
       versionType: string;
       amount: number;
+      channel?: string;
     },
   ): Promise<any> {
     return await this.bookOrderService.create(body);

@@ -23,4 +23,7 @@ export class OrderEntity extends BaseEntity {
 
   @Column({ comment: '状态: paid / pending / refunded', default: 'pending' })
   status: string;
+
+  @Column({ comment: '首触渠道归因(如 xhs-note0715)', length: 64, nullable: true })
+  channel: string;
 }
