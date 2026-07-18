@@ -26,9 +26,11 @@ export class BookOrderService {
     bookTitle: string;
     versionType: string;
     amount: number;
+    channel?: string;
   }): Promise<any> {
     const entity = this.bookOrderModel.create({
       ...data,
+      channel: data.channel ? String(data.channel).slice(0, 64) : undefined,
       orderNo: generateOrderNo(),
       status: 'pending',
     });
