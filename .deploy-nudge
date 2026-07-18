@@ -1,2 +1,2 @@
-redeploy: P18突破v2上线 + 重建invest-scheduler定时器（daily 17:00连续两日静默丢失）
-2026-07-15 p18v2-and-trigger-rebuild
+redeploy: 术语中文化全面清理（invest-model#137）
+2026-07-17 chinese-terms-sweep
