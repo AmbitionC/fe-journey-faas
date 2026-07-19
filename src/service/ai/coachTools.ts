@@ -40,9 +40,40 @@ export class CoachToolsService {
   @Inject()
   articleService: ArticleService;
 
-  /** OpenAI function-calling 格式的工具定义（白名单，≤5 个）。 */
-  getToolDefs(): any[] {
+  /** OpenAI function-calling 格式的工具定义。传 whitelist 则只返回其中的工具。 */
+  getToolDefs(whitelist?: string[]): any[] {
+    const all = this.allToolDefs();
+    if (!whitelist || !whitelist.length) {
+      // 默认（qa 模式）不含 ask_question
+      return all.filter((t) => t.function.name !== 'ask_question');
+    }
+    return all.filter((t) => whitelist.includes(t.function.name));
+  }
+
+  private allToolDefs(): any[] {
     return [
+      {
+        type: 'function',
+        function: {
+          name: 'ask_question',
+          description:
+            '向用户提出一个结构化问题并给出可点选的选项（用于摸底/文章测一测/费曼追问）。' +
+            '当你需要用户回答一个判断题/选择题来推进时调用它——调用后本轮结束、等待用户作答，不要同时给出答案。',
+          parameters: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: '问题文本（中文，一次只问一个）' },
+              options: {
+                type: 'array',
+                description: '2-4 个选项文本；也可为空表示开放作答',
+                items: { type: 'string' },
+              },
+              allowFreeText: { type: 'boolean', description: '是否允许自由输入' },
+            },
+            required: ['question'],
+          },
+        },
+      },
       {
         type: 'function',
         function: {
