@@ -12,6 +12,7 @@ import { RedisService } from '@midwayjs/redis';
 import { UserDTO } from '../dto/user';
 import { CaptchaService } from '../service/auth/captcha';
 import { UserService } from '../service/user';
+import { EntitlementService } from '../service/entitlement';
 import { R } from '../common/base.error.utils';
 
 @Provide()
@@ -24,6 +25,9 @@ export class UserHTTPService {
 
   @Inject()
   userService: UserService;
+
+  @Inject()
+  entitlementService: EntitlementService;
 
   @Inject()
   redisService: RedisService;
@@ -94,6 +98,23 @@ export class UserHTTPService {
     const { userId, nickName, avatar } = data;
     if (!userId) throw R.error('用户ID不能为空');
     return await this.userService.updateUser(userId, { nickName, avatar });
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '当前用户权益概要（是否会员/到期日/权益键）',
+    functionName: 'userEntitlements',
+    name: 'userEntitlements',
+    path: '/user/entitlements',
+    method: 'get',
+  })
+  async userEntitlements(): Promise<any> {
+    const uid = await this.resolveUserId();
+    if (!uid) {
+      // 游客：返回非会员概要，前端据此渲染锁态（仅展示，不作判定依据）
+      return { success: true, data: { isMember: false, expireAt: null, guest: true } };
+    }
+    const data = await this.entitlementService.getEntitlements(uid);
+    return { success: true, data };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

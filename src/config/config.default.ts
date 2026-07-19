@@ -32,6 +32,7 @@ import { GrowthStatEntity } from '../entity/growthStat';
 import { GrowthReviewEntity } from '../entity/growthReview';
 import { UserGoalEntity } from '../entity/userGoal';
 import { ArticleContentEntity } from '../entity/articleContent';
+import { MemberEntitlementEntity } from '../entity/memberEntitlement';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import {
@@ -143,7 +144,7 @@ export default {
           AiConversationEntity, AiMessageEntity, ArticleReadingStateEntity,
           QuizQuestionEntity, QuizAttemptEntity, ReviewScheduleEntity,
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
-          ArticleContentEntity,
+          ArticleContentEntity, MemberEntitlementEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,
@@ -215,6 +216,19 @@ export default {
   // 置 COACH_AGENTIC_ENABLED=true 后，非结构化任务的问答走 agentic 工具循环（带引用/status）。
   coach: {
     agenticEnabled: process.env.COACH_AGENTIC_ENABLED === 'true',
+  },
+  // 权益网关（PRD-07）：关闭时业务模块回落各自的现有判定；本服务的 isMember/试用发放
+  // 始终可用（限免期全员会员）。各业务模块（做题/评审/计划）另有自己的灰度开关。
+  entitlement: {
+    enabled: process.env.ENTITLEMENT_ENABLED === 'true',
+  },
+  // 一条路各模块灰度开关（默认全关，逐个验证后开启，关时对线上零影响）
+  journey: {
+    missionEnabled: process.env.MISSION_ENABLED === 'true',
+    reviewEnabled: process.env.REVIEW_ENABLED === 'true',
+    planEnabled: process.env.PLAN_ENABLED === 'true',
+    cohortEnabled: process.env.COHORT_ENABLED === 'true',
+    embeddingEnabled: process.env.EMBEDDING_ENABLED === 'true',
   },
   syncSecret: process.env.SYNC_SECRET,
 } as MidwayConfig;

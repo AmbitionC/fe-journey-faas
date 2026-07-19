@@ -10,6 +10,7 @@ import { UserDTO } from '../../dto/user';
 import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
 import { AiProxyService } from '../ai/proxy';
+import { EntitlementService } from '../entitlement';
 
 @Provide()
 export class UserService {
@@ -28,6 +29,9 @@ export class UserService {
   @Inject()
   aiProxyService: AiProxyService;
 
+  @Inject()
+  entitlementService: EntitlementService;
+
   // 创建用户
   async createUser(user: UserDTO): Promise<any> {
     const entity = user.toEntity();
@@ -41,6 +45,10 @@ export class UserService {
     entity.avatar = 'default';
     entity.inviteCode = uuid().slice(0, 8);
     await this.userModel.save(entity);
+
+    // PRD-07：注册即发放 7 天全功能试用（服务端权威，每手机号一次；幂等）。
+    // 权益记录只在 ENTITLEMENT_ENABLED 开启后被消费，此处写入对现网无影响。
+    await this.entitlementService.grantTrial(phoneNumber);
 
     const { expire } = this.tokenConfig;
     const token = uuid();
@@ -111,6 +119,9 @@ export class UserService {
     user.isMember = true;
     user.memberDate = newExpiry.toISOString().slice(0, 19).replace('T', ' ');
     await this.userModel.save(user);
+
+    // PRD-07：同步写入权益记录，让新权益网关与存量 isMember 标记一致（过渡期双写）。
+    await this.entitlementService.grantFromOrder(userId, plan).catch(() => {});
 
     return { success: true, data: user.toVO() };
   }
