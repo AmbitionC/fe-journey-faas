@@ -35,6 +35,8 @@ import { ArticleContentEntity } from '../entity/articleContent';
 import { MemberEntitlementEntity } from '../entity/memberEntitlement';
 import { MissionEntity } from '../entity/mission';
 import { MissionSubmissionEntity } from '../entity/missionSubmission';
+import { MissionReviewEntity } from '../entity/missionReview';
+import { SkillScoreEntity } from '../entity/skillScore';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import {
@@ -147,7 +149,7 @@ export default {
           QuizQuestionEntity, QuizAttemptEntity, ReviewScheduleEntity,
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
           ArticleContentEntity, MemberEntitlementEntity,
-          MissionEntity, MissionSubmissionEntity,
+          MissionEntity, MissionSubmissionEntity, MissionReviewEntity, SkillScoreEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,

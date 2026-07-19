@@ -10,6 +10,7 @@ import {
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
 import { MissionService } from '../service/mission';
+import { ReviewService } from '../service/review';
 import { EntitlementService } from '../service/entitlement';
 import { MetricsService } from '../service/metrics';
 import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
@@ -25,6 +26,9 @@ export class MissionHTTPService {
 
   @Inject()
   missionService: MissionService;
+
+  @Inject()
+  reviewService: ReviewService;
 
   @Inject()
   entitlementService: EntitlementService;
@@ -129,6 +133,8 @@ export class MissionHTTPService {
       retro: body.retro,
     });
     this.track(userId, 'mission_submit', { submissionId: body.submissionId });
+    // 交作业成功 → 异步触发 AI 评审（REVIEW_ENABLED 关闭时为空操作）
+    this.reviewService.triggerAsync(body.submissionId);
     return { success: true, data };
   }
 
