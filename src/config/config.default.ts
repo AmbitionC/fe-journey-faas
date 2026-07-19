@@ -33,6 +33,8 @@ import { GrowthReviewEntity } from '../entity/growthReview';
 import { UserGoalEntity } from '../entity/userGoal';
 import { ArticleContentEntity } from '../entity/articleContent';
 import { MemberEntitlementEntity } from '../entity/memberEntitlement';
+import { MissionEntity } from '../entity/mission';
+import { MissionSubmissionEntity } from '../entity/missionSubmission';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import {
@@ -145,6 +147,7 @@ export default {
           QuizQuestionEntity, QuizAttemptEntity, ReviewScheduleEntity,
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
           ArticleContentEntity, MemberEntitlementEntity,
+          MissionEntity, MissionSubmissionEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,
