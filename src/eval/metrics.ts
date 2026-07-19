@@ -17,13 +17,6 @@ export function citationHit(citedKeys: string[], relevantKeys: string[]): boolea
   return citedKeys.some((k) => rel.has(k));
 }
 
-/** 提示是否剧透（包含了应当隐藏的答案关键词）。 */
-export function isHintSpoiler(hint: string, answerKeywords: string[]): boolean {
-  if (!hint || !answerKeywords?.length) return false;
-  const text = hint.toLowerCase();
-  return answerKeywords.some((kw) => kw && text.includes(kw.toLowerCase()));
-}
-
 /** 判分档位是否与标注一致。 */
 export function verdictMatch(actual: string, expected: string): boolean {
   return String(actual || '').trim() === String(expected || '').trim();

@@ -3,15 +3,6 @@
  * 规模小、可手工维护；离线 runner 按此跑指标。
  */
 
-export interface HintEvalCase {
-  id: string;
-  title: string;
-  description: string;
-  level: 1 | 2 | 3 | 4;
-  /** 不应出现在提示里的答案关键词（出现即判剧透） */
-  answerKeywords: string[];
-}
-
 export interface GradeEvalCase {
   id: string;
   stem: string;
@@ -19,23 +10,6 @@ export interface GradeEvalCase {
   userAnswer: string;
   expectedVerdict: '对' | '部分对' | '错';
 }
-
-export const HINT_CASES: HintEvalCase[] = [
-  {
-    id: 'two-sum-l1',
-    title: '两数之和',
-    description: '给定数组和目标值，返回两个数的下标，使它们的和为目标值。',
-    level: 1,
-    answerKeywords: ['哈希表', 'hashmap', 'map.get', '复杂度 o(n)', '用一个 map'],
-  },
-  {
-    id: 'reverse-list-l2',
-    title: '反转链表',
-    description: '反转一个单链表。',
-    level: 2,
-    answerKeywords: ['prev', 'cur.next = prev', '三指针', '迭代反转'],
-  },
-];
 
 export const GRADE_CASES: GradeEvalCase[] = [
   {

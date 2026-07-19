@@ -37,9 +37,7 @@ async function main() {
   }
   const report = await runEval(callDeepSeek);
   console.log(JSON.stringify(report, null, 2));
-  console.log(
-    `\n剧透合规率 ${report.spoiler.rate * 100}%  判分正确率 ${report.gradeAccuracy.rate * 100}%`
-  );
+  console.log(`\n判分正确率 ${report.gradeAccuracy.rate * 100}%`);
 }
 
 main().catch((e) => {

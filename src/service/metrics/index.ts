@@ -45,7 +45,6 @@ export class MetricsService {
     const saved = await this.evalReportModel.save(
       this.evalReportModel.create({
         metrics: report,
-        spoilerRate: report.spoiler.rate,
         gradeAccuracy: report.gradeAccuracy.rate,
       })
     );

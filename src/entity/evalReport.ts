@@ -7,9 +7,6 @@ export class EvalReportEntity extends BaseEntity {
   @Column({ comment: '指标与明细', type: 'json' })
   metrics: any;
 
-  @Column({ comment: '剧透合规率 0-1', type: 'float', default: 0 })
-  spoilerRate: number;
-
   @Column({ comment: '判分正确率 0-1', type: 'float', default: 0 })
   gradeAccuracy: number;
 }
