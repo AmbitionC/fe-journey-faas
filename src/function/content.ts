@@ -67,12 +67,29 @@ import {
   syncChanged,
 } from '../service/content/sync';
 import { OssService } from '../service/content/oss';
+import { ArticleContentService } from '../service/content/articleContent';
 import { assertSafeSegment, normalizeFilePath } from '../service/content/path';
+
+/** 从 markdown 提取标题：优先 frontmatter title，其次首个 H1，取不到返回空串。 */
+export function extractTitle(content: string): string {
+  const text = String(content || '');
+  const fm = text.match(/^---\s*[\r\n]([\s\S]*?)[\r\n]---/);
+  if (fm) {
+    const m = fm[1].match(/^\s*title\s*:\s*["']?(.+?)["']?\s*$/m);
+    if (m && m[1].trim()) return m[1].trim().slice(0, 200);
+  }
+  const h1 = text.match(/^#\s+(.+?)\s*$/m);
+  if (h1 && h1[1].trim()) return h1[1].trim().slice(0, 200);
+  return '';
+}
 
 @Provide()
 export class ContentHTTPService {
   @Inject() ctx: Context;
   @Inject() redisService: RedisService;
+
+  @Inject()
+  articleContentService: ArticleContentService;
 
   @Config('syncSecret') syncSecret: string;
 
@@ -317,7 +334,36 @@ export class ContentHTTPService {
     }
     if (!files) files = [];
 
-    const oss = new OssService();
+    const baseOss = new OssService();
+
+    // 教练地基：包装 oss，put/delete 时顺带把正文入库/删除 article_content（供 ngram 检索）。
+    // 零改动 sync.ts 纯函数——它只依赖 oss.put/delete/putImage 的结构。索引失败仅记日志、
+    // 绝不阻断内容同步主流程。
+    const contentSvc = this.articleContentService;
+    const ctx = this.ctx;
+    const oss: any = {
+      put: async (m: string, fp: string, k: string, c: string): Promise<void> => {
+        await baseOss.put(m, fp, k, c);
+        try {
+          await contentSvc.upsert(m, fp, k, extractTitle(c), c);
+        } catch (e) {
+          ctx.logger?.warn?.('[sync] 正文入库失败（不阻断）', e);
+        }
+      },
+      delete: async (m: string, fp: string, k: string): Promise<void> => {
+        await baseOss.delete(m, fp, k);
+        try {
+          await contentSvc.remove(m, k);
+        } catch {
+          /* 索引删除失败不阻断 */
+        }
+      },
+      putImage: (name: string, buf: Buffer): Promise<string> => baseOss.putImage(name, buf),
+    };
+    // 保持既有图片删除行为（若底层实现有 deleteRaw 则透传）
+    if (typeof (baseOss as any).deleteRaw === 'function') {
+      oss.deleteRaw = (p: string) => (baseOss as any).deleteRaw(p);
+    }
 
     // 构建 saveNavToDb 回调（写入 DB 并原子自增 version）
     const saveNavToDb = async (module: string, navData: any): Promise<void> => {
@@ -332,6 +378,32 @@ export class ContentHTTPService {
     };
 
     const result = await syncChanged(files, saveNavToDb, oss);
+    return { success: true, data: result };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '全量回填文章正文到检索库（教练地基，x-sync-secret 保护）',
+    functionName: 'reindexContent',
+    name: 'reindexContent',
+    path: '/content/reindex',
+    method: 'post',
+  })
+  @NoAuth()
+  async reindexContent(@Body(ALL) body: { modules?: string[] }): Promise<any> {
+    const secret = this.ctx.headers['x-sync-secret'];
+    if (!this.syncSecret || secret !== this.syncSecret) {
+      throw R.unauthorizedError('reindex 需要有效的 x-sync-secret');
+    }
+    const oss = new OssService();
+    const getNavList = async (module: string): Promise<{ navData: any[] }> => {
+      const config = await this.navConfigModel.findOneBy({ module });
+      return { navData: (config?.navData as any[]) || [] };
+    };
+    const ossGet = (module: string, filePath: string, key: string): Promise<string> =>
+      oss.get(module, filePath, key);
+    const result = await this.articleContentService.backfillAll(getNavList, ossGet, {
+      modules: body?.modules,
+    });
     return { success: true, data: result };
   }
 }

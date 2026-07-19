@@ -31,6 +31,7 @@ import { EvalReportEntity } from '../entity/evalReport';
 import { GrowthStatEntity } from '../entity/growthStat';
 import { GrowthReviewEntity } from '../entity/growthReview';
 import { UserGoalEntity } from '../entity/userGoal';
+import { ArticleContentEntity } from '../entity/articleContent';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import {
@@ -142,6 +143,7 @@ export default {
           AiConversationEntity, AiMessageEntity, ArticleReadingStateEntity,
           QuizQuestionEntity, QuizAttemptEntity, ReviewScheduleEntity,
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
+          ArticleContentEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,
@@ -208,6 +210,11 @@ export default {
   // 将来恢复收费：设环境变量 MEMBERSHIP_FREE=false 即可，无需改代码。
   membership: {
     freeForAll: process.env.MEMBERSHIP_FREE !== 'false',
+  },
+  // 教练 agentic 检索（教练地基 P0）：默认关闭，/api/ai/chat/stream 走现有链路。
+  // 置 COACH_AGENTIC_ENABLED=true 后，非结构化任务的问答走 agentic 工具循环（带引用/status）。
+  coach: {
+    agenticEnabled: process.env.COACH_AGENTIC_ENABLED === 'true',
   },
   syncSecret: process.env.SYNC_SECRET,
 } as MidwayConfig;

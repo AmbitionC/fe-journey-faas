@@ -12,6 +12,7 @@ import { RedisService } from '@midwayjs/redis';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiProxyService, ChatMessage, ChatContext, AiTask } from '../service/ai/proxy';
+import { CoachAgentService } from '../service/ai/coachAgent';
 import { AiHistoryService } from '../service/ai/history';
 import { RetrieveService } from '../service/ai/retrieve';
 import { ArticleService } from '../service/article';
@@ -90,6 +91,9 @@ export class AiHTTPService {
   aiProxyService: AiProxyService;
 
   @Inject()
+  coachAgentService: CoachAgentService;
+
+  @Inject()
   aiHistoryService: AiHistoryService;
 
   @Inject()
@@ -109,6 +113,9 @@ export class AiHTTPService {
 
   @Config('membership')
   membershipConfig: { freeForAll: boolean };
+
+  @Config('coach')
+  coachConfig: { agenticEnabled: boolean };
 
   private async getIsMember(userId: string): Promise<boolean> {
     // 限时免费：所有人按会员对待
@@ -328,21 +335,49 @@ export class AiHTTPService {
       // 限流放在流内：超限时以 SSE error 帧返回，前端可识别 RATE_LIMIT
       await this.aiProxyService.checkRateLimit(userId, isMember);
 
-      const gen = body.task
-        ? this.aiProxyService.forwardTaskStream(body.task, userId, body.deepThink !== false)
-        : this.aiProxyService.forwardStream(
-            body.messages,
-            body.context,
-            userId,
-            body.deepThink !== false
-          );
+      // 教练地基：灰度开启且为普通问答（非结构化任务）且模型支持 tools 时，走 agentic 工具循环。
+      // 关闭时逐字节等同现有链路（零线上影响）。
+      const useAgentic =
+        this.coachConfig?.agenticEnabled &&
+        !body.task &&
+        this.aiProxyService.supportsTools();
 
-      for await (const chunk of gen) {
-        if (chunk && chunk.reasoning) {
-          res.write(`data: ${JSON.stringify({ reasoning: chunk.reasoning })}\n\n`);
+      if (useAgentic) {
+        for await (const frame of this.coachAgentService.streamAgentic(
+          body.messages || [],
+          body.context || {},
+          userId
+        )) {
+          if (frame.status) {
+            res.write(`data: ${JSON.stringify({ status: frame.status })}\n\n`);
+          }
+          if (frame.content) {
+            res.write(`data: ${JSON.stringify({ content: frame.content })}\n\n`);
+          }
+          if (frame.citations) {
+            res.write(`data: ${JSON.stringify({ citations: frame.citations })}\n\n`);
+          }
+          if (frame.error) {
+            res.write(`data: ${JSON.stringify({ error: frame.error })}\n\n`);
+          }
         }
-        if (chunk && chunk.content) {
-          res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
+      } else {
+        const gen = body.task
+          ? this.aiProxyService.forwardTaskStream(body.task, userId, body.deepThink !== false)
+          : this.aiProxyService.forwardStream(
+              body.messages,
+              body.context,
+              userId,
+              body.deepThink !== false
+            );
+
+        for await (const chunk of gen) {
+          if (chunk && chunk.reasoning) {
+            res.write(`data: ${JSON.stringify({ reasoning: chunk.reasoning })}\n\n`);
+          }
+          if (chunk && chunk.content) {
+            res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
+          }
         }
       }
     } catch (err: any) {

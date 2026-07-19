@@ -32,4 +32,20 @@ export class AiCallLogEntity extends BaseEntity {
 
   @Column({ comment: '错误信息', type: 'text', nullable: true })
   errorMsg: string;
+
+  // ---- 教练 agentic 可观测扩展（PRD-04 F11；nullable，仅 agentic 链路写） ----
+  @Column({ comment: '教练模式 qa|rescue|placement|... ', length: 32, nullable: true })
+  mode: string;
+
+  @Column({ comment: 'agentic 循环轮数', type: 'int', nullable: true })
+  rounds: number;
+
+  @Column({ comment: '工具调用次数', type: 'int', nullable: true })
+  toolCallCount: number;
+
+  @Column({ comment: '兜底触发标记（去重/文本化/空响应/强制终答/参数自纠）', type: 'json', nullable: true })
+  fallbackFlags: any;
+
+  @Column({ comment: '成本估算（元）', type: 'float', nullable: true })
+  costEstimate: number;
 }
