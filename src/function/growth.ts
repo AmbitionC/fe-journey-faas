@@ -56,6 +56,19 @@ export class GrowthHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '一条路漏斗（测评→领题→交作业→评审→付费）',
+    functionName: 'growthPathFunnel',
+    name: 'growthPathFunnel',
+    path: '/growth/path-funnel',
+    method: 'get',
+  })
+  async pathFunnel(@Query(ALL) query: { days?: number }) {
+    this.requireLogin();
+    const data = await this.growthService.pathFunnel(Number(query.days) || 30);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '渠道拆解',
     functionName: 'growthChannels',
     name: 'growthChannels',

@@ -193,6 +193,56 @@ export class GrowthService {
    * 渠道拆解（近 N 天）：每个渠道的 uv + 关键转化事件计数。
    * 渠道来源于前端首触归因（?ch= 参数落 localStorage 后随埋点上报）。
    */
+  /**
+   * 一条路漏斗（PRD-08）：测评→领计划→领题→方案→交作业→评审→分享→付费 的分层转化。
+   * 每层按 distinct userId 计数；付费取会员订单。
+   */
+  async pathFunnel(days = 30) {
+    const since = new Date(Date.now() - days * 86400000);
+    const STEPS: { key: string; label: string; event?: string }[] = [
+      { key: 'visit', label: '访问', event: 'page_view' },
+      { key: 'assess', label: '测评完成', event: 'onboarding_assess_done' },
+      { key: 'plan', label: '领计划', event: 'plan_generate_done' },
+      { key: 'claim', label: '领题', event: 'mission_claim' },
+      { key: 'planSubmit', label: '指挥方案', event: 'mission_plan_submit' },
+      { key: 'submit', label: '交作业', event: 'mission_submit' },
+      { key: 'review', label: '评审完成', event: 'review_done' },
+      { key: 'share', label: '分享回流', event: 'portfolio_view' },
+    ];
+    const counts: Record<string, number> = {};
+    for (const s of STEPS) {
+      try {
+        const row = await this.eventLogModel
+          .createQueryBuilder('e')
+          .select('COUNT(DISTINCT e.userId)', 'c')
+          .where('e.event = :ev', { ev: s.event })
+          .andWhere('e.createTime >= :since', { since })
+          .getRawOne();
+        counts[s.key] = Number(row?.c || 0);
+      } catch {
+        counts[s.key] = 0;
+      }
+    }
+    // 付费（会员订单）
+    let paid = 0;
+    try {
+      const byType = await this.paidOrders(since);
+      paid = byType.member?.count || 0;
+    } catch {
+      /* ignore */
+    }
+
+    const rate = (a: number, b: number) => (b > 0 ? Number(((a / b) * 100).toFixed(2)) : null);
+    const steps = STEPS.map((s) => ({ key: s.key, label: s.label, count: counts[s.key] }));
+    steps.push({ key: 'paid', label: '付费', count: paid });
+    // 相邻转化率
+    const withRates = steps.map((s, i) => ({
+      ...s,
+      rateFromPrev: i === 0 ? null : rate(s.count, steps[i - 1].count),
+    }));
+    return { days, steps: withRates };
+  }
+
   async channels(days = 30) {
     const since = new Date(Date.now() - days * 86400000);
     const CONVERSION_EVENTS = [

@@ -8,6 +8,7 @@ import { MissionSubmissionEntity } from '../../entity/missionSubmission';
 import { MissionEntity } from '../../entity/mission';
 import { UserEntity } from '../../entity/user';
 import { AiProxyService } from '../ai/proxy';
+import { MetricsService } from '../metrics';
 import { sanitizeForPrompt } from '../ai/sanitize';
 import { R } from '../../common/base.error.utils';
 
@@ -42,6 +43,9 @@ export class ReviewService {
 
   @Inject()
   aiProxyService: AiProxyService;
+
+  @Inject()
+  metricsService: MetricsService;
 
   @Config('journey')
   journeyConfig: { reviewEnabled: boolean };
@@ -112,6 +116,9 @@ export class ReviewService {
       sub.status = 'reviewing';
     }
     await this.submissionModel.save(sub);
+    this.metricsService
+      .track({ userId: sub.userId, event: 'review_done', props: { verdict, submissionId: Number(sub.id) } })
+      .catch(() => {});
     return review;
   }
 
