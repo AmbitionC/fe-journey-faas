@@ -122,4 +122,16 @@ export class OssService {
     }
     return objKey;
   }
+
+  /** 读取任意对象元信息（供群二维码过期提醒等）；对象不存在返回 null */
+  async rawMeta(objKey: string): Promise<{ lastModified: string } | null> {
+    this.assertClient();
+    try {
+      const metadata: any = await this.client!.getObjectMeta(objKey);
+      const lm = metadata?.res?.headers?.['last-modified'] || '';
+      return lm ? { lastModified: lm } : null;
+    } catch {
+      return null;
+    }
+  }
 }

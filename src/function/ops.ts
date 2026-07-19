@@ -10,6 +10,7 @@ import {
 import { Context } from '@midwayjs/faas';
 import { OpsService } from '../service/ops';
 import { OpsExecutorService } from '../service/ops/executor';
+import { OssService } from '../service/content/oss';
 import { R } from '../common/base.error.utils';
 
 @Provide()
@@ -22,6 +23,9 @@ export class OpsHTTPService {
 
   @Inject()
   opsExecutorService: OpsExecutorService;
+
+  @Inject()
+  ossService: OssService;
 
   private requireLogin() {
     const userId = this.ctx.userInfo?.userId;
@@ -132,5 +136,29 @@ export class OpsHTTPService {
     const sampler = this.requireLogin();
     const data = await this.opsService.submitSampling({ ...body, sampler });
     return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '群二维码文件状态（过期提醒横幅用）',
+    functionName: 'opsGroupQrStatus',
+    name: 'opsGroupQrStatus',
+    path: '/ops/group-qr/status',
+    method: 'get',
+  })
+  async groupQrStatus() {
+    this.requireLogin();
+    const meta = await this.ossService.rawMeta('images/group.jpg');
+    if (!meta?.lastModified) {
+      return { success: true, data: { exists: false } };
+    }
+    const updatedAt = new Date(meta.lastModified);
+    const staleDays = Math.max(
+      0,
+      Math.floor((Date.now() - updatedAt.getTime()) / 86400000)
+    );
+    return {
+      success: true,
+      data: { exists: true, updatedAt: updatedAt.toISOString(), staleDays },
+    };
   }
 }
