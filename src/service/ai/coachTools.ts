@@ -2,6 +2,7 @@ import { Provide, Inject } from '@midwayjs/core';
 import { RetrieveService } from './retrieve';
 import { ArticleContentService, ContentHit } from '../content/articleContent';
 import { ArticleService } from '../article';
+import { EmbeddingService } from '../embedding';
 import { OssService } from '../content/oss';
 import { sanitizeForPrompt } from './sanitize';
 import { ALL_MODULES } from '../content/modules';
@@ -39,6 +40,9 @@ export class CoachToolsService {
 
   @Inject()
   articleService: ArticleService;
+
+  @Inject()
+  embeddingService: EmbeddingService;
 
   /** OpenAI function-calling 格式的工具定义。传 whitelist 则只返回其中的工具。 */
   getToolDefs(whitelist?: string[]): any[] {
@@ -157,14 +161,17 @@ export class CoachToolsService {
     if (!query.trim()) return '（未提供检索词）';
     const mod = module && CONTENT_MODULES.includes(module) ? module : undefined;
 
-    const [lexical, content] = await Promise.all([
+    const [lexical, content, semantic] = await Promise.all([
       this.retrieveService.retrieve(query, { module: mod, topK: 8 }).catch(() => []),
       this.articleContentService.search(query, { module: mod, limit: 8 }).catch(() => [] as ContentHit[]),
+      // 第三路：embedding 语义召回（EMBEDDING_ENABLED 关闭时返回 []）
+      this.embeddingService.semanticSearch(query, { module: mod, limit: 8 }).catch(() => []),
     ]);
 
     // 归一化后融合（正文命中略加权，因为它补的正是词法召回不到的部分）
     const maxLex = Math.max(1, ...lexical.map((h) => h.score));
     const maxCon = Math.max(1, ...content.map((h) => h.score));
+    const maxSem = Math.max(0.01, ...semantic.map((h) => h.score));
     const merged = new Map<
       string,
       { module: string; articleKey: string; title: string; snippet: string; score: number }
@@ -195,6 +202,19 @@ export class CoachToolsService {
           snippet: h.snippet,
           score: contentScore,
         });
+      }
+    }
+
+    // 第三路：embedding 语义召回融合（语义相关但无字面命中的补齐）
+    for (const h of semantic) {
+      const k = `${h.module}:${h.articleKey}`;
+      const semScore = (h.score / maxSem) * 0.55;
+      const prev = merged.get(k);
+      if (prev) {
+        prev.score += semScore;
+        if (!prev.title) prev.title = h.title;
+      } else {
+        merged.set(k, { module: h.module, articleKey: h.articleKey, title: h.title, snippet: '', score: semScore });
       }
     }
 

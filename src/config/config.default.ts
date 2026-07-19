@@ -42,6 +42,8 @@ import { PlanWeekEntity } from '../entity/planWeek';
 import { CohortEntity } from '../entity/cohort';
 import { CohortMemberEntity } from '../entity/cohortMember';
 import { CohortPostEntity } from '../entity/cohortPost';
+import { ContentEmbeddingEntity } from '../entity/contentEmbedding';
+import { QuestionClusterEntity } from '../entity/questionCluster';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import {
@@ -157,6 +159,7 @@ export default {
           MissionEntity, MissionSubmissionEntity, MissionReviewEntity, SkillScoreEntity,
           LearningPlanEntity, PlanWeekEntity,
           CohortEntity, CohortMemberEntity, CohortPostEntity,
+          ContentEmbeddingEntity, QuestionClusterEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,
@@ -233,6 +236,13 @@ export default {
   // 始终可用（限免期全员会员）。各业务模块（做题/评审/计划）另有自己的灰度开关。
   entitlement: {
     enabled: process.env.ENTITLEMENT_ENABLED === 'true',
+  },
+  // Embedding 层（PRD-09 决策 8，阶段 2）：DashScope text-embedding-v4 OpenAI 兼容接口。
+  // 默认复用全站 LLM_API_KEY（DashScope key）；EMBEDDING_ENABLED 关闭时不调用。
+  embedding: {
+    baseUrl: process.env.EMBEDDING_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: process.env.EMBEDDING_API_KEY || process.env.LLM_API_KEY || '',
+    model: process.env.EMBEDDING_MODEL || 'text-embedding-v4',
   },
   // 一条路各模块灰度开关（默认全关，逐个验证后开启，关时对线上零影响）
   journey: {
