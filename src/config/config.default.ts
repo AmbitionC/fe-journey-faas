@@ -39,6 +39,9 @@ import { MissionReviewEntity } from '../entity/missionReview';
 import { SkillScoreEntity } from '../entity/skillScore';
 import { LearningPlanEntity } from '../entity/learningPlan';
 import { PlanWeekEntity } from '../entity/planWeek';
+import { CohortEntity } from '../entity/cohort';
+import { CohortMemberEntity } from '../entity/cohortMember';
+import { CohortPostEntity } from '../entity/cohortPost';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import {
@@ -153,6 +156,7 @@ export default {
           ArticleContentEntity, MemberEntitlementEntity,
           MissionEntity, MissionSubmissionEntity, MissionReviewEntity, SkillScoreEntity,
           LearningPlanEntity, PlanWeekEntity,
+          CohortEntity, CohortMemberEntity, CohortPostEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,
