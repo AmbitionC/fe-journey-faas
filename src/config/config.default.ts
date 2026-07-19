@@ -37,6 +37,8 @@ import { MissionEntity } from '../entity/mission';
 import { MissionSubmissionEntity } from '../entity/missionSubmission';
 import { MissionReviewEntity } from '../entity/missionReview';
 import { SkillScoreEntity } from '../entity/skillScore';
+import { LearningPlanEntity } from '../entity/learningPlan';
+import { PlanWeekEntity } from '../entity/planWeek';
 import { LearningPathEntity } from '../entity/learningPath';
 import { NotifySubscriptionEntity } from '../entity/notifySubscription';
 import {
@@ -150,6 +152,7 @@ export default {
           EventLogEntity, AiCallLogEntity, UserGoalEntity, LearningPathEntity,
           ArticleContentEntity, MemberEntitlementEntity,
           MissionEntity, MissionSubmissionEntity, MissionReviewEntity, SkillScoreEntity,
+          LearningPlanEntity, PlanWeekEntity,
           NotifySubscriptionEntity,
           OpsTaskEntity, ContentHealthReportEntity, OpsAuditLogEntity, SamplingCheckEntity,
           OpsReviewEntity, EvalReportEntity,
@@ -232,6 +235,7 @@ export default {
     missionEnabled: process.env.MISSION_ENABLED === 'true',
     reviewEnabled: process.env.REVIEW_ENABLED === 'true',
     planEnabled: process.env.PLAN_ENABLED === 'true',
+    planAiEnabled: process.env.PLAN_AI_ENABLED === 'true',
     cohortEnabled: process.env.COHORT_ENABLED === 'true',
     embeddingEnabled: process.env.EMBEDDING_ENABLED === 'true',
   },

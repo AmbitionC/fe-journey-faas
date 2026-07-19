@@ -19,4 +19,14 @@ export class UserGoalEntity extends BaseEntity {
 
   @Column({ comment: '备注', length: 255, nullable: true })
   note: string;
+
+  // ---- PRD-01 测评回写：教练读 learner_state 时拿到最新画像 ----
+  @Column({ comment: '现状岗位 frontend/backend/other_tech/non_tech', length: 24, nullable: true })
+  role: string;
+
+  @Column({ comment: '年限档 lt1/y1_3/y3_5/y5plus', length: 16, nullable: true })
+  yearsOfExp: string;
+
+  @Column({ comment: '每周时间档 lt5/h5_10/h10_20/h20plus', length: 16, nullable: true })
+  weeklyHours: string;
 }
