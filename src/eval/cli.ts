@@ -7,7 +7,7 @@ import fetch from 'node-fetch';
 import { runEval, CallLLM } from './runner';
 
 const API_KEY = process.env.LLM_API_KEY || '';
-const MODEL = process.env.LLM_MODEL || 'deepseek-chat';
+const MODEL = process.env.LLM_MODEL || 'deepseek-v4-flash';
 const BASE = process.env.LLM_BASE || 'https://api.deepseek.com/chat/completions';
 
 const callDeepSeek: CallLLM = async (system, user) => {

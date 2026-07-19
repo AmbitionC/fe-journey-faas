@@ -116,7 +116,7 @@ export default {
           ? 'https://api.openai.com/v1'
           : 'https://api.deepseek.com'),
       apiKey: process.env.HEALTH_CHAT_API_KEY || process.env.LLM_API_KEY || '',
-      model: process.env.HEALTH_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-chat',
+      model: process.env.HEALTH_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-v4-flash',
     },
   },
   typeorm: {
@@ -197,7 +197,8 @@ export default {
   ai: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
     apiKey: process.env.LLM_API_KEY || '',
-    model: process.env.LLM_MODEL || 'deepseek-chat',
+    // deepseek-chat / deepseek-reasoner 于 2026-07-24 弃用，统一切 deepseek-v4-flash（非思考=chat、思考=reasoner 均由它承载，思考走请求体 thinking 参数，见 proxy.buildRequestBody）。生产可用 LLM_MODEL 覆盖（如 deepseek-v4-pro）。
+    model: process.env.LLM_MODEL || 'deepseek-v4-flash',
     rateLimit: {
       freeUserPerDay: parseInt(process.env.AI_RATE_FREE || '10', 10),
       freeWindowSeconds: 86400,

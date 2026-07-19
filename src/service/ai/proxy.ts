@@ -408,17 +408,22 @@ export class AiProxyService {
     ];
 
     if (this.isOpenAiStyle()) {
-      // 深度思考：DeepSeek 走 reasoner 模型（流式 delta 里带 reasoning_content）。
-      // 模型名可用 LLM_REASONER_MODEL 覆盖（默认 deepseek-reasoner）。
-      const useReasoner = deepThink && this.aiConfig.provider === 'deepseek';
-      return {
-        model: useReasoner
-          ? process.env.LLM_REASONER_MODEL || 'deepseek-reasoner'
-          : this.aiConfig.model,
+      // 深度思考：DeepSeek V4 起，思考模式改为「请求体参数」而非独立模型名。
+      // 旧的 deepseek-reasoner 模型名于 2026-07-24 弃用——统一用 aiConfig.model
+      //（deepseek-v4-flash）+ thinking 参数触发思考；reasoning_content 仍在
+      // delta.reasoning_content 流式返回（extractStreamContent 已读取）。
+      const wantThinking = deepThink && this.aiConfig.provider === 'deepseek';
+      const body: Record<string, unknown> = {
+        model: this.aiConfig.model,
         messages: allMessages,
         stream: streaming,
         max_tokens: 2048,
       };
+      if (wantThinking) {
+        body.thinking = { type: 'enabled' };
+        body.reasoning_effort = process.env.LLM_REASONING_EFFORT || 'high';
+      }
+      return body;
     }
 
     // Default: DashScope (通义千问)

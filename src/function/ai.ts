@@ -24,7 +24,7 @@ class AIChatDTO {
   messages: ChatMessage[];
   context: ChatContext;
   conversationId?: number;
-  /** 深度思考开关（默认开启；走 DeepSeek reasoner 返回思考链） */
+  /** 深度思考开关（默认开启；DeepSeek V4 经 thinking 参数返回思考链） */
   deepThink?: boolean;
   /** 结构化任务（算法提示/点评）：存在时提示词由服务端拼装 */
   task?: AiTask;

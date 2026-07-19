@@ -118,7 +118,7 @@ export class OpsExecutorService {
       await this.reviewModel.save(
         this.reviewModel.create({
           taskId: Number(task.id),
-          reviewerModel: process.env.LLM_MODEL || 'deepseek-chat',
+          reviewerModel: process.env.LLM_MODEL || 'deepseek-v4-flash',
           verdict: review.verdict,
           confidence: review.confidence,
           issues: review.issues,
