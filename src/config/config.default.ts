@@ -223,9 +223,11 @@ export default {
     },
   },
   // 限时免费开关：开启时所有人按会员对待（AI 无限、模拟面试解锁、项目实战全开、隐藏付费入口）。
-  // 将来恢复收费：设环境变量 MEMBERSHIP_FREE=false 即可，无需改代码。
+  // 当前处于全员免费阶段，硬编码为 true——避免线上函数残留的 MEMBERSHIP_FREE 环境变量
+  // （历史付费试验遗留值）导致会员被误判非会员而触发每日限流（RATE_LIMIT）。
+  // 将来恢复收费：改回 `process.env.MEMBERSHIP_FREE !== 'false'` 并在环境变量里设置即可。
   membership: {
-    freeForAll: process.env.MEMBERSHIP_FREE !== 'false',
+    freeForAll: true,
   },
   // 教练 agentic 检索（教练地基 P0）：默认关闭，/api/ai/chat/stream 走现有链路。
   // 置 COACH_AGENTIC_ENABLED=true 后，非结构化任务的问答走 agentic 工具循环（带引用/status）。

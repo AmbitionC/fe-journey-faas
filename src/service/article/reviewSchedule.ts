@@ -59,7 +59,9 @@ export function computeReviewDue(
         ? `上次得分 ${r.lastScore}%`
         : mastery === 'mastered'
         ? '已掌握内容定期巩固'
-        : '该复习了';
+        : mastery === 'review'
+        ? '自评待复习'
+        : '学完到间隔，巩固一遍';
 
     items.push({
       articleKey: r.articleKey,
