@@ -44,4 +44,8 @@ export class MissionReviewEntity extends BaseEntity {
 
   @Column({ comment: '是否已人工复核', default: false })
   humanChecked: boolean;
+
+  @Index('idx_mreview_share', ['shareCode'])
+  @Column({ comment: '分享码（通过时生成，公开只读报告用）', length: 32, nullable: true })
+  shareCode: string;
 }

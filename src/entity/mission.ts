@@ -57,6 +57,13 @@ export class MissionEntity extends BaseEntity {
   @Column({ comment: '手把手指南步数（列表展示「N 步带练」）', type: 'int', default: 0 })
   guideCheckpoints: number;
 
+  @Column({
+    comment: '手把手五阶段指南（json：{stages:[{id,title,desc,checkpoints:[{id,title,hint,prompt,selfCheck}]}]}）',
+    type: 'json',
+    nullable: true,
+  })
+  guide: any;
+
   @Column({ comment: '是否免费可做（保留字段，当前单轨制不启用）', default: false })
   freeAccess: boolean;
 }

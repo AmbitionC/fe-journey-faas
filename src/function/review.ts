@@ -78,6 +78,37 @@ export class ReviewHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '公开只读评审报告（分享卡）',
+    functionName: 'reviewShared',
+    name: 'reviewShared',
+    path: '/review/shared',
+    method: 'get',
+  })
+  @NoAuth()
+  async shared(@Query('code') code: string, @Query('ch') ch: string) {
+    const data = await this.reviewService.getSharedReport(code);
+    this.metricsService
+      .track({ event: 'review_share_view', props: { code }, channel: ch || `review-${code}`, ip: this.ctx.ip })
+      .catch(() => {});
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '设置作品档案可见性（本人）',
+    functionName: 'portfolioConfig',
+    name: 'portfolioConfig',
+    path: '/portfolio/config',
+    method: 'post',
+  })
+  @NoAuth()
+  async portfolioConfig(@Body(ALL) body: { visible?: boolean; headline?: string }) {
+    const uid = await this.userId();
+    if (!uid) return { success: false, message: '请先登录' };
+    const data = await this.reviewService.setPortfolioConfig(uid, body);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '作品档案（公开页）',
     functionName: 'portfolioGet',
     name: 'portfolioGet',

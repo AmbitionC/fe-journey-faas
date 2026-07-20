@@ -180,6 +180,34 @@ export class MissionHTTPService {
     return { success: true, data };
   }
 
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '手把手陪跑指南（会员，五阶段 + 进度）',
+    functionName: 'missionGuide',
+    name: 'missionGuide',
+    path: '/mission/guide',
+    method: 'get',
+  })
+  @NoAuth()
+  async guide(@Query('slug') slug: string) {
+    const { userId, isMember } = await this.resolveUser();
+    const data = await this.missionService.getGuide(userId, slug, isMember);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '手把手 checkpoint 勾选',
+    functionName: 'missionGuideProgress',
+    name: 'missionGuideProgress',
+    path: '/mission/guide/progress',
+    method: 'post',
+  })
+  @NoAuth()
+  async guideProgress(@Body(ALL) body: { submissionId: number; checkpointId: string; done: boolean }) {
+    const { userId } = await this.resolveUser();
+    const data = await this.missionService.toggleGuideProgress(userId, body.submissionId, body.checkpointId, body.done);
+    return { success: true, data };
+  }
+
   // ---- manager 题卡管理 ----
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

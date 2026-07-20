@@ -234,6 +234,46 @@ export class MissionService {
     });
   }
 
+  /**
+   * 手把手陪跑指南（PRD-02 F12，会员权益）：返回五阶段指南 + 本人 checkpoint 进度。
+   * 非会员返回锁态（阶段目录可见、内容不可见，转化素材）。
+   */
+  async getGuide(userId: string, slug: string, isMember: boolean): Promise<any> {
+    this.ensureEnabled();
+    const mission = await this.missionModel.findOne({ where: { slug } });
+    if (!mission || !mission.guided) throw R.error('该题无手把手指南');
+
+    const check = await this.entitlementService.check(userId, 'guided_mission', { isMember, consume: false });
+    const guide = mission.guide || { stages: [] };
+    if (!check.allowed) {
+      // 锁态：只给阶段标题目录，不给内容
+      const outline = (guide.stages || []).map((s: any) => ({ id: s.id, title: s.title, locked: true }));
+      return { locked: true, reason: check.reason, outline, guideCheckpoints: mission.guideCheckpoints };
+    }
+
+    let progress: any = {};
+    if (userId && !userId.startsWith('guest:')) {
+      const sub = await this.submissionModel.findOne({
+        where: { userId, missionId: Number(mission.id) },
+        order: { createTime: 'DESC' },
+      });
+      progress = sub?.guideProgress || {};
+    }
+    return { locked: false, guide, progress };
+  }
+
+  /** 勾选/取消一个 checkpoint（写 guideProgress）。 */
+  async toggleGuideProgress(userId: string, submissionId: number, checkpointId: string, done: boolean): Promise<any> {
+    this.ensureEnabled();
+    const sub = await this.mySubmission(userId, submissionId);
+    const progress = (sub.guideProgress && typeof sub.guideProgress === 'object') ? sub.guideProgress : {};
+    if (done) progress[checkpointId] = Date.now();
+    else delete progress[checkpointId];
+    sub.guideProgress = progress;
+    await this.submissionModel.save(sub);
+    return { progress };
+  }
+
   /** 放弃做题。 */
   async abandon(userId: string, submissionId: number): Promise<any> {
     this.ensureEnabled();

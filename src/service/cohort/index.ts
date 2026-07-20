@@ -129,6 +129,104 @@ export class CohortService {
     };
   }
 
+  /** 里程碑打卡（PRD-06 F2）：成员自报"我到这步了"。客观进度仍以做题评审为准（进度榜）。 */
+  async checkinMilestone(userId: string, slug: string, milestone: string): Promise<any> {
+    this.ensureEnabled();
+    const member = await this.requireMember(userId, slug);
+    const checks = (member.milestoneChecks && typeof member.milestoneChecks === 'object') ? member.milestoneChecks : {};
+    checks[milestone] = Date.now();
+    member.milestoneChecks = checks;
+    await this.memberModel.save(member);
+    return { milestoneChecks: checks };
+  }
+
+  /** 提交结营展示物 + 是否上作品墙（PRD-06 F3/F4）。 */
+  async submitShowcase(
+    userId: string,
+    slug: string,
+    data: { title?: string; content?: string; repoUrl?: string; deployUrl?: string; wallOptIn?: boolean }
+  ): Promise<any> {
+    this.ensureEnabled();
+    const member = await this.requireMember(userId, slug);
+    member.showcase = {
+      title: (data.title || '').slice(0, 128),
+      content: (data.content || '').slice(0, 4000),
+      repoUrl: (data.repoUrl || '').slice(0, 255),
+      deployUrl: (data.deployUrl || '').slice(0, 255),
+    };
+    if (typeof data.wallOptIn === 'boolean') member.wallOptIn = data.wallOptIn;
+    await this.memberModel.save(member);
+    return { showcase: member.showcase, wallOptIn: member.wallOptIn };
+  }
+
+  /** 作品墙（PRD-06 F4）：展示同意上墙的结营展示物，通过大题者优先。 */
+  async getWall(slug: string): Promise<any> {
+    this.ensureEnabled();
+    const cohort = await this.cohortModel.findOne({ where: { slug } });
+    if (!cohort) throw R.error('期次不存在');
+    const members = await this.memberModel.find({ where: { cohortId: Number(cohort.id), wallOptIn: true } });
+    const withShowcase = members.filter((m) => m.showcase && (m.showcase.title || m.showcase.content));
+    return withShowcase
+      .map((m) => ({
+        name: m.anonymous ? '匿名学员' : m.nickName || '学员',
+        completion: m.completion,
+        showcase: m.showcase,
+      }))
+      .sort((a, b) => Number(b.completion) - Number(a.completion));
+  }
+
+  /** 本人在本期的状态（打卡/展示/结营徽章）。 */
+  async myStatus(userId: string, slug: string): Promise<any> {
+    this.ensureEnabled();
+    if (!userId || userId.startsWith('guest:')) return null;
+    const cohort = await this.cohortModel.findOne({ where: { slug } });
+    if (!cohort) return null;
+    const member = await this.memberModel.findOne({ where: { cohortId: Number(cohort.id), userId } });
+    if (!member) return { joined: false };
+    // 结营徽章：通过当期大题即得（客观，评审判定）
+    let completion = member.completion;
+    if (!completion && cohort.missionSlug) {
+      const mission = await this.missionModel.findOne({ where: { slug: cohort.missionSlug } });
+      if (mission) {
+        const passed = await this.submissionModel.findOne({
+          where: { userId, missionId: Number(mission.id), status: 'passed' as any },
+        });
+        if (passed) {
+          member.completion = true;
+          completion = true;
+          await this.memberModel.save(member);
+        }
+      }
+    }
+    return {
+      joined: true,
+      milestoneChecks: member.milestoneChecks || {},
+      showcase: member.showcase || null,
+      wallOptIn: member.wallOptIn,
+      completion,
+    };
+  }
+
+  /** 我的结营徽章清单（作品档案联动，PRD-06 F6）。 */
+  async myBadges(userId: string): Promise<any> {
+    if (!userId || userId.startsWith('guest:')) return [];
+    const members = await this.memberModel.find({ where: { userId, completion: true } });
+    const cohortIds = members.map((m) => m.cohortId);
+    if (!cohortIds.length) return [];
+    const cohorts = await this.cohortModel.find({ where: { id: In(cohortIds as any) } });
+    return cohorts.map((c) => ({ slug: c.slug, title: c.title }));
+  }
+
+  /** 取本人在某期的成员记录，未报名则抛错。 */
+  private async requireMember(userId: string, slug: string): Promise<CohortMemberEntity> {
+    if (!userId || userId.startsWith('guest:')) throw R.unauthorizedError('请先登录');
+    const cohort = await this.cohortModel.findOne({ where: { slug } });
+    if (!cohort) throw R.error('期次不存在');
+    const member = await this.memberModel.findOne({ where: { cohortId: Number(cohort.id), userId } });
+    if (!member) throw R.error('请先报名加入本期');
+    return member;
+  }
+
   /** 期次已发布内容。 */
   async posts(slug: string): Promise<any> {
     this.ensureEnabled();

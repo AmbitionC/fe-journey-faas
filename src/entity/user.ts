@@ -29,6 +29,12 @@ export class UserEntity extends BaseEntity {
   @Column({ comment: '角色: user | admin', default: 'user' })
   role: string;
 
+  @Column({ comment: '作品档案是否公开（PRD-03 F6，默认不公开，用户主动开启）', default: false })
+  portfolioPublic?: boolean;
+
+  @Column({ comment: '作品档案一句话简介', length: 255, nullable: true })
+  portfolioHeadline?: string;
+
   toVO(): UserVO {
     const userVO = omit<UserEntity>(this, ['password']) as UserVO;
     return userVO;

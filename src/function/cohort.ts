@@ -63,6 +63,64 @@ export class CohortHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '里程碑打卡',
+    functionName: 'cohortMilestone',
+    name: 'cohortMilestone',
+    path: '/cohort/milestone',
+    method: 'post',
+  })
+  @NoAuth()
+  async milestone(@Body(ALL) body: { slug: string; milestone: string }) {
+    const uid = await this.userId();
+    if (!uid) return { success: false, message: '请先登录' };
+    const data = await this.cohortService.checkinMilestone(uid, body.slug, body.milestone);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '提交结营展示物 + 上作品墙',
+    functionName: 'cohortShowcase',
+    name: 'cohortShowcase',
+    path: '/cohort/showcase',
+    method: 'post',
+  })
+  @NoAuth()
+  async showcase(@Body(ALL) body: any) {
+    const uid = await this.userId();
+    if (!uid) return { success: false, message: '请先登录' };
+    const data = await this.cohortService.submitShowcase(uid, body.slug, body);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '期次作品墙',
+    functionName: 'cohortWall',
+    name: 'cohortWall',
+    path: '/cohort/wall',
+    method: 'get',
+  })
+  @NoAuth()
+  async wall(@Query('slug') slug: string) {
+    const data = await this.cohortService.getWall(slug);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '本人在本期的状态（打卡/展示/徽章）',
+    functionName: 'cohortMyStatus',
+    name: 'cohortMyStatus',
+    path: '/cohort/my-status',
+    method: 'get',
+  })
+  @NoAuth()
+  async myStatus(@Query('slug') slug: string) {
+    const uid = await this.userId();
+    if (!uid) return { success: true, data: null };
+    const data = await this.cohortService.myStatus(uid, slug);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '期次进度榜',
     functionName: 'cohortLeaderboard',
     name: 'cohortLeaderboard',

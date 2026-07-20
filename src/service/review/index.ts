@@ -9,8 +9,14 @@ import { MissionEntity } from '../../entity/mission';
 import { UserEntity } from '../../entity/user';
 import { AiProxyService } from '../ai/proxy';
 import { MetricsService } from '../metrics';
+import { CohortService } from '../cohort';
 import { sanitizeForPrompt } from '../ai/sanitize';
+import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
+
+function genShareCode(): string {
+  return uuid().replace(/-/g, '').slice(0, 12);
+}
 
 const SKILL_DIMS = ['requirement', 'ai_direction', 'engineering', 'debugging', 'knowledge'] as const;
 const GH_API = 'https://api.github.com';
@@ -46,6 +52,9 @@ export class ReviewService {
 
   @Inject()
   metricsService: MetricsService;
+
+  @Inject()
+  cohortService: CohortService;
 
   @Config('journey')
   journeyConfig: { reviewEnabled: boolean };
@@ -107,6 +116,7 @@ export class ReviewService {
         makeupArticles: parsed.makeupArticles || null,
         reviewerModel: process.env.LLM_MODEL || 'deepseek-v4-flash',
         humanChecked: false,
+        shareCode: verdict === 'pass' ? genShareCode() : null,
       })
     );
 
@@ -319,6 +329,7 @@ export class ReviewService {
     review.verdict = verdict;
     review.humanChecked = true;
     if (note) review.report = `${review.report || ''}\n\n【人工复核】${note}`;
+    if (verdict === 'pass' && !review.shareCode) review.shareCode = genShareCode();
     await this.reviewModel.save(review);
     const sub = await this.submissionModel.findOne({ where: { id: review.submissionId as any } });
     if (sub) {
@@ -336,10 +347,44 @@ export class ReviewService {
     return review;
   }
 
+  /** 分享码 → 公开只读评审报告（PRD-03 F3，不暴露手机号，仅昵称）。 */
+  async getSharedReport(code: string): Promise<any> {
+    if (!code) return null;
+    const review = await this.reviewModel.findOne({ where: { shareCode: code } });
+    if (!review || review.verdict !== 'pass') return null;
+    const mission = await this.missionModel.findOne({ where: { id: review.missionId as any } });
+    const user = await this.userModel.findOne({ where: { phoneNumber: review.userId } });
+    return {
+      missionTitle: mission?.title || '',
+      tier: mission?.tier,
+      verdict: review.verdict,
+      totalScore: review.totalScore,
+      scores: review.scores,
+      criteriaVerdicts: review.criteriaVerdicts,
+      report: review.report,
+      owner: { nickName: user?.nickName || '匿名学员', portfolioSlug: user?.portfolioPublic ? user?.inviteCode : null },
+      passedAt: review.updateTime,
+    };
+  }
+
+  /** 设置作品档案可见性（PRD-03 F6，本人）。 */
+  async setPortfolioConfig(userId: string, cfg: { visible?: boolean; headline?: string }): Promise<any> {
+    const user = await this.userModel.findOne({ where: { phoneNumber: userId } });
+    if (!user) throw R.error('用户不存在');
+    if (typeof cfg.visible === 'boolean') user.portfolioPublic = cfg.visible;
+    if (typeof cfg.headline === 'string') user.portfolioHeadline = cfg.headline.slice(0, 255);
+    await this.userModel.save(user);
+    return { portfolioPublic: user.portfolioPublic, portfolioHeadline: user.portfolioHeadline, slug: user.inviteCode };
+  }
+
   /** 作品档案（公开）：以 inviteCode 作 slug。展示通过的题 + 报告摘要 + 能力曲线。 */
   async getPortfolio(slug: string): Promise<any> {
     const user = await this.userModel.findOne({ where: { inviteCode: slug } });
     if (!user) throw R.error('作品档案不存在');
+    // PRD-03 F6：默认不公开，用户主动开启后才对外可见
+    if (!user.portfolioPublic) {
+      return { visible: false, owner: { nickName: user.nickName, slug } };
+    }
     const userId = user.phoneNumber;
     const passed = await this.submissionModel.find({
       where: { userId, status: 'passed' },
@@ -370,9 +415,11 @@ export class ReviewService {
     });
 
     return {
-      owner: { nickName: user.nickName, avatar: user.avatar, slug },
+      owner: { nickName: user.nickName, avatar: user.avatar, slug, headline: user.portfolioHeadline || '' },
       projects,
       skillCurve: await this.skillCurve(userId),
+      // 结营徽章（PRD-06 F6 作品档案联动）
+      badges: await this.cohortService.myBadges(userId).catch(() => []),
     };
   }
 

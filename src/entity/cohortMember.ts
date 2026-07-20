@@ -20,4 +20,16 @@ export class CohortMemberEntity extends BaseEntity {
 
   @Column({ comment: '里程碑进度（json：{claimed,plan,building,submitted,passed}）', type: 'json', nullable: true })
   progress: any;
+
+  @Column({ comment: '里程碑打卡（json：{milestoneKey: 时间戳}，成员自报"我到这步了"）', type: 'json', nullable: true })
+  milestoneChecks: any;
+
+  @Column({ comment: '结营展示物（json：{title,content,repoUrl,deployUrl}）', type: 'json', nullable: true })
+  showcase: any;
+
+  @Column({ comment: '是否同意展示到作品墙', default: false })
+  wallOptIn: boolean;
+
+  @Column({ comment: '是否结营（通过当期大题即得结营徽章）', default: false })
+  completion: boolean;
 }
