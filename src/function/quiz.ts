@@ -6,6 +6,7 @@ import {
   Query,
   Body,
   ALL,
+  Config,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
@@ -53,7 +54,12 @@ export class QuizHTTPService {
   @InjectEntityModel(UserEntity)
   userModel: Repository<UserEntity>;
 
+  // 限免期开关：与 ai.ts / mission.ts 口径一致，避免 quiz 路径把限免期用户误判非会员
+  @Config('membership')
+  membershipConfig: { freeForAll: boolean };
+
   private async getIsMember(userId: string): Promise<boolean> {
+    if (this.membershipConfig?.freeForAll) return true; // 限免期：所有人按会员对待
     try {
       const user = await this.userModel.findOneBy({ phoneNumber: userId });
       if (!user?.isMember || !user?.memberDate) return false;
@@ -82,7 +88,8 @@ export class QuizHTTPService {
     }
     const fwd = this.ctx.headers['x-forwarded-for'] as string;
     const ip = (fwd ? fwd.split(',')[0].trim() : '') || this.ctx.ip || 'anonymous';
-    return { userId: `guest:${ip}`, isMember: false };
+    // 限免期游客也按会员对待，与 ai.ts resolveUser 一致
+    return { userId: `guest:${ip}`, isMember: !!this.membershipConfig?.freeForAll };
   }
 
   private requireLogin() {
