@@ -2,3 +2,4 @@ redeploy: 复盘增强四件套+防御端裁决措辞（invest-model#138/#141）
 2026-07-19 review-enhancements
 2026-07-20T04:03:57Z deploy-nudge: invest-model#144 白名单遗留引用修复(NameError)
 2026-07-20T10:14:11Z deploy: invest-model#152 计划渲染补 risk_hints(投顾风向行)
+2026-07-20T11:32:55Z deploy: invest-model#153主题有效期+#154计划ETF观察段
