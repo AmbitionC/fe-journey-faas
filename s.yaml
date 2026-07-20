@@ -60,6 +60,9 @@ resources:
         # HEALTH_API_TOKEN 未配置时模块拒绝所有请求，不影响其他功能。
         HEALTH_DB_NAME: ${env('HEALTH_DB_NAME', 'health')}
         HEALTH_API_TOKEN: ${env('HEALTH_API_TOKEN', '')}
+        # 限时免费：当前未收费阶段，所有人按会员对待（AI 无限、不限流）。将来收费时改 'false'。
+        # 显式写死是因为不设时可能残留旧值导致会员被误限流（RATE_LIMIT）。
+        MEMBERSHIP_FREE: 'true'
         # 一条路灰度开关（创始人 2026-07-19 全开验证）。要关某个模块把对应值改成 'false' 即可。
         COACH_AGENTIC_ENABLED: 'true'
         ENTITLEMENT_ENABLED: 'true'
