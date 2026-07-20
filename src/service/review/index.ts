@@ -77,12 +77,18 @@ export class ReviewService {
       repoSnapshot = { error: true };
     }
 
+    // 归一化验收标准 id（缺 id 时用序号），保证 prompt 列表与 mustPass 判定用同一套 id。
+    // 否则未显式写 id 的验收标准，其"必过"判定会永远匹配不上、兜底失效。
+    const normCriteria = (Array.isArray(mission.acceptanceCriteria) ? mission.acceptanceCriteria : []).map(
+      (c: any, i: number) => ({ ...c, id: String(c?.id ?? i + 1) })
+    );
+    mission.acceptanceCriteria = normCriteria;
+
     const parsed = await this.gradeWithLLM(mission, sub, repoDigest);
     // mustPass 兜底：任一必过项 fail → 强制 rework
     let verdict = parsed.verdict;
-    const criteria = Array.isArray(mission.acceptanceCriteria) ? mission.acceptanceCriteria : [];
     const mustPassFailed = (parsed.criteriaVerdicts || []).some((cv: any) => {
-      const def = criteria.find((c: any) => String(c.id) === String(cv.id));
+      const def = normCriteria.find((c: any) => c.id === String(cv.id));
       return def?.mustPass && cv.verdict === 'fail';
     });
     if (mustPassFailed) verdict = 'rework';

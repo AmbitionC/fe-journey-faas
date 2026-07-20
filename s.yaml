@@ -60,6 +60,17 @@ resources:
         # HEALTH_API_TOKEN 未配置时模块拒绝所有请求，不影响其他功能。
         HEALTH_DB_NAME: ${env('HEALTH_DB_NAME', 'health')}
         HEALTH_API_TOKEN: ${env('HEALTH_API_TOKEN', '')}
+        # 一条路灰度开关（创始人 2026-07-19 全开验证）。要关某个模块把对应值改成 'false' 即可。
+        COACH_AGENTIC_ENABLED: 'true'
+        ENTITLEMENT_ENABLED: 'true'
+        MISSION_ENABLED: 'true'
+        REVIEW_ENABLED: 'true'
+        PLAN_ENABLED: 'true'
+        PLAN_AI_ENABLED: 'true'
+        COHORT_ENABLED: 'true'
+        EMBEDDING_ENABLED: 'true'
+        # Embedding 需 DashScope（百炼）key，未配置时第三路自动空转不发请求（见 config.default embedding）。
+        EMBEDDING_API_KEY: ${env('EMBEDDING_API_KEY', '')}
         # 拍照识别热量的视觉模型（OpenAI 兼容，如 dashscope qwen-vl-max）；未配置则该功能降级
         HEALTH_VISION_BASE_URL: ${env('HEALTH_VISION_BASE_URL', '')}
         HEALTH_VISION_API_KEY: ${env('HEALTH_VISION_API_KEY', '')}

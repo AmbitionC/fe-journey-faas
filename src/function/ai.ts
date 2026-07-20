@@ -18,6 +18,7 @@ import { RetrieveService } from '../service/ai/retrieve';
 import { ArticleService } from '../service/article';
 import { GradeItem } from '../service/ai/prompts';
 import { isEntitled } from '../common/entitlement';
+import { EntitlementService } from '../service/entitlement';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
 
@@ -108,6 +109,9 @@ export class AiHTTPService {
   @InjectEntityModel(UserEntity)
   userModel: Repository<UserEntity>;
 
+  @Inject()
+  entitlementService: EntitlementService;
+
   @Config('ai')
   aiConfig: { rateLimit: { freeUserPerDay: number } };
 
@@ -120,6 +124,13 @@ export class AiHTTPService {
   private async getIsMember(userId: string): Promise<boolean> {
     // 限时免费：所有人按会员对待
     if (this.membershipConfig?.freeForAll) return true;
+    // 新权益体系（试用/购买）优先——与做题/计划/期次模块口径统一，避免同一会员在
+    // AI 端被判非会员（PRD-07 过渡期双写，两套判定必须一致）。
+    try {
+      if (await this.entitlementService.hasActiveEntitlement(userId)) return true;
+    } catch {
+      /* 权益查询失败则回落存量判定 */
+    }
     try {
       const user = await this.userModel.findOneBy({ phoneNumber: userId });
       if (!user?.isMember || !user?.memberDate) return false;
@@ -180,6 +191,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiChat(@Body(ALL) body: AIChatDTO) {
+    if (!Array.isArray(body.messages)) body.messages = [];
     const { userId, isMember } = await this.resolveUser();
     await this.aiProxyService.checkRateLimit(userId, isMember);
 
@@ -320,6 +332,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiChatStream(@Body(ALL) body: AIChatDTO) {
+    if (!Array.isArray(body.messages)) body.messages = [];
     const { userId, isMember } = await this.resolveUser();
 
     this.ctx.set('Content-Type', 'text/event-stream; charset=utf-8');
@@ -356,6 +369,10 @@ export class AiHTTPService {
           }
           if (frame.citations) {
             res.write(`data: ${JSON.stringify({ citations: frame.citations })}\n\n`);
+          }
+          // 结构化提问帧（选项气泡）：placement/article_check/feynman 等模式的核心输出
+          if (frame.question) {
+            res.write(`data: ${JSON.stringify({ question: frame.question })}\n\n`);
           }
           if (frame.error) {
             res.write(`data: ${JSON.stringify({ error: frame.error })}\n\n`);

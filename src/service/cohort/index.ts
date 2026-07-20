@@ -11,20 +11,21 @@ import { R } from '../../common/base.error.utils';
 /** 里程碑顺序（进度榜格子图用）。 */
 const MILESTONES = ['claimed', 'plan', 'building', 'submitted', 'passed'];
 
+/** 里程碑：领题(1)→方案(2)→开发(3)→交付(4)→通过(5)。返回已完成的里程碑数。 */
 function statusToMilestone(status: string): number {
   switch (status) {
     case 'claimed':
-      return 1;
     case 'plan_pending':
-      return 1;
+      return 1; // 领题
     case 'building':
-      return 3;
+      return 2; // 方案已过，开发中
+    case 'rework':
+      return 3; // 交付过、返工中（开发完成）
     case 'submitted':
     case 'reviewing':
-    case 'rework':
-      return 4;
+      return 4; // 已交付，评审中
     case 'passed':
-      return 5;
+      return 5; // 通过
     default:
       return 0;
   }
@@ -161,7 +162,7 @@ export class CohortService {
         const ms = s ? statusToMilestone(s.status) : 0;
         if (ms >= 5) dist.passed++;
         else if (ms >= 4) dist.submitted++;
-        else if (ms >= 1) dist.building++;
+        else if (ms >= 2) dist.building++; // 方案已过、真正在做（仅领题不算"building"）
         else dist.notStarted++;
       }
     }
