@@ -238,10 +238,12 @@ export default {
     enabled: process.env.ENTITLEMENT_ENABLED === 'true',
   },
   // Embedding 层（PRD-09 决策 8，阶段 2）：DashScope text-embedding-v4 OpenAI 兼容接口。
-  // 默认复用全站 LLM_API_KEY（DashScope key）；EMBEDDING_ENABLED 关闭时不调用。
+  // ⚠️ apiKey 必须是 DashScope（百炼）key，不能复用 DeepSeek 的 LLM_API_KEY——两者端点不同。
+  // 未配置 EMBEDDING_API_KEY 时，即便 EMBEDDING_ENABLED=true，EmbeddingService.enabled() 也为 false，
+  // 检索第三路直接返回空、不发失败请求（见 embedding/index.ts enabled()）。
   embedding: {
     baseUrl: process.env.EMBEDDING_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    apiKey: process.env.EMBEDDING_API_KEY || process.env.LLM_API_KEY || '',
+    apiKey: process.env.EMBEDDING_API_KEY || '',
     model: process.env.EMBEDDING_MODEL || 'text-embedding-v4',
   },
   // 一条路各模块灰度开关（默认全关，逐个验证后开启，关时对线上零影响）
