@@ -1,2 +1,3 @@
 redeploy: 复盘增强四件套+防御端裁决措辞（invest-model#138/#141）
 2026-07-19 review-enhancements
+2026-07-20T04:03:57Z deploy-nudge: invest-model#144 白名单遗留引用修复(NameError)
