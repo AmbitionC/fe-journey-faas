@@ -1,2 +1,2 @@
-ingest_etf
-# 补拉0717 ETF行情：ingest-etf 16:50 timer 0716/0717 连续静默丢失。
+daily_update_plan
+# 0721 盘后计划出成决策日=0720：17:00 跑时 Tushare 尚未发布 0721 EOD，手动补拉今日数据+重出计划(决策日=0721)
