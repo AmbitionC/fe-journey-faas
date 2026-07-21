@@ -7,3 +7,4 @@ redeploy: 复盘增强四件套+防御端裁决措辞（invest-model#138/#141）
 2026-07-21T02:00:39Z deploy: invest-model#163 盯盘预警套利关时不推 WATER/ALPHA 水表影子误报
 2026-07-21T08:02:26Z deploy: invest-model#167 恐慌密控 job_fear_panic_watch + s.yaml fear-panic-watch timer(5min)
 2026-07-21T08:56:33Z deploy: invest-model#170 恐慌提醒补深度点位85+仓位文案按E17校正
+2026-07-21T09:02:43Z deploy: invest-model#171 恐慌提醒加关键点位80(恐慌加深)
