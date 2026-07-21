@@ -228,6 +228,16 @@ resources:
             cronExpression: '0 0 2,3,5,6,7 ? * MON-FRI'
             enable: true
             payload: 'fear_intraday'
+        - triggerName: fear-panic-watch
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            # 每 5 分钟（北京 09:00-15:59）恐慌密控哨兵：job 内先轻量查当日 fear_intraday，
+            # 仅当曾 ≥75 且最新 ≥70（密控态）才全市场加密重算、把小时级抬到 5 分钟级；
+            # 常态一次 SELECT 即毫秒退出（同 plan_watchdog 哨兵，空转成本可忽略）。纯监测不下单。
+            cronExpression: '0 0/5 1-7 ? * MON-FRI'
+            enable: true
+            payload: 'fear_panic_watch'
         - triggerName: weekly-rebuild-review
           triggerType: timer
           qualifier: LATEST
