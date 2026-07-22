@@ -12,3 +12,4 @@ redeploy: 复盘增强四件套+防御端裁决措辞（invest-model#138/#141）
 2026-07-21T10:44:20Z deploy: invest-model#173 盘中观察池突破追高也提示
 2026-07-22T09:32:11Z deploy: invest-model#182 涨停信号买入行改挂回踩位+警示
 2026-07-22T15:47:53Z deploy: invest-model#185 减仓股数可执行口径(1手二选一/多手夹取)
+2026-07-22T16:00:57Z deploy: invest-model#186 回撤阈值10%+弱股提示行
