@@ -11,6 +11,7 @@ import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
 import { AiProxyService } from '../ai/proxy';
 import { EntitlementService } from '../entitlement';
+import { OrderService } from '../order';
 
 @Provide()
 export class UserService {
@@ -31,6 +32,9 @@ export class UserService {
 
   @Inject()
   entitlementService: EntitlementService;
+
+  @Inject()
+  orderService: OrderService;
 
   // 创建用户
   async createUser(user: UserDTO): Promise<any> {
@@ -103,7 +107,11 @@ export class UserService {
     return { success: true, data: user.toVO() };
   }
 
-  async activateMembership(userId: string, plan: 'monthly' | 'yearly'): Promise<any> {
+  async activateMembership(
+    userId: string,
+    plan: 'monthly' | 'yearly',
+    channel?: string
+  ): Promise<any> {
     const user = await this.userModel.findOneBy({ phoneNumber: userId });
     if (!user) throw R.error('用户不存在');
 
@@ -122,6 +130,17 @@ export class UserService {
 
     // PRD-07：同步写入权益记录，让新权益网关与存量 isMember 标记一致（过渡期双写）。
     await this.entitlementService.grantFromOrder(userId, plan).catch(() => {});
+
+    // 订单落库：会员账单页与增长漏斗此前无数据源（order 表从未被写入）
+    await this.orderService
+      .create({
+        userId,
+        type: 'member',
+        name: plan === 'yearly' ? '年付会员 · Iris Pro' : '月付会员 · Iris Pro',
+        amount: plan === 'yearly' ? 199 : 29,
+        channel,
+      })
+      .catch(() => {});
 
     return { success: true, data: user.toVO() };
   }

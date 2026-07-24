@@ -41,6 +41,8 @@ const BENEFITS: Record<string, BenefitDef> = {
   service_discount: { memberOnly: true },
   // 推荐项目·手把手陪跑指南
   guided_mission: { memberOnly: true },
+  // 面试知识点 PDF（收费日起并入会员权益；限免期该 SKU 仍独立售卖，见前端 PDF_AS_MEMBER_BENEFIT）
+  materials_pdf: { memberOnly: true },
 };
 
 export interface CheckResult {
@@ -104,14 +106,14 @@ export class EntitlementService {
     }
   }
 
-  /** 注册发放 7 天全功能试用（每手机号一次）。幂等：已发过 trial 不重复发。 */
+  /** 注册发放 14 天全功能试用（每手机号一次），对齐注册页「赠送14天会员权益」文案。幂等：已发过 trial 不重复发。 */
   async grantTrial(userId: string): Promise<void> {
     if (!userId) return;
     try {
       const existing = await this.entModel.findOne({ where: { userId, source: 'trial' } });
       if (existing) return;
       const now = new Date();
-      const expireAt = new Date(now.getTime() + 7 * 86400000);
+      const expireAt = new Date(now.getTime() + 14 * 86400000);
       await this.entModel.save(
         this.entModel.create({ userId, source: 'trial', startAt: now, expireAt, meta: null })
       );

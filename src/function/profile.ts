@@ -66,4 +66,35 @@ export class ProfileHTTPService {
   async getPdfOrders(@Query('userId') userId: string): Promise<any> {
     return await this.orderService.getPdfOrders(userId);
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '订单落库（自证支付完成后记录，供账单页与增长漏斗）',
+    functionName: 'recordOrder',
+    name: 'recordOrder',
+    path: '/order/record',
+    method: 'post',
+  })
+  async recordOrder(
+    @Body(ALL)
+    body: {
+      userId?: string;
+      type?: string;
+      name?: string;
+      amount?: number;
+      channel?: string;
+    }
+  ): Promise<any> {
+    const userId = this.ctx.userInfo?.userId || body?.userId;
+    // 未登录不落单（PDF 购买不强制登录），静默成功不阻断交付
+    if (!userId) return { success: true, data: null };
+    const type = body?.type === 'member' ? 'member' : 'pdf';
+    await this.orderService.create({
+      userId,
+      type,
+      name: String(body?.name || '学习资料（PDF）').slice(0, 100),
+      amount: Number(body?.amount) || 9.9,
+      channel: body?.channel,
+    });
+    return { success: true, data: {} };
+  }
 }

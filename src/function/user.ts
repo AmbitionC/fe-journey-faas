@@ -125,13 +125,13 @@ export class UserHTTPService {
     method: 'post',
   })
   async activateMembership(
-    @Body(ALL) data: { plan: 'monthly' | 'yearly'; userId?: string }
+    @Body(ALL) data: { plan: 'monthly' | 'yearly'; userId?: string; channel?: string }
   ): Promise<any> {
     // 优先用鉴权中间件注入的登录态；取不到再回退到 body 的 userId（前端已携带），
     // 与 getUserInfo / updateUserInfo 信任客户端 userId 的做法一致。
     const userId = this.ctx.userInfo?.userId || data.userId;
     if (!userId) throw R.error('请先登录');
     if (!data.plan || !['monthly', 'yearly'].includes(data.plan)) throw R.error('plan 参数无效');
-    return await this.userService.activateMembership(userId, data.plan);
+    return await this.userService.activateMembership(userId, data.plan, data.channel);
   }
 }
