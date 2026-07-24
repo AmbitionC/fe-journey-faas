@@ -15,3 +15,4 @@ redeploy: 复盘增强四件套+防御端裁决措辞（invest-model#138/#141）
 2026-07-22T16:00:57Z deploy: invest-model#186 回撤阈值10%+弱股提示行
 2026-07-23T05:11:47Z deploy: invest-model#188 盯盘诊断行(定位盘中零预警)
 2026-07-23T05:27:36Z deploy: invest-model#190 实时行情三级回退(修盯盘失明)
+2026-07-24T14:15:59Z nudge: 打包 invest-model DB 引擎超时修复(connect 10s/read·write 300s)到 FC
