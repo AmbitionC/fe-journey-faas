@@ -148,8 +148,33 @@ export class MaterialsService {
     }));
   }
 
-  /** 仅保留已生成 PDF 的项，丢弃空分组（会员下载用） */
+  /**
+   * 会员下载用：仅返回已生成 PDF 的分组。
+   * 以 **manifest 为准**（manifest 本身就带完整目录结构，且只含已生成项）——
+   * 不依赖 nav_config 的二级 key 与 manifest 精确匹配，避免键不一致时整页空白。
+   * 仅当没有 v2 manifest.groups 时才回退到 nav∩manifest 合并逻辑。
+   */
   async groupedListReady(): Promise<MaterialGroup[]> {
+    const manifest = await this.readManifest();
+    if (Array.isArray(manifest.groups) && manifest.groups.length) {
+      return manifest.groups
+        .map((g) => ({
+          key: g.key,
+          label: g.label || g.key,
+          items: (g.items || [])
+            .filter((it) => it.updatedAt)
+            .map((it) => ({
+              key: it.key,
+              label: it.label || it.key,
+              updatedAt: it.updatedAt || null,
+              sizeBytes: it.sizeBytes || 0,
+              articleCount: it.articleCount || 0,
+              ready: true,
+            })),
+        }))
+        .filter((g) => g.items.length > 0);
+    }
+    // 兜底（v1 / 无 manifest）：走 nav 合并
     const groups = await this.groupedList();
     return groups
       .map((g) => ({ ...g, items: g.items.filter((i) => i.ready) }))
