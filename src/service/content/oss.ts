@@ -1,3 +1,4 @@
+import { Provide } from '@midwayjs/core';
 import * as OSS from 'ali-oss';
 import { createHash } from 'crypto';
 import { articlePath } from './modules';
@@ -41,6 +42,7 @@ export function buildObjectKey(
   return articlePath(module, filePath, key);
 }
 
+@Provide()
 export class OssService {
   private client: OSS | undefined;
 
