@@ -54,7 +54,7 @@ export class MaterialsHTTPService {
   @NoAuth()
   async list(): Promise<any> {
     await this.gateMember();
-    const data = await this.materialsService.listReady();
+    const data = await this.materialsService.groupedListReady();
     return { success: true, data };
   }
 
@@ -72,7 +72,7 @@ export class MaterialsHTTPService {
     if (!(await this.materialsService.isReady(category))) {
       throw R.error('该分类资料尚未生成');
     }
-    const url = this.materialsService.downloadUrl(category);
+    const url = await this.materialsService.downloadUrl(category);
     return { success: true, data: { url, expiresInSec: 86400 } };
   }
 
@@ -85,7 +85,7 @@ export class MaterialsHTTPService {
   })
   async adminList(): Promise<any> {
     await assertAdmin(this.ctx, this.redisService);
-    const data = await this.materialsService.list();
+    const data = await this.materialsService.groupedList();
     return { success: true, data };
   }
 
@@ -102,7 +102,7 @@ export class MaterialsHTTPService {
     if (!(await this.materialsService.isReady(category))) {
       throw R.error('该分类资料尚未生成');
     }
-    const url = this.materialsService.downloadUrl(category);
+    const url = await this.materialsService.downloadUrl(category);
     return { success: true, data: { url, expiresInSec: 86400 } };
   }
 

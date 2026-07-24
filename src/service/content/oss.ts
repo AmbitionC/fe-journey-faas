@@ -126,10 +126,19 @@ export class OssService {
   /**
    * 生成带失效期的临时下载签名 URL（防泄漏传播）。
    * 对象需为 private ACL，公网直链不可访问，只能通过本签名链接在 expires 秒内下载。
+   * 传 filename 时以 attachment 方式下载（浏览器另存为该文件名，而非 inline 打开），
+   * 便于批量下载；中文名走 RFC5987 编码。
    */
-  signedUrl(objKey: string, expiresSec = 86400): string {
+  signedUrl(objKey: string, expiresSec = 86400, filename?: string): string {
     this.assertClient();
-    return this.client!.signatureUrl(objKey, { expires: expiresSec });
+    const options: any = { expires: expiresSec };
+    if (filename) {
+      const encoded = encodeURIComponent(filename);
+      options.response = {
+        'content-disposition': `attachment; filename="download.pdf"; filename*=UTF-8''${encoded}`,
+      };
+    }
+    return this.client!.signatureUrl(objKey, options);
   }
 
   /** 以私有 ACL 写入任意对象（下载类资产，禁止公网直链，只能签名访问） */
