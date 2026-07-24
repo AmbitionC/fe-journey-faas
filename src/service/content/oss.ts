@@ -123,6 +123,66 @@ export class OssService {
     return objKey;
   }
 
+  /**
+   * 生成带失效期的临时下载签名 URL（防泄漏传播）。
+   * 对象需为 private ACL，公网直链不可访问，只能通过本签名链接在 expires 秒内下载。
+   */
+  signedUrl(objKey: string, expiresSec = 86400): string {
+    this.assertClient();
+    return this.client!.signatureUrl(objKey, { expires: expiresSec });
+  }
+
+  /** 以私有 ACL 写入任意对象（下载类资产，禁止公网直链，只能签名访问） */
+  async putPrivate(
+    objKey: string,
+    buf: Buffer,
+    contentType = 'application/octet-stream'
+  ): Promise<number> {
+    this.assertClient();
+    await this.client!.put(objKey, buf, {
+      headers: {
+        'Content-Type': contentType,
+        'x-oss-object-acl': 'private',
+        'Content-MD5': md5Base64(buf),
+      },
+    });
+    const metadata: any = await this.client!.getObjectMeta(objKey);
+    const storedSize = Number(metadata?.res?.headers?.['content-length']);
+    if (!Number.isSafeInteger(storedSize) || storedSize !== buf.length) {
+      throw new Error(
+        `OSS ${objKey} 大小校验失败: 期望 ${buf.length} bytes，实际 ${String(storedSize)} bytes`
+      );
+    }
+    return buf.length;
+  }
+
+  /** 按完整 objKey 读取文本对象（如 manifest.json）；不存在返回 null */
+  async getRawText(objKey: string): Promise<string | null> {
+    this.assertClient();
+    try {
+      const result = await this.client!.get(objKey);
+      return result.content.toString('utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  /** 写入文本对象（如 manifest.json），可选私有 ACL */
+  async putRawText(
+    objKey: string,
+    text: string,
+    contentType = 'application/json; charset=utf-8',
+    isPrivate = true
+  ): Promise<void> {
+    this.assertClient();
+    await this.client!.put(objKey, Buffer.from(text, 'utf-8'), {
+      headers: {
+        'Content-Type': contentType,
+        ...(isPrivate ? { 'x-oss-object-acl': 'private' } : {}),
+      },
+    });
+  }
+
   /** 读取任意对象元信息（供群二维码过期提醒等）；对象不存在返回 null */
   async rawMeta(objKey: string): Promise<{ lastModified: string } | null> {
     this.assertClient();
