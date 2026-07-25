@@ -12,6 +12,7 @@ import { R } from '../../common/base.error.utils';
 import { AiProxyService } from '../ai/proxy';
 import { EntitlementService } from '../entitlement';
 import { OrderService } from '../order';
+import { isMembershipFree, MembershipConfig } from '../../common/membership';
 
 @Provide()
 export class UserService {
@@ -22,7 +23,7 @@ export class UserService {
   tokenConfig: TokenConfig;
 
   @Config('membership')
-  membershipConfig: { freeForAll: boolean };
+  membershipConfig: MembershipConfig;
 
   @Inject()
   redisService: RedisService;
@@ -75,7 +76,7 @@ export class UserService {
       .getOne();
     if (userInfo) {
       // 限时免费：所有人按会员对待，并下发远期到期日，让前端各处会员判定自动通过
-      const freeForAll = !!this.membershipConfig?.freeForAll;
+      const freeForAll = !!isMembershipFree(this.membershipConfig);
       const isMember = freeForAll || !!userInfo.isMember;
       const quota = await this.aiProxyService.getQuota(userId, isMember);
       const vo = userInfo.toVO();

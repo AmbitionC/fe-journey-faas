@@ -227,7 +227,10 @@ export default {
   // （历史付费试验遗留值）导致会员被误判非会员而触发每日限流（RATE_LIMIT）。
   // 将来恢复收费：改回 `process.env.MEMBERSHIP_FREE !== 'false'` 并在环境变量里设置即可。
   membership: {
-    freeForAll: true,
+    // 限免截止：北京时间 2026-08-01 00:00 起恢复收费（每次请求实时判定，见 common/membership.ts）
+    freeUntil: process.env.MEMBERSHIP_FREE_UNTIL || '2026-08-01T00:00:00+08:00',
+    // 应急开关：置 MEMBERSHIP_FREE_FORCE=true 可无视日期强制全员免费（回滚用）
+    freeForAll: process.env.MEMBERSHIP_FREE_FORCE === 'true',
   },
   // 教练 agentic 检索（教练地基 P0）：默认关闭，/api/ai/chat/stream 走现有链路。
   // 置 COACH_AGENTIC_ENABLED=true 后，非结构化任务的问答走 agentic 工具循环（带引用/status）。

@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 import { R } from '../../common/base.error.utils';
 import { AiUsageLogEntity } from '../../entity/aiUsageLog';
 import { AiCallLogEntity } from '../../entity/aiCallLog';
+import { isMembershipFree, MembershipConfig } from '../../common/membership';
 import {
   buildHintPrompt,
   buildReviewPrompt,
@@ -112,7 +113,7 @@ export class AiProxyService {
   // 限时免费开关：开启时全站不限流（与各 caller 传入的 isMember 无关，作为兜底闸门，
   // 避免任一路径误判非会员就限流）。
   @Config('membership')
-  membershipConfig: { freeForAll: boolean };
+  membershipConfig: MembershipConfig;
 
   @Inject()
   redisService: RedisService;
@@ -165,7 +166,7 @@ export class AiProxyService {
   }
 
   async checkRateLimit(userId: string, isMember: boolean): Promise<void> {
-    if (this.membershipConfig?.freeForAll) return; // 限免期：全员不限流
+    if (isMembershipFree(this.membershipConfig)) return; // 限免期：全员不限流
     if (isMember) return; // members have no limit
     const limit = this.aiConfig.rateLimit.freeUserPerDay;
     const key = `ai:rate:day:${userId}`;
@@ -179,7 +180,7 @@ export class AiProxyService {
   }
 
   async getQuota(userId: string, isMember: boolean): Promise<{ used: number; limit: number | null; resetAt: string | null }> {
-    if (this.membershipConfig?.freeForAll || isMember) {
+    if (isMembershipFree(this.membershipConfig) || isMember) {
       return { used: 0, limit: null, resetAt: null };
     }
     const key = `ai:rate:day:${userId}`;

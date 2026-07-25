@@ -19,6 +19,7 @@ import { AgentService } from '../service/ai/agent';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
+import { isMembershipFree, MembershipConfig } from '../common/membership';
 import {
   QuizListQueryDTO,
   QuizSubmitDTO,
@@ -56,10 +57,10 @@ export class QuizHTTPService {
 
   // 限免期开关：与 ai.ts / mission.ts 口径一致，避免 quiz 路径把限免期用户误判非会员
   @Config('membership')
-  membershipConfig: { freeForAll: boolean };
+  membershipConfig: MembershipConfig;
 
   private async getIsMember(userId: string): Promise<boolean> {
-    if (this.membershipConfig?.freeForAll) return true; // 限免期：所有人按会员对待
+    if (isMembershipFree(this.membershipConfig)) return true; // 限免期：所有人按会员对待
     try {
       const user = await this.userModel.findOneBy({ phoneNumber: userId });
       if (!user?.isMember || !user?.memberDate) return false;
@@ -89,7 +90,7 @@ export class QuizHTTPService {
     const fwd = this.ctx.headers['x-forwarded-for'] as string;
     const ip = (fwd ? fwd.split(',')[0].trim() : '') || this.ctx.ip || 'anonymous';
     // 限免期游客也按会员对待，与 ai.ts resolveUser 一致
-    return { userId: `guest:${ip}`, isMember: !!this.membershipConfig?.freeForAll };
+    return { userId: `guest:${ip}`, isMember: !!isMembershipFree(this.membershipConfig) };
   }
 
   /** 聚合 FaaS 下 ctx.userInfo 未必透传，回落到请求头 token 反查 Redis（排除游客态） */

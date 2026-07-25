@@ -21,6 +21,7 @@ import { isEntitled } from '../common/entitlement';
 import { EntitlementService } from '../service/entitlement';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
+import { isMembershipFree, MembershipConfig } from '../common/membership';
 
 class AIChatDTO {
   messages: ChatMessage[];
@@ -116,14 +117,14 @@ export class AiHTTPService {
   aiConfig: { rateLimit: { freeUserPerDay: number } };
 
   @Config('membership')
-  membershipConfig: { freeForAll: boolean };
+  membershipConfig: MembershipConfig;
 
   @Config('coach')
   coachConfig: { agenticEnabled: boolean };
 
   private async getIsMember(userId: string): Promise<boolean> {
     // 限时免费：所有人按会员对待
-    if (this.membershipConfig?.freeForAll) return true;
+    if (isMembershipFree(this.membershipConfig)) return true;
     // 新权益体系（试用/购买）优先——与做题/计划/期次模块口径统一，避免同一会员在
     // AI 端被判非会员（PRD-07 过渡期双写，两套判定必须一致）。
     try {
@@ -165,7 +166,7 @@ export class AiHTTPService {
     const fwd = this.ctx.headers['x-forwarded-for'] as string;
     const ip = (fwd ? fwd.split(',')[0].trim() : '') || this.ctx.ip || 'anonymous';
     // 限时免费：游客也按会员对待（AI 无限）
-    return { userId: `guest:${ip}`, isMember: !!this.membershipConfig?.freeForAll };
+    return { userId: `guest:${ip}`, isMember: !!isMembershipFree(this.membershipConfig) };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

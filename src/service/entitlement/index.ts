@@ -3,6 +3,7 @@ import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
 import { RedisService } from '@midwayjs/redis';
 import { MemberEntitlementEntity } from '../../entity/memberEntitlement';
+import { isMembershipFree, MembershipConfig } from '../../common/membership';
 
 /** 权益键定义（PRD-07 §4.1 F1）：memberOnly + 可选限次。 */
 interface BenefitDef {
@@ -68,7 +69,7 @@ export class EntitlementService {
   redisService: RedisService;
 
   @Config('membership')
-  membershipConfig: { freeForAll: boolean };
+  membershipConfig: MembershipConfig;
 
   @Config('entitlement')
   entConfig: { enabled: boolean };
@@ -89,7 +90,7 @@ export class EntitlementService {
 
   /** 会员判定：限免期 → 全员会员；否则看有效权益记录。 */
   async isMember(userId: string): Promise<boolean> {
-    if (this.membershipConfig?.freeForAll) return true;
+    if (isMembershipFree(this.membershipConfig)) return true;
     return this.hasActiveEntitlement(userId);
   }
 
@@ -209,7 +210,7 @@ export class EntitlementService {
     return {
       isMember: member,
       expireAt: expiry ? expiry.toISOString() : null,
-      freeForAll: !!this.membershipConfig?.freeForAll,
+      freeForAll: !!isMembershipFree(this.membershipConfig),
       benefits: Object.keys(BENEFITS),
     };
   }
