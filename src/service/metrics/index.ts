@@ -3,7 +3,6 @@ import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../../entity/user';
 import { ArticleReadingStateEntity } from '../../entity/articleReadingState';
-import { QuizAttemptEntity } from '../../entity/quizAttempt';
 import { AiUsageLogEntity } from '../../entity/aiUsageLog';
 import { AiCallLogEntity } from '../../entity/aiCallLog';
 import { EventLogEntity } from '../../entity/eventLog';
@@ -18,9 +17,6 @@ export class MetricsService {
 
   @InjectEntityModel(ArticleReadingStateEntity)
   readingStateModel: Repository<ArticleReadingStateEntity>;
-
-  @InjectEntityModel(QuizAttemptEntity)
-  quizAttemptModel: Repository<QuizAttemptEntity>;
 
   @InjectEntityModel(AiUsageLogEntity)
   aiUsageLogModel: Repository<AiUsageLogEntity>;
@@ -97,6 +93,7 @@ export class MetricsService {
     const ex = this.excludedUserIds(exclude);
 
     // 各存量口径统一排除内部/自测账号（userId = 手机号）
+    // 测验指标（quizAttempts/quizUsers/avgScore）已于 2026-07-25 随「测一测」下线移除
     const usersQb = this.userModel.createQueryBuilder('u');
     if (ex.length) usersQb.andWhere('u.phoneNumber NOT IN (:...ex)', { ex });
 
@@ -105,16 +102,12 @@ export class MetricsService {
       .where("r.status = 'done'");
     if (ex.length) readingQb.andWhere('r.userId NOT IN (:...ex)', { ex });
 
-    const quizCountQb = this.quizAttemptModel.createQueryBuilder('a');
-    if (ex.length) quizCountQb.andWhere('a.userId NOT IN (:...ex)', { ex });
-
     const aiCallsQb = this.aiUsageLogModel.createQueryBuilder('u');
     if (ex.length) aiCallsQb.andWhere('u.userId NOT IN (:...ex)', { ex });
 
-    const [users, readingDone, quizAttempts, aiCalls] = await Promise.all([
+    const [users, readingDone, aiCalls] = await Promise.all([
       usersQb.getCount(),
       readingQb.getCount(),
-      quizCountQb.getCount(),
       aiCallsQb.getCount(),
     ]);
 
@@ -127,22 +120,6 @@ export class MetricsService {
       members = await qb.getCount();
     } catch {
       members = 0;
-    }
-
-    // 平均测验分 + 完成测验的去重用户数
-    let avgScore = 0;
-    let quizUsers = 0;
-    try {
-      const qb = this.quizAttemptModel
-        .createQueryBuilder('a')
-        .select('AVG(a.score)', 'avg')
-        .addSelect('COUNT(DISTINCT a.userId)', 'users');
-      if (ex.length) qb.andWhere('a.userId NOT IN (:...ex)', { ex });
-      const row = await qb.getRawOne();
-      avgScore = Math.round(Number(row?.avg || 0));
-      quizUsers = Number(row?.users || 0);
-    } catch {
-      /* ignore */
     }
 
     // AI token 总量
@@ -162,9 +139,6 @@ export class MetricsService {
       users,
       members,
       readingDone,
-      quizAttempts,
-      quizUsers,
-      avgScore,
       aiCalls,
       tokens,
     };
