@@ -48,6 +48,8 @@ resources:
         OSS_BUCKET: font-end-journey-resources
         OSS_REGION: oss-cn-hangzhou
         SYNC_SECRET: ${env('SYNC_SECRET')}
+        # 增长复盘排除的内部/自测账号（详见 src/config/config.default.ts 的 growthInternalUserIds）
+        GROWTH_INTERNAL_USER_IDS: ${env('GROWTH_INTERNAL_USER_IDS', '')}
         # 数据库/Redis 凭证（PRD-07：移出代码，改由环境变量注入）
         DB_HOST: ${env('DB_HOST')}
         DB_USER: ${env('DB_USER')}

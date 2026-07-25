@@ -20,6 +20,9 @@ env:
   OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
   OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
   SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+  # 增长复盘排除的内部账号（手机号，逗号分隔）。存 GitHub secret 而非写进仓库（本仓库公开，避免暴露 PII）。
+  # 未配置时解析为空串 → 不排除任何人、不阻断部署。注意：FC 控制台手改的环境变量会被每次部署覆盖，必须走这里。
+  GROWTH_INTERNAL_USER_IDS: ${{ secrets.GROWTH_INTERNAL_USER_IDS }}
   # 数据库/Redis 凭证（PRD-07：移出代码，改由环境变量注入；DB_* 与 invest 函数共用）
   DB_HOST: ${{ secrets.DB_HOST }}
   DB_USER: ${{ secrets.DB_USER }}
