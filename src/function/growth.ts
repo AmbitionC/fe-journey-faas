@@ -53,7 +53,9 @@ export class GrowthHTTPService {
     method: 'get',
   })
   @NoAuth()
-  async exportReview(@Query(ALL) query: { days?: number }): Promise<any> {
+  async exportReview(
+    @Query(ALL) query: { days?: number; excludeUsers?: string }
+  ): Promise<any> {
     // 与 /content/sync 同一套密钥头：免登录、无验证码、无 token 过期，
     // 便于外部（如 AI 助手/脚本）一次拉全复盘所需数据。仅返回聚合数字，不含任何个人信息。
     const secret = this.ctx.headers['x-sync-secret'];
@@ -61,19 +63,26 @@ export class GrowthHTTPService {
       throw R.unauthorizedError('导出需要有效的 x-sync-secret');
     }
     const days = Number(query?.days) > 0 ? Number(query.days) : 7;
+    // 可选：本次导出额外排除的账号（手机号，逗号分隔），与 config 的
+    // GROWTH_INTERNAL_USER_IDS 求并集；便于未配环境变量时先临时拉一份剔除自己的干净数据。
+    const excludeUsers = String(query?.excludeUsers || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     const [dashboard, overview, funnel, pathFunnel, channels, daily] =
       await Promise.all([
-        this.metricsService.overview().catch(() => null),
-        this.growthService.overview().catch(() => null),
-        this.growthService.funnel(days).catch(() => null),
-        this.growthService.pathFunnel(days).catch(() => null),
-        this.growthService.channels(days).catch(() => null),
-        this.growthService.daily(days).catch(() => null),
+        this.metricsService.overview(excludeUsers).catch(() => null),
+        this.growthService.overview(excludeUsers).catch(() => null),
+        this.growthService.funnel(days, excludeUsers).catch(() => null),
+        this.growthService.pathFunnel(days, excludeUsers).catch(() => null),
+        this.growthService.channels(days, excludeUsers).catch(() => null),
+        this.growthService.daily(days, excludeUsers).catch(() => null),
       ]);
     return {
       success: true,
       data: {
         days,
+        excludeUsers,
         generatedAt: new Date().toISOString(),
         dashboard,
         overview,

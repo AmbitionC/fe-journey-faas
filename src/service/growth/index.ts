@@ -1,4 +1,4 @@
-import { Provide } from '@midwayjs/core';
+import { Provide, Config } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../../entity/user';
@@ -36,6 +36,22 @@ export class GrowthService {
   @InjectEntityModel(GrowthReviewEntity)
   growthReviewModel: Repository<GrowthReviewEntity>;
 
+  @Config('growthInternalUserIds')
+  internalUserIds: string[];
+
+  /**
+   * 内部/自测账号排除口径：config（GROWTH_INTERNAL_USER_IDS）∪ 调用方额外传入的 id。
+   * 返回去重后的手机号数组；所有涉及 userId/phoneNumber 的聚合都据此过滤。
+   * 注：event_log.userId 可空（匿名事件），相关查询用
+   * `(userId IS NULL OR userId NOT IN (...))`，只剔除指定账号、保留匿名/游客事件。
+   */
+  private excludedUserIds(extra?: string[]): string[] {
+    const merged = [...(this.internalUserIds || []), ...(extra || [])]
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+    return Array.from(new Set(merged));
+  }
+
   /** 某指标最近一次录入值 */
   private async latestStat(metric: string): Promise<{ value: number; statDate: string } | null> {
     const row = await this.growthStatModel.findOne({
@@ -46,7 +62,8 @@ export class GrowthService {
   }
 
   /** 时间段内已支付订单的数量与金额（order + book_order 合并） */
-  private async paidOrders(since: Date, until?: Date) {
+  private async paidOrders(since: Date, until?: Date, exclude?: string[]) {
+    const ex = this.excludedUserIds(exclude);
     const qb1 = this.orderModel
       .createQueryBuilder('o')
       .select('o.type', 'type')
@@ -56,6 +73,7 @@ export class GrowthService {
       .andWhere('o.payTime >= :since', { since })
       .groupBy('o.type');
     if (until) qb1.andWhere('o.payTime < :until', { until });
+    if (ex.length) qb1.andWhere('o.userId NOT IN (:...ex)', { ex });
     const orders = await qb1.getRawMany();
 
     const qb2 = this.bookOrderModel
@@ -65,6 +83,7 @@ export class GrowthService {
       .where("b.status = 'paid'")
       .andWhere('b.payTime >= :since', { since });
     if (until) qb2.andWhere('b.payTime < :until', { until });
+    if (ex.length) qb2.andWhere('b.userId NOT IN (:...ex)', { ex });
     const book = await qb2.getRawOne();
 
     const byType: Record<string, { count: number; amount: number }> = {};
@@ -78,11 +97,12 @@ export class GrowthService {
   /**
    * 北极星概览：本月收入/成本/净现金流（第一里程碑：收入 ≥ 成本）+ 私域/小红书存量。
    */
-  async overview() {
+  async overview(exclude?: string[]) {
+    const ex = this.excludedUserIds(exclude);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const byType = await this.paidOrders(monthStart);
+    const byType = await this.paidOrders(monthStart, undefined, exclude);
     const monthRevenue = Object.values(byType).reduce((s, v) => s + v.amount, 0);
     const monthOrderCount = Object.values(byType).reduce((s, v) => s + v.count, 0);
 
@@ -94,10 +114,11 @@ export class GrowthService {
 
     let monthNewUsers = 0;
     try {
-      monthNewUsers = await this.userModel
+      const qb = this.userModel
         .createQueryBuilder('u')
-        .where('u.createTime >= :since', { since: monthStart })
-        .getCount();
+        .where('u.createTime >= :since', { since: monthStart });
+      if (ex.length) qb.andWhere('u.phoneNumber NOT IN (:...ex)', { ex });
+      monthNewUsers = await qb.getCount();
     } catch {
       /* ignore */
     }
@@ -123,17 +144,19 @@ export class GrowthService {
    * 转化漏斗（近 N 天）：uv → 注册 → 破冰付费(pdf+书) → 高价付费(member/consult)。
    * uv 口径 = event_log 里 page_view 事件的去重 userId（游客为 guest:ip）。
    */
-  async funnel(days = 30) {
+  async funnel(days = 30, exclude?: string[]) {
     const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
 
     let uv = 0;
     try {
-      const row = await this.eventLogModel
+      const qb = this.eventLogModel
         .createQueryBuilder('e')
         .select('COUNT(DISTINCT e.userId)', 'uv')
         .where("e.event = 'page_view'")
-        .andWhere('e.createTime >= :since', { since })
-        .getRawOne();
+        .andWhere('e.createTime >= :since', { since });
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const row = await qb.getRawOne();
       uv = Number(row?.uv || 0);
     } catch {
       /* ignore */
@@ -141,15 +164,16 @@ export class GrowthService {
 
     let signups = 0;
     try {
-      signups = await this.userModel
+      const qb = this.userModel
         .createQueryBuilder('u')
-        .where('u.createTime >= :since', { since })
-        .getCount();
+        .where('u.createTime >= :since', { since });
+      if (ex.length) qb.andWhere('u.phoneNumber NOT IN (:...ex)', { ex });
+      signups = await qb.getCount();
     } catch {
       /* ignore */
     }
 
-    const byType = await this.paidOrders(since);
+    const byType = await this.paidOrders(since, undefined, exclude);
     const icebreaker =
       (byType.pdf?.count || 0) + (byType.book?.count || 0);
     const icebreakerAmount =
@@ -197,8 +221,9 @@ export class GrowthService {
    * 一条路漏斗（PRD-08）：测评→领计划→领题→方案→交作业→评审→分享→付费 的分层转化。
    * 每层按 distinct userId 计数；付费取会员订单。
    */
-  async pathFunnel(days = 30) {
+  async pathFunnel(days = 30, exclude?: string[]) {
     const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
     const STEPS: { key: string; label: string; event?: string }[] = [
       { key: 'visit', label: '访问', event: 'page_view' },
       { key: 'assess', label: '测评完成', event: 'onboarding_assess_done' },
@@ -212,12 +237,13 @@ export class GrowthService {
     const counts: Record<string, number> = {};
     for (const s of STEPS) {
       try {
-        const row = await this.eventLogModel
+        const qb = this.eventLogModel
           .createQueryBuilder('e')
           .select('COUNT(DISTINCT e.userId)', 'c')
           .where('e.event = :ev', { ev: s.event })
-          .andWhere('e.createTime >= :since', { since })
-          .getRawOne();
+          .andWhere('e.createTime >= :since', { since });
+        if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+        const row = await qb.getRawOne();
         counts[s.key] = Number(row?.c || 0);
       } catch {
         counts[s.key] = 0;
@@ -226,7 +252,7 @@ export class GrowthService {
     // 付费（会员订单）
     let paid = 0;
     try {
-      const byType = await this.paidOrders(since);
+      const byType = await this.paidOrders(since, undefined, exclude);
       paid = byType.member?.count || 0;
     } catch {
       /* ignore */
@@ -243,8 +269,9 @@ export class GrowthService {
     return { days, steps: withRates };
   }
 
-  async channels(days = 30) {
+  async channels(days = 30, exclude?: string[]) {
     const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
     const CONVERSION_EVENTS = [
       'group_hint_click',
       'group_qr_view',
@@ -256,17 +283,18 @@ export class GrowthService {
       'signup_success',
     ];
     try {
-      const uvRows = await this.eventLogModel
+      const uvQb = this.eventLogModel
         .createQueryBuilder('e')
         .select("COALESCE(e.channel, '(未标记)')", 'channel')
         .addSelect('COUNT(DISTINCT e.userId)', 'uv')
         .where("e.event = 'page_view'")
         .andWhere('e.createTime >= :since', { since })
         .groupBy("COALESCE(e.channel, '(未标记)')")
-        .orderBy('uv', 'DESC')
-        .getRawMany();
+        .orderBy('uv', 'DESC');
+      if (ex.length) uvQb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const uvRows = await uvQb.getRawMany();
 
-      const convRows = await this.eventLogModel
+      const convQb = this.eventLogModel
         .createQueryBuilder('e')
         .select("COALESCE(e.channel, '(未标记)')", 'channel')
         .addSelect('e.event', 'event')
@@ -274,8 +302,9 @@ export class GrowthService {
         .where('e.event IN (:...events)', { events: CONVERSION_EVENTS })
         .andWhere('e.createTime >= :since', { since })
         .groupBy("COALESCE(e.channel, '(未标记)')")
-        .addGroupBy('e.event')
-        .getRawMany();
+        .addGroupBy('e.event');
+      if (ex.length) convQb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const convRows = await convQb.getRawMany();
 
       const map: Record<string, any> = {};
       for (const r of uvRows) {
@@ -292,8 +321,9 @@ export class GrowthService {
   }
 
   /** 日趋势（近 N 天）：uv + 当日已支付金额，给折线图用 */
-  async daily(days = 30) {
+  async daily(days = 30, exclude?: string[]) {
     const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
     const fmt = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
         d.getDate()
@@ -306,14 +336,15 @@ export class GrowthService {
     }
 
     try {
-      const uvRows = await this.eventLogModel
+      const uvQb = this.eventLogModel
         .createQueryBuilder('e')
         .select('DATE(e.createTime)', 'date')
         .addSelect('COUNT(DISTINCT e.userId)', 'uv')
         .where("e.event = 'page_view'")
         .andWhere('e.createTime >= :since', { since })
-        .groupBy('DATE(e.createTime)')
-        .getRawMany();
+        .groupBy('DATE(e.createTime)');
+      if (ex.length) uvQb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const uvRows = await uvQb.getRawMany();
       for (const r of uvRows) {
         const d = fmt(new Date(r.date));
         if (byDate[d]) byDate[d].uv = Number(r.uv);
@@ -323,22 +354,24 @@ export class GrowthService {
     }
 
     try {
-      const revRows = await this.orderModel
+      const revQb = this.orderModel
         .createQueryBuilder('o')
         .select('DATE(o.payTime)', 'date')
         .addSelect('SUM(o.amount)', 'amount')
         .where("o.status = 'paid'")
         .andWhere('o.payTime >= :since', { since })
-        .groupBy('DATE(o.payTime)')
-        .getRawMany();
-      const bookRows = await this.bookOrderModel
+        .groupBy('DATE(o.payTime)');
+      if (ex.length) revQb.andWhere('o.userId NOT IN (:...ex)', { ex });
+      const revRows = await revQb.getRawMany();
+      const bookQb = this.bookOrderModel
         .createQueryBuilder('b')
         .select('DATE(b.payTime)', 'date')
         .addSelect('SUM(b.amount)', 'amount')
         .where("b.status = 'paid'")
         .andWhere('b.payTime >= :since', { since })
-        .groupBy('DATE(b.payTime)')
-        .getRawMany();
+        .groupBy('DATE(b.payTime)');
+      if (ex.length) bookQb.andWhere('b.userId NOT IN (:...ex)', { ex });
+      const bookRows = await bookQb.getRawMany();
       for (const r of [...revRows, ...bookRows]) {
         const d = fmt(new Date(r.date));
         if (byDate[d]) byDate[d].revenue += Number(r.amount || 0);

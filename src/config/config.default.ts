@@ -261,4 +261,12 @@ export default {
     embeddingEnabled: process.env.EMBEDDING_ENABLED === 'true',
   },
   syncSecret: process.env.SYNC_SECRET,
+  // 增长复盘：内部/自测账号（手机号，即各表 userId），从所有增长口径中排除，
+  // 避免创始人自己浏览/自测污染 UV、漏斗、渠道、日趋势等数据。逗号分隔，经 FC
+  // 环境变量注入（不写进仓库，避免提交个人手机号）：
+  //   GROWTH_INTERNAL_USER_IDS=17394940726,155xxxxxxxx
+  growthInternalUserIds: (process.env.GROWTH_INTERNAL_USER_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
 } as MidwayConfig;
