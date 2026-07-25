@@ -8,7 +8,9 @@ import {
   ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
+import { RedisService } from '@midwayjs/redis';
 import { GrowthService } from '../service/growth';
+import { resolveUserInfo } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
 
 /**
@@ -23,8 +25,13 @@ export class GrowthHTTPService {
   @Inject()
   growthService: GrowthService;
 
-  private requireLogin() {
-    const userId = this.ctx.userInfo?.userId;
+  @Inject()
+  redisService: RedisService;
+
+  /** 同 ops：聚合 FaaS 下 ctx.userInfo 未必透传，需用请求头 token 反查 Redis 兜底 */
+  private async requireLogin(): Promise<string> {
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    const userId = info?.userId;
     if (!userId) throw R.unauthorizedError('请先登录');
     return userId;
   }
@@ -37,7 +44,7 @@ export class GrowthHTTPService {
     method: 'get',
   })
   async overview() {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.overview();
     return { success: true, data };
   }
@@ -50,7 +57,7 @@ export class GrowthHTTPService {
     method: 'get',
   })
   async funnel(@Query(ALL) query: { days?: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.funnel(Number(query.days) || 30);
     return { success: true, data };
   }
@@ -63,7 +70,7 @@ export class GrowthHTTPService {
     method: 'get',
   })
   async pathFunnel(@Query(ALL) query: { days?: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.pathFunnel(Number(query.days) || 30);
     return { success: true, data };
   }
@@ -76,7 +83,7 @@ export class GrowthHTTPService {
     method: 'get',
   })
   async channels(@Query(ALL) query: { days?: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.channels(Number(query.days) || 30);
     return { success: true, data };
   }
@@ -89,7 +96,7 @@ export class GrowthHTTPService {
     method: 'get',
   })
   async daily(@Query(ALL) query: { days?: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.daily(Number(query.days) || 30);
     return { success: true, data };
   }
@@ -104,7 +111,7 @@ export class GrowthHTTPService {
   async saveStat(
     @Body(ALL) body: { statDate: string; metric: string; value: number; note?: string }
   ) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.upsertStat(body);
     return data;
   }
@@ -117,7 +124,7 @@ export class GrowthHTTPService {
     method: 'get',
   })
   async listStats(@Query(ALL) query: { metric?: string; days?: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.listStats({
       metric: query.metric,
       days: query.days ? Number(query.days) : undefined,
@@ -133,7 +140,7 @@ export class GrowthHTTPService {
     method: 'post',
   })
   async deleteStat(@Body(ALL) body: { id: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.deleteStat(Number(body.id));
     return data;
   }
@@ -149,7 +156,7 @@ export class GrowthHTTPService {
     @Body(ALL)
     body: { id?: number; period: string; title: string; content: string; status?: string }
   ) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.saveReview(body);
     return data;
   }
@@ -162,7 +169,7 @@ export class GrowthHTTPService {
     method: 'get',
   })
   async listReviews(@Query(ALL) query: { page?: number; pageSize?: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.listReviews({
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 10,
@@ -178,7 +185,7 @@ export class GrowthHTTPService {
     method: 'post',
   })
   async deleteReview(@Body(ALL) body: { id: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.growthService.deleteReview(Number(body.id));
     return data;
   }

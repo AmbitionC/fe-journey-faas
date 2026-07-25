@@ -8,9 +8,11 @@ import {
   ALL,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
+import { RedisService } from '@midwayjs/redis';
 import { OpsService } from '../service/ops';
 import { OpsExecutorService } from '../service/ops/executor';
 import { OssService } from '../service/content/oss';
+import { resolveUserInfo } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
 
 @Provide()
@@ -27,8 +29,17 @@ export class OpsHTTPService {
   @Inject()
   ossService: OssService;
 
-  private requireLogin() {
-    const userId = this.ctx.userInfo?.userId;
+  @Inject()
+  redisService: RedisService;
+
+  /**
+   * 解析登录态。聚合 FaaS 下中间件写入的 ctx.userInfo 不一定透传到本层，
+   * 只读 ctx.userInfo 会把已登录管理员误判为未登录 → 前端收 401 后清 token 弹回登录页。
+   * 故统一走 resolveUserInfo（ctx.userInfo 快路径 + 请求头 token 反查 Redis 兜底）。
+   */
+  private async requireLogin(): Promise<string> {
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    const userId = info?.userId;
     if (!userId) throw R.unauthorizedError('请先登录');
     return userId;
   }
@@ -41,7 +52,7 @@ export class OpsHTTPService {
     method: 'post',
   })
   async healthRun(@Body(ALL) body: { module: string; articleKey: string }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.opsService.runArticleHealth(body.module, body.articleKey);
     return { success: true, data };
   }
@@ -54,7 +65,7 @@ export class OpsHTTPService {
     method: 'get',
   })
   async healthReports(@Query(ALL) query: any) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.opsService.listReports({
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 20,
@@ -71,7 +82,7 @@ export class OpsHTTPService {
     method: 'get',
   })
   async tasks(@Query(ALL) query: any) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.opsService.listTasks({
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 20,
@@ -87,7 +98,7 @@ export class OpsHTTPService {
     method: 'get',
   })
   async audit(@Query(ALL) query: any) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.opsService.listAudit({
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 20,
@@ -103,7 +114,7 @@ export class OpsHTTPService {
     method: 'post',
   })
   async autoQuiz(@Body(ALL) body: { module: string; articleKey: string }) {
-    const userId = this.requireLogin();
+    const userId = await this.requireLogin();
     const data = await this.opsExecutorService.autoQuiz({
       userId,
       module: body.module,
@@ -120,7 +131,7 @@ export class OpsHTTPService {
     method: 'post',
   })
   async rollback(@Body(ALL) body: { auditId: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.opsExecutorService.rollback(body.auditId);
     return { success: true, data };
   }
@@ -133,7 +144,7 @@ export class OpsHTTPService {
     method: 'post',
   })
   async sampling(@Body(ALL) body: { taskId?: number; result: string; note?: string }) {
-    const sampler = this.requireLogin();
+    const sampler = await this.requireLogin();
     const data = await this.opsService.submitSampling({ ...body, sampler });
     return { success: true, data };
   }
@@ -146,7 +157,7 @@ export class OpsHTTPService {
     method: 'get',
   })
   async groupQrStatus() {
-    this.requireLogin();
+    await this.requireLogin();
     const meta = await this.ossService.rawMeta('images/group.jpg');
     if (!meta?.lastModified) {
       return { success: true, data: { exists: false } };

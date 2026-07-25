@@ -44,8 +44,9 @@ export class LearningHTTPService {
     }
   }
 
-  private requireLogin() {
-    const userId = this.ctx.userInfo?.userId;
+  /** 聚合 FaaS 下 ctx.userInfo 未必透传，回落到请求头 token 反查 Redis */
+  private async requireLogin(): Promise<string> {
+    const userId = this.ctx.userInfo?.userId || (await this.resolveUserId());
     if (!userId) throw R.unauthorizedError('请先登录');
     return userId;
   }
@@ -122,7 +123,7 @@ export class LearningHTTPService {
     method: 'get',
   })
   async adminList() {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.learningService.listPaths(true);
     return { success: true, data: { list: data } };
   }
@@ -135,7 +136,7 @@ export class LearningHTTPService {
     method: 'post',
   })
   async savePath(@Body(ALL) body: any) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.learningService.savePath(body);
     return { success: true, data };
   }
@@ -148,7 +149,7 @@ export class LearningHTTPService {
     method: 'post',
   })
   async deletePath(@Body(ALL) body: { id: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.learningService.deletePath(body.id);
     return { success: true, data };
   }

@@ -43,8 +43,9 @@ export class MetricsHTTPService {
     }
   }
 
-  private requireLogin() {
-    const userId = this.ctx.userInfo?.userId;
+  /** 聚合 FaaS 下 ctx.userInfo 未必透传，回落到请求头 token 反查 Redis（同 resolveUserId） */
+  private async requireLogin(): Promise<string> {
+    const userId = this.ctx.userInfo?.userId || (await this.resolveUserId());
     if (!userId) throw R.unauthorizedError('请先登录');
     return userId;
   }
@@ -82,7 +83,7 @@ export class MetricsHTTPService {
     method: 'get',
   })
   async overview() {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.metricsService.overview();
     return { success: true, data };
   }
@@ -95,7 +96,7 @@ export class MetricsHTTPService {
     method: 'get',
   })
   async events(@Query(ALL) query: { days?: number }) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.metricsService.events(Number(query.days) || 7);
     return { success: true, data: { list: data } };
   }
@@ -108,7 +109,7 @@ export class MetricsHTTPService {
     method: 'post',
   })
   async evalRun() {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.metricsService.runEval();
     return { success: true, data };
   }
@@ -121,7 +122,7 @@ export class MetricsHTTPService {
     method: 'get',
   })
   async evalLatest() {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.metricsService.latestEval();
     return { success: true, data };
   }
@@ -134,7 +135,7 @@ export class MetricsHTTPService {
     method: 'get',
   })
   async aiCalls(@Query(ALL) query: any) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.metricsService.aiCalls({
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 20,

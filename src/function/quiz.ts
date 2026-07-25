@@ -92,9 +92,24 @@ export class QuizHTTPService {
     return { userId: `guest:${ip}`, isMember: !!this.membershipConfig?.freeForAll };
   }
 
-  private requireLogin() {
-    const userId = this.ctx.userInfo?.userId;
-    if (!userId) throw R.unauthorizedError('请先登录后再操作');
+  /** 聚合 FaaS 下 ctx.userInfo 未必透传，回落到请求头 token 反查 Redis（排除游客态） */
+  private async requireLogin(): Promise<string> {
+    let userId = this.ctx.userInfo?.userId as string | undefined;
+    if (!userId) {
+      const header = (this.ctx.header || {}) as any;
+      const token = header.token || header.authorization?.replace('Bearer ', '');
+      if (token) {
+        try {
+          const s = await this.redisService.get(`token:${token}`);
+          if (s) userId = JSON.parse(s).userId;
+        } catch {
+          // 反查失败视为未登录
+        }
+      }
+    }
+    if (!userId || userId.startsWith('guest:')) {
+      throw R.unauthorizedError('请先登录后再操作');
+    }
     return userId;
   }
 
@@ -223,7 +238,7 @@ export class QuizHTTPService {
     method: 'post',
   })
   async agentStudyPlan(@Body(ALL) body: QuizListQueryDTO) {
-    const userId = this.requireLogin();
+    const userId = await this.requireLogin();
     const data = await this.agentService.runStudyPlan({
       userId,
       module: body.module,
@@ -242,7 +257,7 @@ export class QuizHTTPService {
     method: 'get',
   })
   async adminList(@Query(ALL) query: QuizAdminListQueryDTO) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.quizService.adminList(query);
     return { success: true, data };
   }
@@ -255,7 +270,7 @@ export class QuizHTTPService {
     method: 'get',
   })
   async detail(@Query(ALL) query: QuizDetailQueryDTO) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.quizService.getById(query.id);
     return { success: true, data };
   }
@@ -268,7 +283,7 @@ export class QuizHTTPService {
     method: 'post',
   })
   async generate(@Body(ALL) body: QuizGenerateDTO) {
-    const userId = this.requireLogin();
+    const userId = await this.requireLogin();
     const data = await this.quizService.generate({
       userId,
       module: body.module,
@@ -287,7 +302,7 @@ export class QuizHTTPService {
     method: 'post',
   })
   async save(@Body(ALL) body: QuizSaveDTO) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.quizService.saveQuestion(body as any);
     return { success: true, data };
   }
@@ -300,7 +315,7 @@ export class QuizHTTPService {
     method: 'post',
   })
   async remove(@Body(ALL) body: QuizDeleteDTO) {
-    this.requireLogin();
+    await this.requireLogin();
     const data = await this.quizService.deleteQuestion(body.id);
     return { success: true, data };
   }
