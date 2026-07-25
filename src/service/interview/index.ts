@@ -38,10 +38,13 @@ export class InterviewService {
     }
 
     // 默认不显示已删除的，除非显式查询 'deleted'
+    // 注意 SQL NULL 语义：`status != 'deleted'` 对 status IS NULL 的行求值为 NULL（不匹配），
+    // 早期入库未写 status 的面经会被整体过滤掉、表现为"列表空"，故显式放行 NULL。
     if (status !== 'deleted') {
-      query.andWhere('interview.status != :deletedStatus', {
-        deletedStatus: 'deleted',
-      });
+      query.andWhere(
+        '(interview.status IS NULL OR interview.status != :deletedStatus)',
+        { deletedStatus: 'deleted' }
+      );
     }
 
     query
