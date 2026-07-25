@@ -6,10 +6,13 @@ import {
   Query,
   Body,
   ALL,
+  Config,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
 import { GrowthService } from '../service/growth';
+import { MetricsService } from '../service/metrics';
+import { NoAuth } from '../decorator/noAuth';
 import { resolveUserInfo } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
 
@@ -28,12 +31,58 @@ export class GrowthHTTPService {
   @Inject()
   redisService: RedisService;
 
+  @Inject()
+  metricsService: MetricsService;
+
+  @Config('syncSecret')
+  syncSecret: string;
+
   /** 同 ops：聚合 FaaS 下 ctx.userInfo 未必透传，需用请求头 token 反查 Redis 兜底 */
   private async requireLogin(): Promise<string> {
     const info = await resolveUserInfo(this.ctx, this.redisService);
     const userId = info?.userId;
     if (!userId) throw R.unauthorizedError('请先登录');
     return userId;
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '复盘数据一次性导出（只读聚合，x-sync-secret 保护）',
+    functionName: 'growthExport',
+    name: 'growthExport',
+    path: '/growth/export',
+    method: 'get',
+  })
+  @NoAuth()
+  async exportReview(@Query(ALL) query: { days?: number }): Promise<any> {
+    // 与 /content/sync 同一套密钥头：免登录、无验证码、无 token 过期，
+    // 便于外部（如 AI 助手/脚本）一次拉全复盘所需数据。仅返回聚合数字，不含任何个人信息。
+    const secret = this.ctx.headers['x-sync-secret'];
+    if (!this.syncSecret || secret !== this.syncSecret) {
+      throw R.unauthorizedError('导出需要有效的 x-sync-secret');
+    }
+    const days = Number(query?.days) > 0 ? Number(query.days) : 7;
+    const [dashboard, overview, funnel, pathFunnel, channels, daily] =
+      await Promise.all([
+        this.metricsService.overview().catch(() => null),
+        this.growthService.overview().catch(() => null),
+        this.growthService.funnel(days).catch(() => null),
+        this.growthService.pathFunnel(days).catch(() => null),
+        this.growthService.channels(days).catch(() => null),
+        this.growthService.daily(days).catch(() => null),
+      ]);
+    return {
+      success: true,
+      data: {
+        days,
+        generatedAt: new Date().toISOString(),
+        dashboard,
+        overview,
+        funnel,
+        pathFunnel,
+        channels,
+        daily,
+      },
+    };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
