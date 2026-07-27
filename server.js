@@ -25,6 +25,8 @@ let retrieveService;
 // 自定义请求头时会先发 OPTIONS，而自定义 server.js 不会自动经过 Midway 的
 // cross-domain 中间件；只依赖 config.default.ts 会导致 curl 正常、浏览器失败。
 const CORS_ORIGINS = new Set([
+  'https://www.agent-journey.cn',
+  'https://agent-journey.cn',
   'https://fe-journey.cn',
   'https://invest-journey.cn',
   'https://www.invest-journey.cn',

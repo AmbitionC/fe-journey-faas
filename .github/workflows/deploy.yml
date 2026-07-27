@@ -221,19 +221,19 @@ jobs:
           # 证明网页可用，所以发布必须同时验证真实前端 Origin 的 CORS 契约。
           preflight_code=$(curl -sS -o /dev/null -D /tmp/nav-list-preflight.headers \
             -w '%{http_code}' -X OPTIONS \
-            -H 'Origin: https://fe-journey.cn' \
+            -H 'Origin: https://www.agent-journey.cn' \
             -H 'Access-Control-Request-Method: GET' \
             -H 'Access-Control-Request-Headers: token' \
             "$FUNCTION_URL/article/navList?module=knowledge")
           test "$preflight_code" = "204"
-          grep -qi '^access-control-allow-origin: https://fe-journey.cn' /tmp/nav-list-preflight.headers
+          grep -qi '^access-control-allow-origin: https://www.agent-journey.cn' /tmp/nav-list-preflight.headers
           grep -qi '^access-control-allow-credentials: true' /tmp/nav-list-preflight.headers
           grep -qi '^access-control-allow-headers: .*token' /tmp/nav-list-preflight.headers
 
           curl -sS -o /tmp/nav-list-browser.out -D /tmp/nav-list-browser.headers \
-            -H 'Origin: https://fe-journey.cn' \
+            -H 'Origin: https://www.agent-journey.cn' \
             "$FUNCTION_URL/article/navList?module=knowledge"
-          grep -qi '^access-control-allow-origin: https://fe-journey.cn' /tmp/nav-list-browser.headers
+          grep -qi '^access-control-allow-origin: https://www.agent-journey.cn' /tmp/nav-list-browser.headers
           grep -qi '^access-control-allow-credentials: true' /tmp/nav-list-browser.headers
           node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/nav-list-browser.out','utf8')); if (!body || body.success !== true || !Array.isArray(body.data?.navData)) throw new Error('invalid browser navList response')"
 
