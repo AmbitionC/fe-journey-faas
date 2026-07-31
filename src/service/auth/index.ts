@@ -36,8 +36,6 @@ export class AuthService {
       throw R.error('账号或密码错误！');
     }
 
-    this.logger.info('password:', password);
-    this.logger.info('user.password:', user.password);
     if (!bcrypt.compareSync(password, user.password)) {
       throw R.error('用户名或密码错误！');
     }

@@ -116,6 +116,14 @@ export class InvestHoldingService {
       // current_holding：stock+etf 全量替换（排除现金/转债，与 Python 端一致）
       const pos = rows.filter(r => ['stock', 'etf'].includes((r.asset_type || '').toLowerCase()));
       if (pos.length) {
+        // 行数断言：现存持仓远多于本次载荷（>3倍+5）时判定为残缺快照，中止而非清表。
+        // 全量替换语义只在载荷完整时才安全；事务内抛错整体回滚。
+        const [{ n: existing }] = await qr.query(
+          'SELECT COUNT(*) AS n FROM current_holding');
+        if (Number(existing) > pos.length * 3 + 5) {
+          throw new Error(
+            `快照持仓行数异常：现存 ${existing} 行 vs 本次 ${pos.length} 行，疑似残缺载荷，已中止全量替换`);
+        }
         await qr.query('DELETE FROM current_holding');
         const chSql = this.db.upsertSql(
           'current_holding', ['code', 'shares', 'cost_price', 'entry_date'], ['code']);

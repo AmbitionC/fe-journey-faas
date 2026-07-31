@@ -3,7 +3,8 @@ import { TypeORMDataSourceManager } from '@midwayjs/typeorm';
 import { UserEntity } from '../entity/user';
 
 // 投资驾驶舱管理员：该手机号的账号自动提升为 admin（写接口 assertAdmin 依赖 role）。
-const INVEST_ADMIN_PHONE = process.env.INVEST_ADMIN_PHONE || '17394940726';
+// 只从环境变量读取，不留源码兜底值——手机号是 PII，且硬编码等于公开点名提权靶子。
+const INVEST_ADMIN_PHONE = process.env.INVEST_ADMIN_PHONE || '';
 
 /**
  * 启动时幂等提升驾驶舱管理员。
@@ -12,6 +13,10 @@ const INVEST_ADMIN_PHONE = process.env.INVEST_ADMIN_PHONE || '17394940726';
  * - 注意：token 里缓存了登录时的 role，提权后需重新登录生效。
  */
 export async function ensureInvestAdmin(container: IMidwayContainer): Promise<void> {
+  if (!INVEST_ADMIN_PHONE) {
+    console.warn('[ensureInvestAdmin] INVEST_ADMIN_PHONE 未配置，跳过提权（请在 s.yaml 环境变量中设置）');
+    return;
+  }
   try {
     const mgr = await container.getAsync(TypeORMDataSourceManager);
     const ds = mgr.getDataSource('default');
