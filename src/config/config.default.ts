@@ -89,13 +89,16 @@ export default {
     origin: (ctx) => {
       const origin: string = ctx.get('origin') || '';
       if (!origin) return '';
-      const extra = (process.env.CORS_ALLOW_ORIGINS || '')
-        .split(',').map(s => s.trim()).filter(Boolean);
+      const allow = [
+        'https://www.agent-journey.cn',   // fe-journey 主站（deploy.yml 冒烟校验的真实前端域名）
+        'https://agent-journey.cn',
+        ...(process.env.CORS_ALLOW_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+      ];
       try {
         const { hostname, protocol } = new URL(origin);
         const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
         const isVercel = protocol === 'https:' && hostname.endsWith('.vercel.app');
-        if (isLocal || isVercel || extra.includes(origin)) return origin;
+        if (isLocal || isVercel || allow.includes(origin)) return origin;
       } catch {
         // 非法 Origin 头 → 拒绝
       }
