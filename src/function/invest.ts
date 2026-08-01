@@ -13,7 +13,8 @@ import { InvestInsightService } from '../service/invest/insight';
 
 /**
  * 投资驾驶舱只读 API：总览 / 每日计划 / 复盘 / 盯盘预警 / 模型健康 / 恐慌指数。
- * 未加 @NoAuth → AuthMiddleware 默认要求 token（登录可见）。
+ * 鉴权：AuthMiddleware 对 /invest/* 统一要求 admin（个人持仓/资产数据，
+ * 平台普通登录账号不可读）；写接口另有 assertAdmin 兜底。
  */
 @Provide()
 export class InvestHTTPService {

@@ -83,7 +83,24 @@ const REDIS_PASS = process.env.REDIS_PASS || '';
 export default {
   cors: {
     credentials: true,
-    origin: (ctx) => ctx.get('origin') || '*',
+    // 白名单制，不反射任意 Origin：credentials:true + 反射是高危组合（一旦引入
+    // cookie 认证即成 CSRF）。名单外的跨域请求不下发 CORS 头（返回空串→浏览器拦截）。
+    // 额外来源用 CORS_ALLOW_ORIGINS 环境变量补充（逗号分隔完整 origin）。
+    origin: (ctx) => {
+      const origin: string = ctx.get('origin') || '';
+      if (!origin) return '';
+      const extra = (process.env.CORS_ALLOW_ORIGINS || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+      try {
+        const { hostname, protocol } = new URL(origin);
+        const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+        const isVercel = protocol === 'https:' && hostname.endsWith('.vercel.app');
+        if (isLocal || isVercel || extra.includes(origin)) return origin;
+      } catch {
+        // 非法 Origin 头 → 拒绝
+      }
+      return '';
+    },
     allowMethods: 'GET,HEAD,PUT,POST,DELETE,PATCH,OPTIONS',
     allowHeaders: 'Content-Type,Authorization,Accept,token,X-Health-Token',
   },
