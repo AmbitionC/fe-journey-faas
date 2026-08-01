@@ -167,6 +167,17 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'P28/P30 杠杆信号最新状态',
+    functionName: 'investLeverage',
+    name: 'investLeverage',
+    path: '/invest/leverage',
+    method: 'get',
+  })
+  async leverage() {
+    return { success: true, data: await this.insightService.leverageLatest() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '恐慌指数序列',
     functionName: 'investFearSeries',
     name: 'investFearSeries',

@@ -124,6 +124,21 @@ export class InvestInsightService {
     return { run, nav, benchmark };
   }
 
+  /** P28/P30 杠杆信号最新状态（invest-model leverage_signal 表；EOD+盘中同表，取最新一行）。 */
+  async leverageLatest() {
+    try {
+      const row = await this.db.one(
+        'SELECT trade_date, snapshot_ts, and_active, p28_count, close, `median`, fear, detail ' +
+        'FROM leverage_signal ORDER BY trade_date DESC, snapshot_ts DESC LIMIT 1'
+      );
+      if (!row) return null;
+      return { ...row, detail: parseJson(row.detail) };
+    } catch {
+      // 表未建（invest-model 未跑过新计划）→ 前端显示"暂无数据"，不报错
+      return null;
+    }
+  }
+
   async fearLatest() {
     const row = await this.db.one(
       'SELECT trade_date, score, level, components, raw FROM fear_daily ORDER BY trade_date DESC LIMIT 1');
