@@ -154,7 +154,8 @@ export class InvestInsightService {
       if (!date) return { date: null, latest: [], ledger: [] };
       const latest = await this.db.q(
         'SELECT trade_date, leg, etf, close, `median`, buy_line, sell_line, buy_mul, sell_mul, ' +
-        'state, fear, bias60, bias_pct, shares, mkt_value, cost_price FROM broad_leg_state WHERE trade_date = ? ' +
+        'state, fear, bias60, bias_pct, bias_rank, shares, mkt_value, cost_price ' +
+        'FROM broad_leg_state WHERE trade_date = ? ' +
         'ORDER BY leg',
         [date]
       );
