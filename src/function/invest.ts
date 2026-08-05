@@ -178,6 +178,17 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'P27 v2 宽基四腿窗口状态与仓位账本',
+    functionName: 'investBroad',
+    name: 'investBroad',
+    path: '/invest/broad',
+    method: 'get',
+  })
+  async broad() {
+    return { success: true, data: await this.insightService.broad() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '恐慌指数序列',
     functionName: 'investFearSeries',
     name: 'investFearSeries',

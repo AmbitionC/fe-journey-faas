@@ -139,6 +139,36 @@ export class InvestInsightService {
     }
   }
 
+  /**
+   * 宽基四腿窗口状态（invest-model broad_leg_state 表，与每日计划 hints 同源同数）。
+   *
+   * latest = 最新决策日的四腿闸位读数；ledger = 该表逐日累积的仓位账本。
+   * 账本**以建表当日为起点**——历史仓位只有回测口径（前端走静态 broadIndex.json），
+   * 实盘仓位从系统接入这套规则的那天起记，两者在页面上分区呈现、不混。
+   */
+  async broad() {
+    try {
+      const last = await this.db.one(
+        'SELECT MAX(trade_date) d FROM broad_leg_state');
+      const date = last?.d ? String(last.d) : null;
+      if (!date) return { date: null, latest: [], ledger: [] };
+      const latest = await this.db.q(
+        'SELECT trade_date, leg, etf, close, `median`, buy_line, sell_line, buy_mul, sell_mul, ' +
+        'state, fear, shares, mkt_value, cost_price FROM broad_leg_state WHERE trade_date = ? ' +
+        'ORDER BY leg',
+        [date]
+      );
+      const ledger = await this.db.q(
+        'SELECT trade_date, leg, state, close, `median`, buy_line, sell_line, fear, ' +
+        'shares, mkt_value FROM broad_leg_state ORDER BY trade_date DESC LIMIT 2000'
+      );
+      return { date, latest, ledger: ledger.reverse() };
+    } catch {
+      // 表未建（invest-model 未跑过带 P27 v2 落库的计划）→ 前端回退到静态回测部分
+      return { date: null, latest: [], ledger: [] };
+    }
+  }
+
   async fearLatest() {
     const row = await this.db.one(
       'SELECT trade_date, score, level, components, raw FROM fear_daily ORDER BY trade_date DESC LIMIT 1');
