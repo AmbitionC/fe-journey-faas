@@ -146,6 +146,43 @@ export class InvestInsightService {
    * 账本**以建表当日为起点**——历史仓位只有回测口径（前端走静态 broadIndex.json），
    * 实盘仓位从系统接入这套规则的那天起记，两者在页面上分区呈现、不混。
    */
+  /**
+   * P70 乖离率读数（提示-only）。owner 2026-08-06：指标入库 + 页面透出，**但不参与任何
+   * 买卖决策**——它已在六个口径上全部验证失败（E37/E56/E57/E58/E59/E60）。
+   *
+   * 排名口径＝**近十年滚动窗口（2500 交易日）内的名次**，rank=1 为窗口内最极端；
+   * 进前 4 时 invest-model 会在每日计划里出 🚨 行（→ issue #9 → 邮件）。
+   * 前端凡展示这些数的地方必须同屏呈现裁决，`verdict` 随数据一起下发、前端不写死。
+   */
+  async bias() {
+    const VERDICT =
+      '乖离率是读数，不是信号。六个口径已全部验证失败：E37（全历史分位高尾，进前 5% 后' +
+      '未来 20 日反而 +0.53~+5.70pp）· E56（分位低尾，与价格闸几乎不相交）· E57（全历史' +
+      '排名双尾，60 日完全反转）· E58（排名+止盈止损，胜率好但期望差、十年不出手）· ' +
+      'E59（近十年滚动排名状态机，七腿跑输买入持有 5.35~7.83pp）· E60（滚动 z 分数短线' +
+      '搏反弹，六条判据过五条、卡在触发频次）。四腿买卖判定完全由中位线锚决定，' +
+      '乖离率零接线。涨到极值尤其不可作卖出依据——历史上是继续涨。';
+    try {
+      const last = await this.db.one('SELECT MAX(trade_date) d FROM index_bias_daily');
+      const date = last?.d ? String(last.d) : null;
+      if (!date) return { date: null, latest: [], history: [], verdict: VERDICT };
+      const latest = await this.db.q(
+        'SELECT trade_date, code, name, close, ma60, bias60, win_days, rank_low, rank_high, ' +
+        'pct_low, extreme FROM index_bias_daily WHERE trade_date = ? ORDER BY rank_low',
+        [date]
+      );
+      // 近一年逐日（画趋势用）；七个指数 × 250 日 ≈ 1750 行
+      const history = await this.db.q(
+        'SELECT trade_date, code, name, bias60, rank_low, rank_high, extreme ' +
+        'FROM index_bias_daily ORDER BY trade_date DESC LIMIT 2000'
+      );
+      return { date, latest, history: history.reverse(), verdict: VERDICT };
+    } catch {
+      // 表未建（invest-model 尚未跑过带 P70 落库的计划）→ 前端隐藏该板块
+      return { date: null, latest: [], history: [], verdict: VERDICT };
+    }
+  }
+
   async broad() {
     try {
       const last = await this.db.one(

@@ -189,6 +189,17 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'P70 指数乖离率读数（提示-only，不参与买卖决策）',
+    functionName: 'investBias',
+    name: 'investBias',
+    path: '/invest/bias',
+    method: 'get',
+  })
+  async bias() {
+    return { success: true, data: await this.insightService.bias() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '恐慌指数序列',
     functionName: 'investFearSeries',
     name: 'investFearSeries',
