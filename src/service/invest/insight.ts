@@ -190,8 +190,11 @@ export class InvestInsightService {
       const date = last?.d ? String(last.d) : null;
       if (!date) return { date: null, latest: [], ledger: [] };
       const latest = await this.db.q(
+        // data_date＝该腿价格的真实截止日，可能早于 trade_date（四腿此前只有沪深300
+        // 在日更清单里，另三腿吃基底 CSV 末行、一度落后 8 个交易日却完全不可见）。
+        // 前端必须在 data_date < trade_date 时显式标注陈旧。
         'SELECT trade_date, leg, etf, close, `median`, buy_line, sell_line, buy_mul, sell_mul, ' +
-        'state, fear, bias60, bias_pct, bias_rank, shares, mkt_value, cost_price ' +
+        'state, fear, bias60, bias_pct, bias_rank, data_date, shares, mkt_value, cost_price ' +
         'FROM broad_leg_state WHERE trade_date = ? ' +
         'ORDER BY leg',
         [date]
