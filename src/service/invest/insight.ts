@@ -166,9 +166,12 @@ export class InvestInsightService {
       const last = await this.db.one('SELECT MAX(trade_date) d FROM index_bias_daily');
       const date = last?.d ? String(last.d) : null;
       if (!date) return { date: null, latest: [], history: [], verdict: VERDICT };
+      // data_date＝该指数价格的真实截止日（XV-4，2026-08-08 起 invest-model 落库下发；
+      // 老行无此列值为 NULL）。前端须在 data_date < trade_date 时显式标注陈旧——
+      // 排名/极值基于旧价不可隐身，与 /invest/broad 的 data_date 同一约定。
       const latest = await this.db.q(
         'SELECT trade_date, code, name, close, ma60, bias60, win_days, rank_low, rank_high, ' +
-        'pct_low, extreme FROM index_bias_daily WHERE trade_date = ? ORDER BY rank_low',
+        'pct_low, extreme, data_date FROM index_bias_daily WHERE trade_date = ? ORDER BY rank_low',
         [date]
       );
       // 近一年逐日（画趋势用）；七个指数 × 250 日 ≈ 1750 行
