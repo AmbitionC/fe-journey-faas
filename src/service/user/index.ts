@@ -49,6 +49,10 @@ export class UserService {
     entity.password = password;
     entity.avatar = 'default';
     entity.inviteCode = uuid().slice(0, 8);
+    // isMember 列 NOT NULL 且无 DB/实体默认值——不显式赋值时 save 插 NULL 被库拒
+    // （"Field 'isMember' doesn't have a default value"），开放注册自测时暴露。
+    // 显式给假值即可，会员态由 grantTrial/entitlement 与限免开关决定，不靠此列。
+    entity.isMember = false;
     await this.userModel.save(entity);
 
     // PRD-07：注册即发放 7 天全功能试用（服务端权威，每手机号一次；幂等）。

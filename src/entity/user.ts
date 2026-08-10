@@ -17,7 +17,7 @@ export class UserEntity extends BaseEntity {
   @Column({ comment: '头像' })
   avatar?: string;
 
-  @Column({ comment: '是否为会员' })
+  @Column({ comment: '是否为会员', default: false })
   isMember?: boolean;
 
   @Column({ comment: '会员到期时间' })
