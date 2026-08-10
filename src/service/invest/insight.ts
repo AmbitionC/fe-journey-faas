@@ -406,7 +406,8 @@ export class InvestInsightService {
     if (!/^\d{8}$/.test(tradeDate)) throw new Error('日期格式应为 YYYYMMDD');
     if (!etf) throw new Error('请填写 ETF 代码');
     if (action !== 'buy' && action !== 'sell') throw new Error('方向只能是买入或卖出');
-    if (!(shares > 0) || !(price > 0)) throw new Error('份额与价格必须大于 0');
+    if (!Number.isFinite(shares) || !Number.isFinite(price) || !(shares > 0) || !(price > 0))
+      throw new Error('份额与价格必须是大于 0 的有效数字');
     await this.db.q(
       'INSERT INTO user_broad_ledger (user_id, trade_date, etf, action, shares, price, note) ' +
         'VALUES (?, ?, ?, ?, ?, ?, ?)',
