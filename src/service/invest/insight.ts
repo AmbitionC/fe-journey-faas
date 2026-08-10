@@ -381,4 +381,66 @@ export class InvestInsightService {
     );
     return { ok: true };
   }
+
+  /** 二期A：个人宽基记账（流水制）。user_id 一律取登录态。 */
+  async myLedgerList(userId: string) {
+    try {
+      const rows = await this.db.q(
+        'SELECT id, trade_date, etf, action, shares, price, note, created_at ' +
+          'FROM user_broad_ledger WHERE user_id = ? ORDER BY trade_date DESC, id DESC LIMIT 500',
+        [userId]
+      );
+      return { rows };
+    } catch {
+      return { rows: [] };
+    }
+  }
+
+  async myLedgerAdd(userId: string, p: any) {
+    const tradeDate = String(p?.trade_date || '').replace(/-/g, '').slice(0, 8);
+    const etf = String(p?.etf || '').slice(0, 16);
+    const action = String(p?.action || '').toLowerCase();
+    const shares = Number(p?.shares);
+    const price = Number(p?.price);
+    const note = String(p?.note || '').slice(0, 64);
+    if (!/^\d{8}$/.test(tradeDate)) throw new Error('日期格式应为 YYYYMMDD');
+    if (!etf) throw new Error('请填写 ETF 代码');
+    if (action !== 'buy' && action !== 'sell') throw new Error('方向只能是买入或卖出');
+    if (!(shares > 0) || !(price > 0)) throw new Error('份额与价格必须大于 0');
+    await this.db.q(
+      'INSERT INTO user_broad_ledger (user_id, trade_date, etf, action, shares, price, note) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [userId, tradeDate, etf, action, shares, price, note]
+    );
+    return { ok: true };
+  }
+
+  async myLedgerDelete(userId: string, id: number) {
+    await this.db.q('DELETE FROM user_broad_ledger WHERE id = ? AND user_id = ?', [
+      Number(id) || 0,
+      userId,
+    ]);
+    return { ok: true };
+  }
+
+  /** 二期C：宏观读数（macro_series 长表，市场级公开数据）。零仓位主张——只给读数。 */
+  async macro(name?: string) {
+    try {
+      if (name) {
+        const rows = await this.db.q(
+          'SELECT period, value FROM macro_series WHERE series = ? ORDER BY period ASC LIMIT 600',
+          [String(name).slice(0, 128)]
+        );
+        return { series: String(name), rows };
+      }
+      const list = await this.db.q(
+        'SELECT m.series, m.period, m.value, m.freq FROM macro_series m ' +
+          'INNER JOIN (SELECT series, MAX(period) mp FROM macro_series GROUP BY series) t ' +
+          'ON m.series = t.series AND m.period = t.mp ORDER BY m.series LIMIT 300'
+      );
+      return { latest: list };
+    } catch {
+      return name ? { series: name, rows: [] } : { latest: [] };
+    }
+  }
 }

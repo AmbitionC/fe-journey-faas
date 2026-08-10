@@ -281,4 +281,58 @@ export class InvestHTTPService {
     if (!uid) return { success: false, message: '未登录' };
     return { success: true, data: await this.insightService.saveAlertPref(uid, body) };
   }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '个人宽基记账·列表（登录，只读自己的）',
+    functionName: 'investMyLedgerList',
+    name: 'investMyLedgerList',
+    path: '/invest/myledger',
+    method: 'get',
+  })
+  async myLedgerList() {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    if (!uid) return { success: false, message: '未登录' };
+    return { success: true, data: await this.insightService.myLedgerList(uid) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '个人宽基记账·新增（登录，只写自己的）',
+    functionName: 'investMyLedgerAdd',
+    name: 'investMyLedgerAdd',
+    path: '/invest/myledger',
+    method: 'post',
+  })
+  async myLedgerAdd(@Body(ALL) body: any) {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    if (!uid) return { success: false, message: '未登录' };
+    try {
+      return { success: true, data: await this.insightService.myLedgerAdd(uid, body) };
+    } catch (e: any) {
+      return { success: false, message: e?.message || '保存失败' };
+    }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '个人宽基记账·删除（登录，只删自己的）',
+    functionName: 'investMyLedgerDelete',
+    name: 'investMyLedgerDelete',
+    path: '/invest/myledger/delete',
+    method: 'post',
+  })
+  async myLedgerDelete(@Body(ALL) body: any) {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    if (!uid) return { success: false, message: '未登录' };
+    return { success: true, data: await this.insightService.myLedgerDelete(uid, body?.id) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '宏观读数（市场级，登录可读；只给读数、零仓位主张）',
+    functionName: 'investMacro',
+    name: 'investMacro',
+    path: '/invest/macro',
+    method: 'get',
+  })
+  async macro(@Query('name') name?: string) {
+    return { success: true, data: await this.insightService.macro(name) };
+  }
 }

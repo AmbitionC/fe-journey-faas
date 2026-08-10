@@ -74,10 +74,14 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
           path === '/invest/bias' ||
           path === '/invest/leverage' ||
           path === '/invest/alerts/feed' ||     // 对外预警流（≠ /invest/alerts 个人盯盘，仍 admin）
+          path === '/invest/macro' ||           // 宏观读数（市场级公开数据）
           path.startsWith('/invest/fear'));
       // 预警订阅设置：登录用户读写自己的（handler 只认 ctx.userInfo，不信任入参）
       // 注意 path 已 toLowerCase，字面量必须全小写（alertPref → alertpref）
-      const isOwnPref = path === '/invest/alertpref' && (method === 'GET' || method === 'POST');
+      const isOwnPref =
+        (path === '/invest/alertpref' && (method === 'GET' || method === 'POST')) ||
+        // 个人记账：handler 只认登录态 userId，行级只读写自己的
+        (path.startsWith('/invest/myledger') && (method === 'GET' || method === 'POST'));
       // 403 而非 401：前端对 401 一律跳登录，越权用 403 走普通错误提示（防登出循环）
       if (!isMarketRead && !isOwnPref) throw R.forbiddenError('需要管理员权限');
       return next();
