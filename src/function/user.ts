@@ -93,10 +93,14 @@ export class UserHTTPService {
     method: 'post',
   })
   async updateUserInfo(
-    @Body(ALL) data: { userId: string; nickName?: string; avatar?: string }
+    @Body(ALL) data: { userId?: string; nickName?: string; avatar?: string }
   ): Promise<any> {
-    const { userId, nickName, avatar } = data;
-    if (!userId) throw R.error('用户ID不能为空');
+    // 2026-08-10 开放注册收紧：写操作只认登录态身份，body 的 userId 仅作展示兼容、
+    // 不再作为写目标（旧实现完全信任 body ⟹ 任何登录用户可改任意人的昵称/头像）。
+    // 两个前端（front-end-journey / invest-journey）都带 token 调用，行为不受影响。
+    const userId = this.ctx.userInfo?.userId;
+    if (!userId) throw R.unauthorizedError('请先登录');
+    const { nickName, avatar } = data;
     return await this.userService.updateUser(userId, { nickName, avatar });
   }
 
