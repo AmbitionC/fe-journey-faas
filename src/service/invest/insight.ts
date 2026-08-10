@@ -338,4 +338,45 @@ export class InvestInsightService {
     }
     return { as_of: asOf, rows };
   }
+
+  /** 对外预警流（alert_outbox，市场级——投顾/个人预警物理不入该表）。登录即可读。 */
+  async alertFeed(limit = 50) {
+    try {
+      const rows = await this.db.q(
+        'SELECT alert_key, topic, title, body, trade_date, created_at FROM alert_outbox ' +
+          'ORDER BY created_at DESC LIMIT ?',
+        [Math.min(Number(limit) || 50, 200)]
+      );
+      return { rows };
+    } catch {
+      return { rows: [] };
+    }
+  }
+
+  /** 用户预警订阅读写（user_id 一律取登录态，不信任入参）。 */
+  async getAlertPref(userId: string) {
+    try {
+      const rows = await this.db.q(
+        'SELECT user_id, email, wxpusher_uid, topics, digest FROM user_alert_pref WHERE user_id = ?',
+        [userId]
+      );
+      return rows[0] || { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
+    } catch {
+      return { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
+    }
+  }
+
+  async saveAlertPref(userId: string, p: any) {
+    const email = String(p?.email || '').slice(0, 128);
+    const wx = String(p?.wxpusher_uid || '').slice(0, 64);
+    const topics = String(p?.topics || '').slice(0, 256);
+    const digest = p?.digest ? 1 : 0;
+    await this.db.q(
+      'INSERT INTO user_alert_pref (user_id, email, wxpusher_uid, topics, digest, updated_at) ' +
+        'VALUES (?, ?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE email=VALUES(email), ' +
+        'wxpusher_uid=VALUES(wxpusher_uid), topics=VALUES(topics), digest=VALUES(digest), updated_at=NOW()',
+      [userId, email, wx, topics, digest]
+    );
+    return { ok: true };
+  }
 }

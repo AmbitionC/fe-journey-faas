@@ -53,16 +53,30 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
         return next();
       }
 
-      // /invest/*：强制登录 + admin（@NoAuth 声明对 invest 路径同样不豁免）
+      // /invest/*：强制登录（@NoAuth 声明对 invest 路径同样不豁免）。
+      // 角色就两种（owner 2026-08-10 定，产品对外一期）：admin=owner 全量；
+      // 普通用户只能读「市场级」四组只读数据——宽基状态/乖离率/恐慌/杠杆信号，
+      // 其余（计划/持仓/投顾/复盘/套利/美股/模型…）一律 admin。
+      // 名单外的新端点默认落到 admin 分支＝加功能忘配权限时只会更严不会泄露。
       if (!token) throw R.unauthorizedError('未登录');
       const userInfoStr = await this.redisService.get(`token:${token}`);
       if (!userInfoStr) throw R.unauthorizedError('未获取到用户信息');
       const userInfo = JSON.parse(userInfoStr);
-      if (userInfo.role !== 'admin') {
-        throw R.unauthorizedError('需要管理员权限');
-      }
       ctx.userInfo = userInfo;
       ctx.token = token;
+      if (userInfo.role === 'admin') return next();
+      const path = String(ctx.path || '');
+      const method = String(ctx.method).toUpperCase();
+      const isMarketRead =
+        method === 'GET' &&
+        (path === '/invest/broad' ||
+          path === '/invest/bias' ||
+          path === '/invest/leverage' ||
+          path === '/invest/alerts/feed' ||     // 对外预警流（≠ /invest/alerts 个人盯盘，仍 admin）
+          path.startsWith('/invest/fear'));
+      // 预警订阅设置：登录用户读写自己的（handler 只认 ctx.userInfo，不信任入参）
+      const isOwnPref = path === '/invest/alertPref' && (method === 'GET' || method === 'POST');
+      if (!isMarketRead && !isOwnPref) throw R.unauthorizedError('需要管理员权限');
       return next();
     };
   }

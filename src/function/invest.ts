@@ -1,5 +1,6 @@
 import {
   Provide,
+  Body,
   ServerlessTrigger,
   ServerlessTriggerType,
   Inject,
@@ -185,7 +186,17 @@ export class InvestHTTPService {
     method: 'get',
   })
   async broad() {
-    return { success: true, data: await this.insightService.broad() };
+    const data = await this.insightService.broad();
+    // 普通用户只看市场级读数：owner 的实盘账本与持仓字段不出接口
+    // （产品一期红线：个人数据不能只靠前端隐藏，见 invest-journey docs/product-plan-v1.md §4.1）
+    if (this.ctx?.userInfo?.role !== 'admin' && data) {
+      data.ledger = [];
+      data.latest = (data.latest || []).map((r: any) => {
+        const { shares, mkt_value, cost_price, ...pub } = r;
+        return pub;
+      });
+    }
+    return { success: true, data };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -232,5 +243,42 @@ export class InvestHTTPService {
   })
   async signalScorecard() {
     return { success: true, data: await this.insightService.signalScorecard() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '对外预警流（市场级，登录可读）',
+    functionName: 'investAlertFeed',
+    name: 'investAlertFeed',
+    path: '/invest/alerts/feed',
+    method: 'get',
+  })
+  async alertFeed(@Query('limit') limit?: number) {
+    return { success: true, data: await this.insightService.alertFeed(limit) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '预警订阅设置·读（登录，取自己的）',
+    functionName: 'investAlertPrefGet',
+    name: 'investAlertPrefGet',
+    path: '/invest/alertPref',
+    method: 'get',
+  })
+  async alertPrefGet() {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    if (!uid) return { success: false, message: '未登录' };
+    return { success: true, data: await this.insightService.getAlertPref(uid) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '预警订阅设置·写（登录，只写自己的）',
+    functionName: 'investAlertPrefSave',
+    name: 'investAlertPrefSave',
+    path: '/invest/alertPref',
+    method: 'post',
+  })
+  async alertPrefSave(@Body(ALL) body: any) {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    if (!uid) return { success: false, message: '未登录' };
+    return { success: true, data: await this.insightService.saveAlertPref(uid, body) };
   }
 }
