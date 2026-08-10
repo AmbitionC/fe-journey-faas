@@ -367,7 +367,9 @@ export class InvestInsightService {
   }
 
   async saveAlertPref(userId: string, p: any) {
-    const email = String(p?.email || '').slice(0, 128);
+    let email = String(p?.email || '').trim().slice(0, 128);
+    // 服务端格式校验（安全审计B）：不合法直接清空，防把任意他人地址当投递目标
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) email = '';
     const wx = String(p?.wxpusher_uid || '').slice(0, 64);
     const topics = String(p?.topics || '').slice(0, 256);
     const digest = p?.digest ? 1 : 0;

@@ -36,7 +36,8 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
         ctx.header.token ||
         ctx.header.authorization?.replace('Bearer ', '');
 
-      const isInvest = String(ctx.path || '').startsWith('/invest');
+      // toLowerCase：消除「路由不区分大小写而本判定区分」时 /INVEST/* 绕过鉴权的歧义（安全审计A）
+      const isInvest = String(ctx.path || '').toLowerCase().startsWith('/invest');
       if (!isInvest) {
         // 尽力解析登录态，不改变非 invest 端点的可达性（见类注释）。
         if (token) {
@@ -65,7 +66,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
       ctx.userInfo = userInfo;
       ctx.token = token;
       if (userInfo.role === 'admin') return next();
-      const path = String(ctx.path || '');
+      const path = String(ctx.path || '').toLowerCase();
       const method = String(ctx.method).toUpperCase();
       const isMarketRead =
         method === 'GET' &&
@@ -75,8 +76,10 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
           path === '/invest/alerts/feed' ||     // 对外预警流（≠ /invest/alerts 个人盯盘，仍 admin）
           path.startsWith('/invest/fear'));
       // 预警订阅设置：登录用户读写自己的（handler 只认 ctx.userInfo，不信任入参）
-      const isOwnPref = path === '/invest/alertPref' && (method === 'GET' || method === 'POST');
-      if (!isMarketRead && !isOwnPref) throw R.unauthorizedError('需要管理员权限');
+      // 注意 path 已 toLowerCase，字面量必须全小写（alertPref → alertpref）
+      const isOwnPref = path === '/invest/alertpref' && (method === 'GET' || method === 'POST');
+      // 403 而非 401：前端对 401 一律跳登录，越权用 403 走普通错误提示（防登出循环）
+      if (!isMarketRead && !isOwnPref) throw R.forbiddenError('需要管理员权限');
       return next();
     };
   }
