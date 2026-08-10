@@ -20,7 +20,7 @@ export class UserEntity extends BaseEntity {
   @Column({ comment: '是否为会员', default: false })
   isMember?: boolean;
 
-  @Column({ comment: '会员到期时间' })
+  @Column({ comment: '会员到期时间', default: '' })
   memberDate?: string;
 
   @Column({ comment: '邀请码', default: '' })

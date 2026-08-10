@@ -53,6 +53,7 @@ export class UserService {
     // （"Field 'isMember' doesn't have a default value"），开放注册自测时暴露。
     // 显式给假值即可，会员态由 grantTrial/entitlement 与限免开关决定，不靠此列。
     entity.isMember = false;
+    entity.memberDate = '';   // 同 isMember：NOT NULL 无默认，不赋值 save 会被库拒
     await this.userModel.save(entity);
 
     // PRD-07：注册即发放 7 天全功能试用（服务端权威，每手机号一次；幂等）。
