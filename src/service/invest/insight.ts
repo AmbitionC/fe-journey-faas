@@ -382,7 +382,9 @@ export class InvestInsightService {
     return { ok: true };
   }
 
-  /** 二期A：个人宽基记账（流水制）。user_id 一律取登录态。 */
+  /** 二期A：个人宽基记账（流水制）。user_id 一律取登录态。
+   *  quotes：流水涉及 ETF 的最近收盘价（stock_daily，前复权最新一根＝现价），
+   *  供前端估算市值/浮动盈亏；无行情的代码不返回该键（前端显示「无行情」）。 */
   async myLedgerList(userId: string) {
     try {
       const rows = await this.db.q(
@@ -390,9 +392,24 @@ export class InvestInsightService {
           'FROM user_broad_ledger WHERE user_id = ? ORDER BY trade_date DESC, id DESC LIMIT 500',
         [userId]
       );
-      return { rows };
+      const quotes: Record<string, { close: number; date: string }> = {};
+      const codes = [...new Set((rows || []).map((r: any) => String(r.etf)))].slice(0, 20);
+      for (const code of codes) {
+        try {
+          const q = await this.db.q(
+            'SELECT trade_date, close FROM stock_daily WHERE code = ? ORDER BY trade_date DESC LIMIT 1',
+            [code]
+          );
+          if (q?.length && q[0].close != null) {
+            quotes[code] = { close: Number(q[0].close), date: String(q[0].trade_date) };
+          }
+        } catch {
+          // 单代码行情缺失不影响流水返回
+        }
+      }
+      return { rows, quotes };
     } catch {
-      return { rows: [] };
+      return { rows: [], quotes: {} };
     }
   }
 
