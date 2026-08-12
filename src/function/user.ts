@@ -82,7 +82,62 @@ export class UserHTTPService {
     // 以登录 token 反查的 userId 为准（前端无需传参，也堵住越权查他人资料）。
     const uid = await this.resolveUserId(userId);
     if (!uid) throw R.unauthorizedError('未登录或登录已过期');
-    return await this.userService.getUserById(uid);
+    const res = await this.userService.getUserById(uid);
+    // 管理员视角开关（/user/roleView）：展示角色跟随当前会话（会话 role 可能被切成
+    // user），realRole 供前端渲染切换入口；会话读取失败不影响资料返回。
+    if (res?.success && res.data) {
+      try {
+        const token =
+          this.ctx.header?.token ||
+          String(this.ctx.header?.authorization || '').replace('Bearer ', '');
+        const raw = token ? await this.redisService.get(`token:${token}`) : null;
+        if (raw) {
+          const sess = JSON.parse(raw);
+          if (sess?.role) res.data.role = sess.role;
+          res.data.realRole = sess?.realRole || sess?.role || res.data.role;
+        }
+      } catch {
+        // 忽略：无会话视角信息时按库内角色返回
+      }
+      if (!res.data.realRole) res.data.realRole = res.data.role;
+    }
+    return res;
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '管理员视角切换（测试用）：只改当前登录会话的角色',
+    functionName: 'roleView',
+    name: 'roleView',
+    path: '/user/roleView',
+    method: 'post',
+  })
+  async roleView(@Body(ALL) body: { view?: string }): Promise<any> {
+    // 只改「当前这个 token 的会话」：库里 role 不动，登出重登自然恢复管理员本色。
+    // 权限依据 realRole（首次切换时由会话 role=admin 背书），普通用户拿不到 admin。
+    const token =
+      this.ctx.header?.token ||
+      String(this.ctx.header?.authorization || '').replace('Bearer ', '');
+    if (!token) throw R.unauthorizedError('未登录');
+    const key = `token:${token}`;
+    const raw = await this.redisService.get(key);
+    if (!raw) throw R.unauthorizedError('登录已过期');
+    const sess = JSON.parse(raw);
+    if ((sess.realRole || sess.role) !== 'admin') {
+      throw R.forbiddenError('仅管理员可切换视角');
+    }
+    const view = body?.view === 'user' ? 'user' : 'admin';
+    const next = { ...sess, role: view, realRole: 'admin' };
+    const ttl = await this.redisService.ttl(key);
+    if (ttl && ttl > 0) {
+      await this.redisService
+        .multi()
+        .set(key, JSON.stringify(next))
+        .expire(key, ttl)
+        .exec();
+    } else {
+      await this.redisService.set(key, JSON.stringify(next));
+    }
+    return { success: true, data: { role: view, realRole: 'admin' } };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
