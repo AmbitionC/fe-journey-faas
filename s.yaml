@@ -188,6 +188,13 @@ resources:
         # 套利模块开关（默认观察态 0；启用态由部署 env 注入 1）
         ARB_ENABLED: ${env('ARB_ENABLED', '0')}
       triggers:
+        - triggerName: source-probe
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 30 0 ? * MON-FRI'   # 北京 08:30 盘前数据源探活（token 过期在开盘前显式暴露，2026-08 六天停摆教训）
+            enable: true
+            payload: 'source_probe'
         - triggerName: snapshot-remind
           triggerType: timer
           qualifier: LATEST
