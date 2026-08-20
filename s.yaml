@@ -110,6 +110,12 @@ resources:
     props:
       region: cn-hangzhou
       functionName: invest-live-watch
+      # 2026-08-20 六日断连修复：FC 默认解析链对数据源域名连续 NameResolution 失败
+      # （同期 GitHub Actions 出口正常＝环境级 DNS 问题）。显式指定公共 DNS 绕开。
+      customDNS:
+        nameServers:
+          - '223.5.5.5'
+          - '119.29.29.29'
       description: 'A股盘中盯盘：无状态定时扫描，预警追评 GitHub issue → 邮件'
       runtime: python3.10
       handler: faas/scheduler_handler.handler
@@ -159,6 +165,12 @@ resources:
     props:
       region: cn-hangzhou
       functionName: invest-scheduler
+      # 2026-08-20 六日断连修复：FC 默认解析链对数据源域名连续 NameResolution 失败
+      # （同期 GitHub Actions 出口正常＝环境级 DNS 问题）。显式指定公共 DNS 绕开。
+      customDNS:
+        nameServers:
+          - '223.5.5.5'
+          - '119.29.29.29'
       description: 'invest-model 定时任务：快照提醒/ETF入库/盘后更新+计划/周度重建+复盘'
       runtime: python3.10
       handler: faas/scheduler_handler.handler
