@@ -104,6 +104,14 @@ export class InvestHoldingService {
     const rows = (input.rows || []).map(deriveSnapshotRow);
     const mv = rows.reduce((s, r) => s + (r.market_value || 0), 0);
     await this.db.tx(async qr => {
+      // P0-4（2026-08-20 审计）：current_holding ＝「最新有效快照日的 stock/etf 投影」。
+      // 只有本次快照日 >= 既有最大快照日才重建投影；编辑历史日不得覆盖当前持仓。
+      // （FaaS 测试基建缺 DB 集成环境——见审计 P2-3，本段以编译+人工验收交付，
+      //   等价语义的红绿测试在 invest-model tests/test_ingest_snapshot.py。）
+      const [mx] = await qr.query(
+        'SELECT MAX(snapshot_date) d FROM holding_snapshot WHERE snapshot_date != ?',
+        [snapshot_date]);
+      const isLatest = !mx?.d || snapshot_date >= mx.d;
       await qr.query('DELETE FROM holding_snapshot WHERE snapshot_date = ?', [snapshot_date]);
       const cols = ['snapshot_date', 'code', 'name', 'asset_type', 'shares', 'available',
         'cost_price', 'last_price', 'market_value', 'pnl', 'pnl_pct'];
@@ -115,7 +123,7 @@ export class InvestHoldingService {
       }
       // current_holding：stock+etf 全量替换（排除现金/转债，与 Python 端一致）
       const pos = rows.filter(r => ['stock', 'etf'].includes((r.asset_type || '').toLowerCase()));
-      if (pos.length) {
+      if (isLatest && pos.length) {
         // 行数断言：现存持仓远多于本次载荷（>3倍+5）时判定为残缺快照，中止而非清表。
         // 全量替换语义只在载荷完整时才安全；事务内抛错整体回滚。
         const [{ n: existing }] = await qr.query(
@@ -131,6 +139,10 @@ export class InvestHoldingService {
           await qr.query(chSql, [r.code, r.shares ?? null, r.cost_price ?? null,
             r.entry_date || snapshot_date]);
         }
+      } else if (isLatest) {
+        // 最新快照声明无 stock/etf（纯现金/仅转债）＝合法清仓投影：
+        // 清空 current_holding，而非静默沿用旧仓（与 Python 端 P0-4 修复一致）。
+        await qr.query('DELETE FROM current_holding');
       }
       const acctSql = this.db.upsertSql(
         'account_snapshot', ['snapshot_date', 'cash', 'market_value', 'total_asset'],
@@ -144,10 +156,17 @@ export class InvestHoldingService {
   /** 删除快照单行并按剩余行+原现金重算账户快照。 */
   async deleteSnapshotRow(snapshot_date: string, code: string) {
     await this.db.tx(async qr => {
+      // P0-4：删的是最新快照日的行 → 当前持仓投影同步剔除该票（历史日删行不影响）。
+      // 最新判定须在删除前取 MAX，否则删掉最新日最后一行后判定会错位到前一日。
+      const [mx] = await qr.query('SELECT MAX(snapshot_date) d FROM holding_snapshot');
+      const isLatest = !mx?.d || snapshot_date >= mx.d;
       await qr.query(
         'DELETE FROM holding_snapshot WHERE snapshot_date = ? AND code = ?',
         [snapshot_date, code]
       );
+      if (isLatest) {
+        await qr.query('DELETE FROM current_holding WHERE code = ?', [code]);
+      }
       const [sum] = await qr.query(
         'SELECT COALESCE(SUM(market_value),0) mv FROM holding_snapshot WHERE snapshot_date = ?',
         [snapshot_date]

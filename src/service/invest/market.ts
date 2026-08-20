@@ -124,8 +124,10 @@ export class InvestMarketService {
          WHERE code = ? ORDER BY trade_date DESC LIMIT ?`,
         [code, days]
       ).catch(() => []),
+      // P1-3（2026-08-20 审计）：日更管道写的是 stock_margin_detail，
+      // 旧表 stock_margin 无生产写入方——此前读错表致融资余额长期空值。
       this.db.q(
-        `SELECT trade_date, rzye FROM stock_margin
+        `SELECT trade_date, rzye FROM stock_margin_detail
          WHERE code = ? ORDER BY trade_date DESC LIMIT ?`,
         [code, days]
       ).catch(() => []),
