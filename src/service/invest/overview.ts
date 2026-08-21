@@ -35,7 +35,7 @@ export class InvestOverviewService {
         // 带策略身份下发；防止投顾主导页面被无关 run 的数字背书
         this.db.one(
           `SELECT metrics, strategy_id, decision_mode FROM backtest_run
-           ORDER BY (decision_mode = 'cs_quant') DESC, (strategy LIKE 'cs%') DESC,
+           ORDER BY (decision_mode = 'cs_quant') DESC, (name LIKE 'cs%') DESC,
                     created_at DESC LIMIT 1`),
         this.db.one(
           `SELECT alert_date, COUNT(*) n FROM watch_alert
