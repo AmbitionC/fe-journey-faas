@@ -121,6 +121,14 @@ export class InvestHoldingService {
           r.shares ?? null, r.available ?? null, r.cost_price ?? null, r.last_price ?? null,
           r.market_value, r.pnl, r.pnl_pct]);
       }
+      // P0-4 残洞（2026-08-21 复核）：纯现金日必须落一行 CASH 进 holding_snapshot，
+      // 否则该日对 MAX(snapshot_date) 不可见——清仓后编辑历史日会被误判为最新、
+      // 复活旧仓进 current_holding。与 Python 路径语义一致（现金行本就入快照表，
+      // 兼作 account_snapshot 重算时的权威现金来源）。
+      if (!rows.length) {
+        await qr.query(insSql, [snapshot_date, 'CASH', '现金', 'cash',
+          null, null, null, null, Math.round(cash * 100) / 100, null, null]);
+      }
       // current_holding：stock+etf 全量替换（排除现金/转债，与 Python 端一致）
       const pos = rows.filter(r => ['stock', 'etf'].includes((r.asset_type || '').toLowerCase()));
       if (isLatest && pos.length) {
