@@ -186,10 +186,14 @@ export class UserHTTPService {
   async activateMembership(
     @Body(ALL) data: { plan: 'monthly' | 'yearly'; userId?: string; channel?: string }
   ): Promise<any> {
-    // 优先用鉴权中间件注入的登录态；取不到再回退到 body 的 userId（前端已携带），
-    // 与 getUserInfo / updateUserInfo 信任客户端 userId 的做法一致。
-    const userId = this.ctx.userInfo?.userId || data.userId;
-    if (!userId) throw R.error('请先登录');
+    // 只认登录态身份，绝不回退到 body.userId。
+    // 旧实现「取不到登录态就信 body.userId」是免费开会员的口子：auth 中间件只对
+    // /invest/* 强制登录，/user/* 一律放行，因此无 token 也能打进来——任何人给任意
+    // 手机号开 30/365 天会员，并连带在 order 表落一笔 ¥29/¥199 的假订单，污染
+    // 「月收入 ≥ 月成本」这个北极星。8/1 恢复收费后该口子等同于送钱。
+    // 与 ac28727 对 updateUserInfo 的加固同款（当次遗漏了本端点）。
+    const userId = this.ctx.userInfo?.userId;
+    if (!userId) throw R.unauthorizedError('请先登录');
     if (!data.plan || !['monthly', 'yearly'].includes(data.plan)) throw R.error('plan 参数无效');
     return await this.userService.activateMembership(userId, data.plan, data.channel);
   }
