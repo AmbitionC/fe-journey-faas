@@ -55,6 +55,14 @@ export interface CheckResult {
 }
 
 /**
+ * 注册赠送的试用天数——**唯一真相源**。
+ * 注册链路有两处写入：user.createUser 的 isMember/memberDate 列 与 grantTrial 的权益记录，
+ * 两处必须同步（各写各的天数正是 2026-08 那次「承诺未兑现」事故的同类隐患）。
+ * 改这里同时改前端文案 `loginModal` / 首页 CTA / memberModal 的「14 天」字样。
+ */
+export const TRIAL_DAYS = 14;
+
+/**
  * 权益网关（PRD-07 §4.1 F1）。全站付费边界的唯一判定入口，数值集中配置。
  *
  * 灰度：ENTITLEMENT_ENABLED 关闭时，isMember 仍可用（回落 MEMBERSHIP_FREE + 存量记录），
@@ -114,7 +122,7 @@ export class EntitlementService {
       const existing = await this.entModel.findOne({ where: { userId, source: 'trial' } });
       if (existing) return;
       const now = new Date();
-      const expireAt = new Date(now.getTime() + 14 * 86400000);
+      const expireAt = new Date(now.getTime() + TRIAL_DAYS * 86400000);
       await this.entModel.save(
         this.entModel.create({ userId, source: 'trial', startAt: now, expireAt, meta: null })
       );

@@ -10,7 +10,7 @@ import { UserDTO } from '../../dto/user';
 import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
 import { AiProxyService } from '../ai/proxy';
-import { EntitlementService } from '../entitlement';
+import { EntitlementService, TRIAL_DAYS } from '../entitlement';
 import { OrderService } from '../order';
 import { isMembershipFree, MembershipConfig } from '../../common/membership';
 
@@ -49,15 +49,21 @@ export class UserService {
     entity.password = password;
     entity.avatar = 'default';
     entity.inviteCode = uuid().slice(0, 8);
-    // isMember 列 NOT NULL 且无 DB/实体默认值——不显式赋值时 save 插 NULL 被库拒
-    // （"Field 'isMember' doesn't have a default value"），开放注册自测时暴露。
-    // 显式给假值即可，会员态由 grantTrial/entitlement 与限免开关决定，不靠此列。
-    entity.isMember = false;
-    entity.memberDate = '';   // 同 isMember：NOT NULL 无默认，不赋值 save 会被库拒
+    // 注册即送 14 天全功能会员——服务端权威发放。三条约束缺一不可：
+    // 1) isMember / memberDate 两列 NOT NULL 且无默认值，必须显式赋值，否则 save 被
+    //    库拒（"Field 'isMember' doesn't have a default value"，2026-08-10 踩过）；
+    // 2) 但不能赋 false/''：ai.ts、quiz.ts、metrics「会员数」与前端所有会员 UI 仍直接
+    //    读这两列（entitlement 受 ENTITLEMENT_ENABLED 灰度，尚未成为唯一判定）。赋假值
+    //    会让全站在售的「注册即送 14 天」变成空头承诺——2026-08-10~08-23 线上即如此，
+    //    期间注册用户实际只拿到免费额度（08-23 复盘发现：users 50 / members 45）；
+    // 3) 不采信前端传入的 isMember/memberDate：客户端可改参数白嫖长期会员。
+    const trialExpireAt = new Date(Date.now() + TRIAL_DAYS * 86400000);
+    entity.isMember = true;
+    entity.memberDate = trialExpireAt.toISOString().slice(0, 19).replace('T', ' ');
     await this.userModel.save(entity);
 
-    // PRD-07：注册即发放 7 天全功能试用（服务端权威，每手机号一次；幂等）。
-    // 权益记录只在 ENTITLEMENT_ENABLED 开启后被消费，此处写入对现网无影响。
+    // PRD-07：注册即发放 14 天全功能试用（服务端权威，每手机号一次；幂等）。
+    // 权益记录只在 ENTITLEMENT_ENABLED 开启后被消费，与上面的 isMember 列双写。
     await this.entitlementService.grantTrial(phoneNumber);
 
     const { expire } = this.tokenConfig;
