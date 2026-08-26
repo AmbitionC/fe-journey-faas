@@ -72,6 +72,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
         method === 'GET' &&
         (path === '/invest/broad' ||
           path === '/invest/bias' ||
+          path === '/invest/allweather' ||
           path === '/invest/leverage' ||
           path === '/invest/alerts/feed' ||     // 对外预警流（≠ /invest/alerts 个人盯盘，仍 admin）
           path === '/invest/macro' ||           // 宏观读数（市场级公开数据）

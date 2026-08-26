@@ -200,6 +200,17 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '五资产配置参考（提示-only，不参与买卖决策）',
+    functionName: 'investAllweather',
+    name: 'investAllweather',
+    path: '/invest/allweather',
+    method: 'get',
+  })
+  async allweather() {
+    return { success: true, data: await this.insightService.allweather() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: 'P70 指数乖离率读数（提示-only，不参与买卖决策）',
     functionName: 'investBias',
     name: 'investBias',

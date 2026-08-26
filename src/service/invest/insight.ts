@@ -187,6 +187,42 @@ export class InvestInsightService {
     }
   }
 
+  /**
+   * 五资产配置参考（allweather_daily 表，与每日计划提示行同源同数）。
+   *
+   * 提示-only：只透出观察状态与参考比例，零仓位接线、零自动交易。
+   * note 随数据下发、前端不写死（同 bias 的 verdict 约定）。
+   */
+  async allweather() {
+    const NOTE =
+      '这是一个独立的多资产观察参考：五类资产（创业板ETF、红利ETF、纳指ETF、黄金ETF、' +
+      '豆粕ETF）按低相关性搭配，科技部分按「近一年趋势」每月初核对一次——趋势向上时' +
+      '参考比例为科技60%·其余各10%，趋势转弱时科技清零、防守资产接棒（红利40%·纳指20%·' +
+      '黄金20%·豆粕20%）。框架来自公开文章，其宣传的历史收益未能通过我们的独立验证' +
+      '（结构可用、收益数字不可当承诺）；此处只做展示与提醒，不构成投资建议，也不会' +
+      '改变系统的任何持仓计划。';
+    try {
+      const last = await this.db.one('SELECT MAX(trade_date) d FROM allweather_daily');
+      const date = last?.d ? String(last.d) : null;
+      if (!date) return { date: null, latest: null, history: [], note: NOTE };
+      const latest = await this.db.one(
+        'SELECT trade_date, signal_on, tech_momentum, signal_date, exec_date, flip, ' +
+        'w_tech, w_div, w_nas, w_gold, w_soy, mom_tech, mom_div, mom_nas, mom_gold, ' +
+        'mom_soy, data_date FROM allweather_daily WHERE trade_date = ?',
+        [date]
+      );
+      // 信号史（画月度状态条/翻转点用）：近两年逐日 ≈ 500 行
+      const history = await this.db.q(
+        'SELECT trade_date, signal_on, flip, tech_momentum ' +
+        'FROM allweather_daily ORDER BY trade_date DESC LIMIT 500'
+      );
+      return { date, latest, history: history.reverse(), note: NOTE };
+    } catch {
+      // 表未建（invest-model 尚未跑过带该落库的计划）→ 前端隐藏该板块
+      return { date: null, latest: null, history: [], note: NOTE };
+    }
+  }
+
   async broad() {
     try {
       const last = await this.db.one(
