@@ -1,0 +1,100 @@
+name: FC logs (manual)
+
+# 只读回捞 FC 函数日志（SLS default-logs），排障用：不改任何线上资源。
+# 等价于登阿里云控制台看函数日志，但结果直接打在本步骤输出里。
+# 用法：workflow_dispatch 选函数 + 回捞窗口（分钟）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      function:
+        description: "s.yaml 里的资源名"
+        type: choice
+        default: fcJourneyMain
+        options:
+          - fcJourneyMain
+          - investLiveWatch
+          - investScheduler
+      minutes:
+        description: "回捞最近 N 分钟（默认 240）"
+        default: "240"
+      grep:
+        description: "可选过滤关键词（留空输出全部）"
+        default: ""
+
+# s.yaml 解析需要全部 ${env('...')} 变量名存在（与 deploy.yml/invoke-invest.yml 同一套）
+env:
+  LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+  LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+  LLM_MODEL: ${{ secrets.LLM_MODEL }}
+  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+  OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+  OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+  SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+  GROWTH_INTERNAL_USER_IDS: ${{ secrets.GROWTH_INTERNAL_USER_IDS }}
+  DB_HOST: ${{ secrets.DB_HOST }}
+  DB_USER: ${{ secrets.DB_USER }}
+  DB_PASS: ${{ secrets.DB_PASS }}
+  REDIS_HOST: ${{ secrets.REDIS_HOST }}
+  REDIS_PASS: ${{ secrets.REDIS_PASS }}
+  INVEST_DB_URL: ${{ secrets.INVEST_DB_URL }}
+  INVEST_DB_NAME: ${{ vars.INVEST_DB_NAME || 'invest' }}
+  TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+  TUSHARE_HTTP_URL: ${{ secrets.TUSHARE_HTTP_URL }}
+  INVEST_GH_PAT: ${{ secrets.INVEST_GH_PAT || secrets.GH_TOKEN }}
+  LIVE_WATCH_MENTION: ${{ vars.LIVE_WATCH_MENTION }}
+  ACCOUNT_CASH: ${{ vars.ACCOUNT_CASH || '0' }}
+  PLAN_ARGS: ${{ vars.PLAN_ARGS }}
+  ARB_ENABLED: ${{ vars.ARB_ENABLED || '0' }}
+  HEALTH_API_TOKEN: ${{ secrets.HEALTH_API_TOKEN }}
+  HEALTH_DB_NAME: ${{ vars.HEALTH_DB_NAME }}
+  HEALTH_VISION_BASE_URL: ${{ vars.HEALTH_VISION_BASE_URL }}
+  HEALTH_VISION_API_KEY: ${{ secrets.HEALTH_VISION_API_KEY }}
+  HEALTH_VISION_MODEL: ${{ vars.HEALTH_VISION_MODEL }}
+  HEALTH_CHAT_BASE_URL: ${{ vars.HEALTH_CHAT_BASE_URL }}
+  HEALTH_CHAT_API_KEY: ${{ secrets.HEALTH_CHAT_API_KEY }}
+  HEALTH_CHAT_MODEL: ${{ vars.HEALTH_CHAT_MODEL }}
+  CORS_ALLOW_ORIGINS: ${{ vars.CORS_ALLOW_ORIGINS }}
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure Alibaba Cloud credentials
+        run: |
+          s config add \
+            --AccountID "${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}" \
+            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access aliyun \
+            -f
+
+      - name: Fetch logs
+        run: |
+          FN="${{ inputs.function }}"
+          MIN="${{ inputs.minutes }}"
+          START=$(date -u -d "-${MIN} minutes" '+%Y-%m-%dT%H:%M:%SZ')
+          END=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          mkdir -p invest-dist noderuntime   # 占位：logs 只走控制面，不需要真实代码目录
+          echo "→ $FN logs $START ~ $END (UTC)"
+          s "$FN" logs --start-time "$START" --end-time "$END" --access aliyun 2>&1 | tee /tmp/fc-logs.out || true
+          echo "===== 行数统计 ====="
+          wc -l /tmp/fc-logs.out || true
+          if [ -n "${{ inputs.grep }}" ]; then
+            echo "===== 过滤: ${{ inputs.grep }} ====="
+            grep -i -- "${{ inputs.grep }}" /tmp/fc-logs.out | tail -300 || echo "(无匹配)"
+          fi
+          echo "===== 错误类关键词摘要 ====="
+          grep -inE "error|timeout|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ER_|PROTOCOL_|unhandled|FATAL|exit" /tmp/fc-logs.out | tail -200 || echo "(无错误类日志)"
