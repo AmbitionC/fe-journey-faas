@@ -2,6 +2,7 @@ import {
   Middleware,
   IMiddleware,
   Inject,
+  Config,
   NextFunction,
 } from '@midwayjs/core';
 import { RedisService } from '@midwayjs/redis';
@@ -28,6 +29,20 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
   @Inject()
   redisService: RedisService;
 
+  @Config('token')
+  tokenConfig: { expire: number };
+
+  /**
+   * 滑动续期：登录态只在登录时写一次、TTL 7 天，此前无任何续期 ⟹ 活跃用户也会在
+   * 第 7 天整点被集体登出（2026-08-28 晨两位用户同时 401、整站「请求失败」的根因①）。
+   * 每次带有效 token 的请求都把 TTL 重置为完整周期：活跃即不掉线，闲置 7 天才过期。
+   * 失败静默——续期挂掉不应影响本次请求。
+   */
+  private renew(token: string) {
+    const expire = this.tokenConfig?.expire || 60 * 60 * 24 * 7;
+    this.redisService.expire(`token:${token}`, expire).catch(() => {});
+  }
+
   resolve() {
     return async (ctx: any, next: NextFunction) => {
       if (String(ctx.method).toUpperCase() === 'OPTIONS') return next();
@@ -46,6 +61,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
             if (s) {
               ctx.userInfo = JSON.parse(s);
               ctx.token = token;
+              this.renew(token);
             }
           } catch {
             // 解析失败视为未登录，不阻断
@@ -65,6 +81,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
       const userInfo = JSON.parse(userInfoStr);
       ctx.userInfo = userInfo;
       ctx.token = token;
+      this.renew(token);
       if (userInfo.role === 'admin') return next();
       const path = String(ctx.path || '').toLowerCase();
       const method = String(ctx.method).toUpperCase();
