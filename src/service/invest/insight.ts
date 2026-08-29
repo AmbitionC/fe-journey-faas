@@ -243,7 +243,35 @@ export class InvestInsightService {
         'SELECT trade_date, leg, state, close, `median`, buy_line, sell_line, fear, bias60, ' +
         'shares, mkt_value FROM broad_leg_state ORDER BY trade_date DESC LIMIT 2000'
       );
-      return { date, latest, ledger: ledger.reverse() };
+      // 红利指数（中证红利）加权股息率读数（index_dv_daily 表，读数-only 零仓位接线）。
+      // since＝表内最早可算日——分位窗口以它为准展示，不得写死任何固定年数
+      // （个股股息率底层数据 2025 年起才有值，窗口只有实际水位那么长；契约测试把关）。
+      let dv = null;
+      try {
+        const row = await this.db.one(
+          'SELECT trade_date, dv_ttm, dv_ratio, n_cons, w_cover FROM index_dv_daily ' +
+          "WHERE code = '000922.CSI' ORDER BY trade_date DESC LIMIT 1");
+        if (row && row.dv_ttm != null) {
+          const stat = await this.db.one(
+            'SELECT COUNT(*) n, MIN(trade_date) since, ' +
+            'SUM(CASE WHEN dv_ttm <= ? THEN 1 ELSE 0 END) below ' +
+            "FROM index_dv_daily WHERE code = '000922.CSI' AND dv_ttm IS NOT NULL",
+            [row.dv_ttm]);
+          const n = Number(stat?.n ?? 0);
+          dv = {
+            trade_date: String(row.trade_date),
+            dv_ttm: Number(row.dv_ttm),
+            n_cons: row.n_cons == null ? null : Number(row.n_cons),
+            w_cover: row.w_cover == null ? null : Number(row.w_cover),
+            pct: n > 0 ? Math.round((Number(stat.below) / n) * 1000) / 10 : null,
+            since: stat?.since ? String(stat.since) : null,
+            n,
+          };
+        }
+      } catch {
+        // 表未建（invest-model 尚未跑过股息率入库）→ 前端隐藏该行
+      }
+      return { date, latest, ledger: ledger.reverse(), dv };
     } catch {
       // 表未建（invest-model 未跑过带 P27 v2 落库的计划）→ 前端回退到静态回测部分
       return { date: null, latest: [], ledger: [] };
