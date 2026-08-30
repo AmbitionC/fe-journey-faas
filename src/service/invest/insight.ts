@@ -205,10 +205,12 @@ export class InvestInsightService {
       const last = await this.db.one('SELECT MAX(trade_date) d FROM allweather_daily');
       const date = last?.d ? String(last.d) : null;
       if (!date) return { date: null, latest: null, history: [], note: NOTE };
+      // stale_legs＝落后于最新腿的资产键逗号串（2026-08-30 二次验收 P3-1：
+      // data_date 已取最老腿，这里把「具体哪条腿旧」也交给消费端；老行 NULL）
       const latest = await this.db.one(
         'SELECT trade_date, signal_on, tech_momentum, signal_date, exec_date, flip, ' +
         'w_tech, w_div, w_nas, w_gold, w_soy, mom_tech, mom_div, mom_nas, mom_gold, ' +
-        'mom_soy, data_date FROM allweather_daily WHERE trade_date = ?',
+        'mom_soy, data_date, stale_legs FROM allweather_daily WHERE trade_date = ?',
         [date]
       );
       // 信号史（画月度状态条/翻转点用）：近两年逐日 ≈ 500 行
