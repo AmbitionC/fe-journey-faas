@@ -68,7 +68,47 @@ export class UserHTTPService {
     const { captcha, captchaId } = data;
     const result = await this.captchaService.checkCaptcha(captchaId, captcha);
     if (!result) throw R.error('验证码错误');
+    await this.guardSignupRate();
     return await this.userService.createUser(data);
+  }
+
+  /**
+   * 注册频次闸（按来源 IP）。
+   *
+   * 起因（2026-08-30 复盘）：8/25~8/26 两晚建了 39 个号，全部零埋点、零 AI 调用、
+   * 无一条 signup_success——没走本站注册框；每个号又各占一个不同的分钟（最高 1/分钟）。
+   * 来源无法从聚合数据判定（后端与 invest-journey.cn 共用 user 表，那边的推广会长成
+   * 一模一样的形状），但无论答案是什么，这个端点本身的敞口是确定的：免登录、无频次
+   * 限制，而 8/23 修好「注册即送 14 天」之后，每建一个号就是白送 14 天不限次 Iris。
+   *
+   * 阈值取得宽：真人一辈子在一个 IP 上注册一次；5/时、20/天 连公司或学校出口 NAT
+   * 都碰不到，却能把 1/分钟 的自动注册在第 5 个上截停。**若那 39 个号真是
+   * invest-journey 的推广用户，他们来自各自的 IP，本闸对他们零影响**——这正是按 IP
+   * 而不是按总量限的原因。
+   *
+   * 失败开放：Redis 异常时放行。注册是唯一的入口漏斗层，宁可少拦不可误杀
+   * （与 entitlement.check 的取舍一致）。
+   */
+  private async guardSignupRate(): Promise<void> {
+    const ip =
+      this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() || this.ctx.ip || '';
+    if (!ip) return;
+    const now = new Date();
+    const buckets: { key: string; limit: number; ttl: number }[] = [
+      { key: `signup:h:${now.toISOString().slice(0, 13)}:${ip}`, limit: 5, ttl: 3600 },
+      { key: `signup:d:${now.toISOString().slice(0, 10)}:${ip}`, limit: 20, ttl: 86400 },
+    ];
+    for (const b of buckets) {
+      let n: number;
+      try {
+        n = await this.redisService.incr(b.key);
+        if (n === 1) await this.redisService.expire(b.key, b.ttl);
+      } catch {
+        return; // Redis 不可用 ⟹ 放行（闸门不能变成注册的单点故障）
+      }
+      // 超限判定放在 try 之外：否则自己抛的业务错误会被自己的 catch 吞掉变成放行
+      if (n > b.limit) throw R.error('注册过于频繁，请稍后再试');
+    }
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
