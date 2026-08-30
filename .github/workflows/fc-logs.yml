@@ -4,7 +4,10 @@ name: FC logs (manual)
 # 安全约束（2026-08-30 审查 P1-2/P1-3/P2-8 修复，勿回退）：
 #   1) 手工输入一律先进 env、再在 shell 内白名单/数值校验——严禁 ${{ inputs.* }} 直接
 #      拼进脚本（$()/反引号会在装载密钥的 job 里执行任意命令）；
-#   2) 本仓 PUBLIC：原始日志不落公开 stdout，只输出脱敏摘要（手机号等 PII 掩码、行数上限）；
+#   2) 本仓 PUBLIC：**默认只输出结构化聚合**（scripts/summarize-logs.sh：行数/时间跨度/
+#      级别分布/错误关键词计数/状态码计数/异常类名——零自由文本）。脱敏是黑名单、
+#      证明不了「无 PII」，所以原文默认根本不打印；确需原文时显式开 include_text，
+#      那条路径再过 scripts/redact-logs.sh 减损（2026-08-30 第三轮验收 P1-1）；
 #   3) s.yaml 解析只需要变量名存在——除阿里云凭据外全部用占位值，不装载真实密钥；
 #   4) set -o pipefail：控制面失败必须红，不许「查不到」伪装成「没有日志」。
 
@@ -23,8 +26,12 @@ on:
         description: "回捞最近 N 分钟（1-240，默认 60）"
         default: "60"
       grep:
-        description: "可选过滤关键词（固定字符串匹配，留空跳过）"
+        description: "可选过滤关键词（固定字符串匹配，留空跳过）——默认只报命中行数，不打印原文"
         default: ""
+      include_text:
+        description: "打印脱敏后的原始日志行（默认否；脱敏是黑名单、不构成无 PII 保证）"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -94,6 +101,7 @@ jobs:
           FN_IN: ${{ inputs.function }}
           MIN_IN: ${{ inputs.minutes }}
           GREP_IN: ${{ inputs.grep }}
+          TEXT_IN: ${{ inputs.include_text }}
         run: |
           set -o pipefail
           # 白名单/数值校验（输入已在 env，不参与 shell 解析）
@@ -113,11 +121,17 @@ jobs:
           # 脱敏规则唯一真源＝scripts/redact-logs.sh（邮箱/授权头/Cookie/token/连接串/手机号，
           # 行为测试 test/workflow/redact.test.ts 喂合成日志把关——不在此内联复制规则）
           redact() { bash scripts/redact-logs.sh; }
-          echo "===== 行数统计 ====="
-          wc -l < /tmp/fc-logs.out
+          # 默认输出＝结构化聚合，零自由文本
+          bash scripts/summarize-logs.sh < /tmp/fc-logs.out
           if [ -n "$GREP_IN" ]; then
-            echo "===== 过滤（固定字符串）====="
-            (grep -iF -- "$GREP_IN" /tmp/fc-logs.out || echo "(无匹配)") | redact | tail -200
+            echo "===== 过滤命中行数（固定字符串）====="
+            grep -icF -- "$GREP_IN" /tmp/fc-logs.out || echo 0
           fi
-          echo "===== 错误类关键词摘要 ====="
-          (grep -inE "error|timeout|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ER_|PROTOCOL_|unhandled|FATAL|exit" /tmp/fc-logs.out || echo "(无错误类日志)") | redact | tail -200
+          if [ "$TEXT_IN" = "true" ]; then
+            echo "===== ⚠️ 脱敏原文（显式索取；黑名单减损，不保证无 PII）====="
+            if [ -n "$GREP_IN" ]; then
+              (grep -iF -- "$GREP_IN" /tmp/fc-logs.out || echo "(无匹配)") | redact | tail -200
+            else
+              (grep -inE "error|timeout|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ER_|PROTOCOL_|unhandled|FATAL|exit" /tmp/fc-logs.out || echo "(无错误类日志)") | redact | tail -200
+            fi
+          fi

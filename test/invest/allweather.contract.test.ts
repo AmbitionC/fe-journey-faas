@@ -42,3 +42,25 @@ describe('allweather 触达文案契约', () => {
     assert.ok(auth.includes("path === '/invest/allweather'"));
   });
 });
+
+/**
+ * stale_legs 字段到达消费端（2026-08-30 第三轮验收 P3-3）：
+ * 此前只有「链路静态存在」，没有任何断言证明滞后腿名单真的从库表进到接口响应。
+ * 这仍是源码契约测试（无 DB/HTTP），报告里不得把它说成端到端验证。
+ */
+describe('allweather stale_legs 契约', () => {
+  const insight = readFileSync(
+    join(__dirname, '..', '..', 'src', 'service', 'invest', 'insight.ts'), 'utf8');
+  const start = insight.indexOf('async allweather()');
+  const fn = insight.slice(start, start + 4000);
+
+  it('SELECT 取出 stale_legs 列', () => {
+    assert.ok(/stale_legs/.test(fn), 'allweather 查询未取 stale_legs');
+  });
+
+  it('stale_legs 随响应下发（不是取了不发）', () => {
+    const afterSelect = fn.slice(fn.indexOf('stale_legs'));
+    assert.ok(/return|data|rows/.test(afterSelect), '取到 stale_legs 后未见下发');
+    assert.ok(!/delete\s+\w+\.stale_legs/.test(fn), 'stale_legs 被剥离');
+  });
+});

@@ -41,7 +41,13 @@ describe('auth 绝对会话寿命·行为', () => {
     let nextCalled = false;
     await assert.rejects(
       mw(redis)(ctx, async () => { nextCalled = true; }),
-      (e: any) => /过期|unauthorized/i.test(String(e?.message ?? e)) || e?.code === 401 || true,
+      (e: any) => {
+        // 第三轮验收 P3-3：原写法末尾的 `|| true` 让整个 predicate 恒真＝异常类型与
+        // 401 文案从未真正被断言。改为逐条硬断言。
+        assert.match(String(e?.message ?? e), /登录已过期/);
+        assert.strictEqual(e?.status ?? e?.code, 401);
+        return true;
+      },
     );
     assert.strictEqual(nextCalled, false, '超龄请求不得放行');
     assert.ok(!redis.store.has('token:t1'), '主 token 未被清理');
