@@ -62,6 +62,26 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
     })().catch(() => {});
   }
 
+  /**
+   * 主鉴权路径的同步超龄检查（2026-08-30 二次验收 P2-1）：只停续期不拒请求时，
+   * 第 30 天前刚续过期的会话还能再用一个完整闲置 TTL（实际 ≈37 天）。超龄即删
+   * 主 key 与伴生键并拒绝本次请求；Redis 异常按未超龄处理，不误伤正常请求。
+   */
+  private async sessionExpired(token: string): Promise<boolean> {
+    try {
+      const iat = Number(await this.redisService.get(`token:${token}:iat`));
+      if (iat && Math.floor(Date.now() / 1000) - iat > AuthMiddleware.ABSOLUTE_MAX_AGE) {
+        await Promise.resolve(
+          this.redisService.del(`token:${token}`, `token:${token}:iat`),
+        ).catch(() => {});
+        return true;
+      }
+    } catch {
+      // 读 iat 失败＝无法判定，放行走闲置 TTL 兜底
+    }
+    return false;
+  }
+
   resolve() {
     return async (ctx: any, next: NextFunction) => {
       if (String(ctx.method).toUpperCase() === 'OPTIONS') return next();
@@ -77,7 +97,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
         if (token) {
           try {
             const s = await this.redisService.get(`token:${token}`);
-            if (s) {
+            if (s && !(await this.sessionExpired(token))) {
               ctx.userInfo = JSON.parse(s);
               ctx.token = token;
               this.renew(token);
@@ -97,6 +117,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
       if (!token) throw R.unauthorizedError('未登录');
       const userInfoStr = await this.redisService.get(`token:${token}`);
       if (!userInfoStr) throw R.unauthorizedError('未获取到用户信息');
+      if (await this.sessionExpired(token)) throw R.unauthorizedError('登录已过期，请重新登录');
       const userInfo = JSON.parse(userInfoStr);
       ctx.userInfo = userInfo;
       ctx.token = token;

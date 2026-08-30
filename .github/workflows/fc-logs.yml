@@ -110,8 +110,9 @@ jobs:
           echo "→ $FN logs $START ~ $END (UTC)"
           # 原始日志只落私有临时文件；控制面失败即红（不再 || true）
           s "$FN" logs --start-time "$START" --end-time "$END" --access aliyun > /tmp/fc-logs.out 2>&1
-          # 脱敏：手机号掩码；输出一律限行
-          redact() { sed -E 's/1[3-9][0-9]{9}/1**********/g'; }
+          # 脱敏规则唯一真源＝scripts/redact-logs.sh（邮箱/授权头/Cookie/token/连接串/手机号，
+          # 行为测试 test/workflow/redact.test.ts 喂合成日志把关——不在此内联复制规则）
+          redact() { bash scripts/redact-logs.sh; }
           echo "===== 行数统计 ====="
           wc -l < /tmp/fc-logs.out
           if [ -n "$GREP_IN" ]; then

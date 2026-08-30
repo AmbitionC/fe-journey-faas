@@ -1,0 +1,60 @@
+name: test
+
+# FaaS 全量测试（2026-08-30 二次验收 P3-5）：标准入口 `npm test` 此前在 Node 22 下
+# 于用例执行前就因 TS/CommonJS 加载失败，且无任何跑全量测试的 CI——
+# .mocharc.json 已加 node-option 修加载，本 workflow 提供带 MySQL/Redis 服务的执行场所。
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: fe-journey
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -ptestpass"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      NODE_ENV: unittest
+      DB_HOST: 127.0.0.1
+      DB_USER: root
+      DB_PASS: testpass
+      REDIS_HOST: 127.0.0.1
+      REDIS_PASS: ''
+      LLM_PROVIDER: openai
+      LLM_API_KEY: dummy-for-tests
+      LLM_MODEL: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: TypeScript 编译检查
+        run: npx tsc --noEmit
+      - name: 全量测试（标准入口）
+        run: npm test
