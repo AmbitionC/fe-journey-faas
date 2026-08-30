@@ -37,4 +37,12 @@ describe('红利股息率读数契约', () => {
     assert.ok(broadBlock.includes('pct'), '缺 pct（分位）字段');
     assert.ok(!broadBlock.includes('近十年'), 'dv 数据只有 2025 起，不得写死「近十年」窗口');
   });
+
+  // 2026-08-30 审查 P2-7/P2-10
+  it('分位用严格 <（文案「高于」），且读数/分位都过覆盖率闸', () => {
+    assert.ok(/dv_ttm < \?/.test(broadBlock), '分位必须严格 <：<= 会把相等样本算进「高于」');
+    assert.ok(!/dv_ttm <= \?/.test(broadBlock), '不得使用 <=');
+    const gates = broadBlock.match(/w_cover >= 0\.8/g) || [];
+    assert.ok(gates.length >= 2, `latest 与分位两条查询都须带 w_cover 闸，实际 ${gates.length} 处`);
+  });
 });

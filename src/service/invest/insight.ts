@@ -246,16 +246,20 @@ export class InvestInsightService {
       // 红利指数（中证红利）加权股息率读数（index_dv_daily 表，读数-only 零仓位接线）。
       // since＝表内最早可算日——分位窗口以它为准展示，不得写死任何固定年数
       // （个股股息率底层数据 2025 年起才有值，窗口只有实际水位那么长；契约测试把关）。
+      // 覆盖率消费闸（2026-08-30 审查 P2-7）：读数与分位都只认 w_cover≥0.8 的行——
+      // 低覆盖快照不冒充「指数股息率」；分位用严格 <（文案是「高于」，2026-08-30 审查
+      // P2-10：<= 会把相等样本算进「高于」，重复值序列能显出 100%）。
       let dv = null;
       try {
         const row = await this.db.one(
           'SELECT trade_date, dv_ttm, dv_ratio, n_cons, w_cover FROM index_dv_daily ' +
-          "WHERE code = '000922.CSI' ORDER BY trade_date DESC LIMIT 1");
+          "WHERE code = '000922.CSI' AND dv_ttm IS NOT NULL AND w_cover >= 0.8 " +
+          'ORDER BY trade_date DESC LIMIT 1');
         if (row && row.dv_ttm != null) {
           const stat = await this.db.one(
             'SELECT COUNT(*) n, MIN(trade_date) since, ' +
-            'SUM(CASE WHEN dv_ttm <= ? THEN 1 ELSE 0 END) below ' +
-            "FROM index_dv_daily WHERE code = '000922.CSI' AND dv_ttm IS NOT NULL",
+            'SUM(CASE WHEN dv_ttm < ? THEN 1 ELSE 0 END) below ' +
+            "FROM index_dv_daily WHERE code = '000922.CSI' AND dv_ttm IS NOT NULL AND w_cover >= 0.8",
             [row.dv_ttm]);
           const n = Number(stat?.n ?? 0);
           dv = {
