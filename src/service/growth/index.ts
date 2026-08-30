@@ -5,6 +5,7 @@ import { UserEntity } from '../../entity/user';
 import { OrderEntity } from '../../entity/order';
 import { BookOrderEntity } from '../../entity/bookOrder';
 import { EventLogEntity } from '../../entity/eventLog';
+import { AiUsageLogEntity } from '../../entity/aiUsageLog';
 import { GrowthStatEntity } from '../../entity/growthStat';
 import { GrowthReviewEntity } from '../../entity/growthReview';
 
@@ -29,6 +30,9 @@ export class GrowthService {
 
   @InjectEntityModel(EventLogEntity)
   eventLogModel: Repository<EventLogEntity>;
+
+  @InjectEntityModel(AiUsageLogEntity)
+  aiUsageLogModel: Repository<AiUsageLogEntity>;
 
   @InjectEntityModel(GrowthStatEntity)
   growthStatModel: Repository<GrowthStatEntity>;
@@ -210,6 +214,122 @@ export class GrowthService {
           rateFromPrev: rate(highValue, icebreaker),
         },
       ],
+    };
+  }
+
+
+  /**
+   * 注册来源体检（近 N 天）——纯聚合，**不返回任何手机号/昵称等个人信息**。
+   *
+   * 起因（2026-08-30 复盘）：近 30 天注册 45 人，而同期 page_view UV 只有 7、
+   * signup_success 埋点只有 4 条。漏斗把「注册/UV」算成 642% 却没人能说清这 45 人
+   * 是谁——前端唯一的注册入口 loginModal 成功后必发 signup_success，因此绝大多数
+   * 注册没走前端。可能是共用 user 表的另一个前端（invest-journey），也可能是脚本
+   * 批量注册；两者的处置完全相反，**不能靠猜**。8/16 已立过规矩：引用漏斗事件前
+   * 先确认它的触发条件，n=1 时连事件语义都可能是错的。
+   *
+   * 判据（按信息量排序）：
+   * - burst.maxPerMinute / minutesUsed：真人注册散落在各分钟里；脚本会挤在同一分钟。
+   * - silent：注册后完全没有事件/AI/阅读记录的人数。真人注册即带 page_view。
+   * - signupSuccessEvents vs signups：差额就是「没走本站前端」的注册数。
+   */
+  async signupAudit(days = 30, exclude?: string[]) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
+
+    const newUsers = async () => {
+      const qb = this.userModel
+        .createQueryBuilder('u')
+        .select('u.phoneNumber', 'id')
+        .addSelect("DATE_FORMAT(u.createTime, '%Y-%m-%d')", 'day')
+        .addSelect("DATE_FORMAT(u.createTime, '%Y-%m-%d %H:%i')", 'minute')
+        .addSelect('u.nickName', 'nickName')
+        .where('u.createTime >= :since', { since });
+      if (ex.length) qb.andWhere('u.phoneNumber NOT IN (:...ex)', { ex });
+      return qb.getRawMany();
+    };
+
+    let rows: any[] = [];
+    try {
+      rows = await newUsers();
+    } catch {
+      return { days, error: 'query_failed' };
+    }
+
+    const ids = rows.map((r) => String(r.id)).filter(Boolean);
+    const signups = rows.length;
+
+    // 按天 / 按分钟聚合（分钟串不含个人信息，只用来看是否挤成一簇）
+    const dayMap: Record<string, number> = {};
+    const minuteMap: Record<string, number> = {};
+    let autoNickname = 0;
+    for (const r of rows) {
+      dayMap[r.day] = (dayMap[r.day] || 0) + 1;
+      minuteMap[r.minute] = (minuteMap[r.minute] || 0) + 1;
+      // 前端注册框昵称留空时自动生成「用户_HHMMSS」
+      if (/^用户_\d{6}$/.test(String(r.nickName || ''))) autoNickname += 1;
+    }
+    const byDay = Object.keys(dayMap)
+      .sort()
+      .map((date) => ({ date, count: dayMap[date] }));
+    const minuteEntries = Object.entries(minuteMap).sort((a, b) => b[1] - a[1]);
+
+    // 注册后是否留下过任何痕迹（三张表任一有记录即算「活过」）
+    const distinctIn = async (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      model: Repository<any>,
+      alias: string,
+      col = 'userId'
+    ): Promise<Set<string>> => {
+      if (!ids.length) return new Set();
+      try {
+        const raw = await model
+          .createQueryBuilder(alias)
+          .select(`${alias}.${col}`, 'id')
+          .where(`${alias}.${col} IN (:...ids)`, { ids })
+          .groupBy(`${alias}.${col}`)
+          .getRawMany();
+        return new Set(raw.map((r) => String(r.id)));
+      } catch {
+        return new Set();
+      }
+    };
+
+    const [eventUsers, aiUsers] = await Promise.all([
+      distinctIn(this.eventLogModel, 'e'),
+      distinctIn(this.aiUsageLogModel, 'a'),
+    ]);
+    const alive = new Set<string>([...eventUsers, ...aiUsers]);
+
+    let signupSuccessEvents = 0;
+    try {
+      const qb = this.eventLogModel
+        .createQueryBuilder('e')
+        .where("e.event = 'signup_success'")
+        .andWhere('e.createTime >= :since', { since });
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      signupSuccessEvents = await qb.getCount();
+    } catch {
+      /* ignore */
+    }
+
+    return {
+      days,
+      signups,
+      byDay,
+      burst: {
+        minutesUsed: minuteEntries.length,
+        maxPerMinute: minuteEntries[0]?.[1] || 0,
+        topMinutes: minuteEntries.slice(0, 5).map(([minute, count]) => ({ minute, count })),
+      },
+      // 注册后有过埋点事件 / AI 调用的人数；silent = 注册完毫无痕迹
+      withEvent: eventUsers.size,
+      withAiCall: aiUsers.size,
+      silent: signups - alive.size,
+      // 本站前端注册成功埋点数；与 signups 的差额 = 没走本站前端的注册
+      signupSuccessEvents,
+      notFromThisFrontend: Math.max(0, signups - signupSuccessEvents),
+      autoNickname,
     };
   }
 
