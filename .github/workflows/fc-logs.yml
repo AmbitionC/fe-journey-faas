@@ -1,8 +1,12 @@
 name: FC logs (manual)
 
 # 只读回捞 FC 函数日志（SLS default-logs），排障用：不改任何线上资源。
-# 等价于登阿里云控制台看函数日志，但结果直接打在本步骤输出里。
-# 用法：workflow_dispatch 选函数 + 回捞窗口（分钟）。
+# 安全约束（2026-08-30 审查 P1-2/P1-3/P2-8 修复，勿回退）：
+#   1) 手工输入一律先进 env、再在 shell 内白名单/数值校验——严禁 ${{ inputs.* }} 直接
+#      拼进脚本（$()/反引号会在装载密钥的 job 里执行任意命令）；
+#   2) 本仓 PUBLIC：原始日志不落公开 stdout，只输出脱敏摘要（手机号等 PII 掩码、行数上限）；
+#   3) s.yaml 解析只需要变量名存在——除阿里云凭据外全部用占位值，不装载真实密钥；
+#   4) set -o pipefail：控制面失败必须红，不许「查不到」伪装成「没有日志」。
 
 on:
   workflow_dispatch:
@@ -16,45 +20,49 @@ on:
           - investLiveWatch
           - investScheduler
       minutes:
-        description: "回捞最近 N 分钟（默认 240）"
-        default: "240"
+        description: "回捞最近 N 分钟（1-240，默认 60）"
+        default: "60"
       grep:
-        description: "可选过滤关键词（留空输出全部）"
+        description: "可选过滤关键词（固定字符串匹配，留空跳过）"
         default: ""
 
-# s.yaml 解析需要全部 ${env('...')} 变量名存在（与 deploy.yml/invoke-invest.yml 同一套）
+permissions:
+  contents: read
+
+# 占位值：s.yaml 的 ${env('...')} 只要求变量存在，日志控制面用不到真实值。
+# 不要把真实 secrets 加回来——这个 job 的输出是公开的。
 env:
-  LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
-  LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-  LLM_MODEL: ${{ secrets.LLM_MODEL }}
-  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-  OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-  OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-  SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
-  GROWTH_INTERNAL_USER_IDS: ${{ secrets.GROWTH_INTERNAL_USER_IDS }}
-  DB_HOST: ${{ secrets.DB_HOST }}
-  DB_USER: ${{ secrets.DB_USER }}
-  DB_PASS: ${{ secrets.DB_PASS }}
-  REDIS_HOST: ${{ secrets.REDIS_HOST }}
-  REDIS_PASS: ${{ secrets.REDIS_PASS }}
-  INVEST_DB_URL: ${{ secrets.INVEST_DB_URL }}
-  INVEST_DB_NAME: ${{ vars.INVEST_DB_NAME || 'invest' }}
-  TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-  TUSHARE_HTTP_URL: ${{ secrets.TUSHARE_HTTP_URL }}
-  INVEST_GH_PAT: ${{ secrets.INVEST_GH_PAT || secrets.GH_TOKEN }}
-  LIVE_WATCH_MENTION: ${{ vars.LIVE_WATCH_MENTION }}
-  ACCOUNT_CASH: ${{ vars.ACCOUNT_CASH || '0' }}
-  PLAN_ARGS: ${{ vars.PLAN_ARGS }}
-  ARB_ENABLED: ${{ vars.ARB_ENABLED || '0' }}
-  HEALTH_API_TOKEN: ${{ secrets.HEALTH_API_TOKEN }}
-  HEALTH_DB_NAME: ${{ vars.HEALTH_DB_NAME }}
-  HEALTH_VISION_BASE_URL: ${{ vars.HEALTH_VISION_BASE_URL }}
-  HEALTH_VISION_API_KEY: ${{ secrets.HEALTH_VISION_API_KEY }}
-  HEALTH_VISION_MODEL: ${{ vars.HEALTH_VISION_MODEL }}
-  HEALTH_CHAT_BASE_URL: ${{ vars.HEALTH_CHAT_BASE_URL }}
-  HEALTH_CHAT_API_KEY: ${{ secrets.HEALTH_CHAT_API_KEY }}
-  HEALTH_CHAT_MODEL: ${{ vars.HEALTH_CHAT_MODEL }}
-  CORS_ALLOW_ORIGINS: ${{ vars.CORS_ALLOW_ORIGINS }}
+  LLM_PROVIDER: unused
+  LLM_API_KEY: unused
+  LLM_MODEL: unused
+  GITHUB_TOKEN: unused
+  OSS_ACCESS_KEY_ID: unused
+  OSS_ACCESS_KEY_SECRET: unused
+  SYNC_SECRET: unused
+  GROWTH_INTERNAL_USER_IDS: unused
+  DB_HOST: unused
+  DB_USER: unused
+  DB_PASS: unused
+  REDIS_HOST: unused
+  REDIS_PASS: unused
+  INVEST_DB_URL: unused
+  INVEST_DB_NAME: unused
+  TUSHARE_TOKEN: unused
+  TUSHARE_HTTP_URL: unused
+  INVEST_GH_PAT: unused
+  LIVE_WATCH_MENTION: unused
+  ACCOUNT_CASH: "0"
+  PLAN_ARGS: unused
+  ARB_ENABLED: "0"
+  HEALTH_API_TOKEN: unused
+  HEALTH_DB_NAME: unused
+  HEALTH_VISION_BASE_URL: unused
+  HEALTH_VISION_API_KEY: unused
+  HEALTH_VISION_MODEL: unused
+  HEALTH_CHAT_BASE_URL: unused
+  HEALTH_CHAT_API_KEY: unused
+  HEALTH_CHAT_MODEL: unused
+  CORS_ALLOW_ORIGINS: unused
 
 jobs:
   logs:
@@ -81,20 +89,34 @@ jobs:
             --access aliyun \
             -f
 
-      - name: Fetch logs
+      - name: Fetch logs (redacted)
+        env:
+          FN_IN: ${{ inputs.function }}
+          MIN_IN: ${{ inputs.minutes }}
+          GREP_IN: ${{ inputs.grep }}
         run: |
-          FN="${{ inputs.function }}"
-          MIN="${{ inputs.minutes }}"
-          START=$(date -u -d "-${MIN} minutes" '+%Y-%m-%dT%H:%M:%SZ')
+          set -o pipefail
+          # 白名单/数值校验（输入已在 env，不参与 shell 解析）
+          case "$FN_IN" in
+            fcJourneyMain|investLiveWatch|investScheduler) FN="$FN_IN";;
+            *) echo "::error::非法函数名"; exit 1;;
+          esac
+          if ! [[ "$MIN_IN" =~ ^[0-9]{1,3}$ ]] || [ "$MIN_IN" -lt 1 ] || [ "$MIN_IN" -gt 240 ]; then
+            echo "::error::minutes 必须是 1-240 的整数"; exit 1
+          fi
+          START=$(date -u -d "-${MIN_IN} minutes" '+%Y-%m-%dT%H:%M:%SZ')
           END=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           mkdir -p invest-dist noderuntime   # 占位：logs 只走控制面，不需要真实代码目录
           echo "→ $FN logs $START ~ $END (UTC)"
-          s "$FN" logs --start-time "$START" --end-time "$END" --access aliyun 2>&1 | tee /tmp/fc-logs.out || true
+          # 原始日志只落私有临时文件；控制面失败即红（不再 || true）
+          s "$FN" logs --start-time "$START" --end-time "$END" --access aliyun > /tmp/fc-logs.out 2>&1
+          # 脱敏：手机号掩码；输出一律限行
+          redact() { sed -E 's/1[3-9][0-9]{9}/1**********/g'; }
           echo "===== 行数统计 ====="
-          wc -l /tmp/fc-logs.out || true
-          if [ -n "${{ inputs.grep }}" ]; then
-            echo "===== 过滤: ${{ inputs.grep }} ====="
-            grep -i -- "${{ inputs.grep }}" /tmp/fc-logs.out | tail -300 || echo "(无匹配)"
+          wc -l < /tmp/fc-logs.out
+          if [ -n "$GREP_IN" ]; then
+            echo "===== 过滤（固定字符串）====="
+            (grep -iF -- "$GREP_IN" /tmp/fc-logs.out || echo "(无匹配)") | redact | tail -200
           fi
           echo "===== 错误类关键词摘要 ====="
-          grep -inE "error|timeout|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ER_|PROTOCOL_|unhandled|FATAL|exit" /tmp/fc-logs.out | tail -200 || echo "(无错误类日志)"
+          (grep -inE "error|timeout|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ER_|PROTOCOL_|unhandled|FATAL|exit" /tmp/fc-logs.out || echo "(无错误类日志)") | redact | tail -200

@@ -32,15 +32,34 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
   @Config('token')
   tokenConfig: { expire: number };
 
+  /** 绝对会话寿命（秒）：活跃续期最多把一个会话延到登录后 30 天，之后须重新登录。
+   * 没有它，被窃 token 只要每 7 天请求一次即可永久有效（2026-08-30 审查 P2-2）。 */
+  static readonly ABSOLUTE_MAX_AGE = 60 * 60 * 24 * 30;
+
   /**
    * 滑动续期：登录态只在登录时写一次、TTL 7 天，此前无任何续期 ⟹ 活跃用户也会在
    * 第 7 天整点被集体登出（2026-08-28 晨两位用户同时 401、整站「请求失败」的根因①）。
    * 每次带有效 token 的请求都把 TTL 重置为完整周期：活跃即不掉线，闲置 7 天才过期。
    * 失败静默——续期挂掉不应影响本次请求。
+   *
+   * 绝对寿命：伴生键 `token:<t>:iat` 记录首次见到该 token 的时间（对既有会话从
+   * 本次部署起计），会话年龄超过 ABSOLUTE_MAX_AGE 后不再续期——闲置 TTL 自然
+   * 走完即登出；不主动删 key，避免把正在处理的请求打断。
    */
   private renew(token: string) {
     const expire = this.tokenConfig?.expire || 60 * 60 * 24 * 7;
-    this.redisService.expire(`token:${token}`, expire).catch(() => {});
+    const iatKey = `token:${token}:iat`;
+    (async () => {
+      const now = Math.floor(Date.now() / 1000);
+      // NX：只有第一次见到才写；EX 给伴生键比绝对寿命略长的 TTL 防泄漏残留
+      const created = await this.redisService.set(
+        iatKey, String(now), 'EX', AuthMiddleware.ABSOLUTE_MAX_AGE + expire, 'NX');
+      if (!created) {
+        const iat = Number(await this.redisService.get(iatKey));
+        if (iat && now - iat > AuthMiddleware.ABSOLUTE_MAX_AGE) return; // 超绝对寿命：不续期
+      }
+      await this.redisService.expire(`token:${token}`, expire);
+    })().catch(() => {});
   }
 
   resolve() {

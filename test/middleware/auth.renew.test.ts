@@ -26,6 +26,16 @@ describe('auth 中间件登录态滑动续期', () => {
   });
 
   it('续期失败静默，不影响本次请求', () => {
-    assert.ok(/expire\([^)]*\)\.catch\(/.test(src), '续期必须 fail-soft（.catch 吞错）');
+    assert.ok(/\)\(\)\.catch\(\(\) => \{\}\)/.test(src) || /expire\([^)]*\)\.catch\(/.test(src),
+      '续期必须 fail-soft（.catch 吞错）');
+  });
+
+  // 2026-08-30 审查 P2-2：滑动续期不得让活跃 bearer token 永久有效
+  it('存在绝对会话寿命上限，超龄不再续期', () => {
+    assert.ok(/ABSOLUTE_MAX_AGE/.test(src), '缺少绝对会话寿命常量');
+    assert.ok(/60 \* 60 \* 24 \* 30/.test(src), '绝对寿命应为 30 天量级');
+    assert.ok(/:iat/.test(src), '须有首见时间伴生键（token:<t>:iat）');
+    assert.ok(/now - iat > AuthMiddleware\.ABSOLUTE_MAX_AGE\) return/.test(src),
+      '超绝对寿命必须提前 return、不执行续期');
   });
 });

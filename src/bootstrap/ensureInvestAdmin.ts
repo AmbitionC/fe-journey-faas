@@ -25,7 +25,9 @@ export async function ensureInvestAdmin(container: IMidwayContainer): Promise<vo
     if (!user) return;
     if (user.role !== 'admin') {
       await repo.update({ id: user.id }, { role: 'admin' });
-      console.log(`[ensureInvestAdmin] ${INVEST_ADMIN_PHONE} 已提升为 admin`);
+      // 日志掩码：FC 日志可能被回捞到 Actions 等外部面，完整手机号不落日志（2026-08-30 审查 P1-3）
+      const masked = `${INVEST_ADMIN_PHONE.slice(0, 3)}****${INVEST_ADMIN_PHONE.slice(-2)}`;
+      console.log(`[ensureInvestAdmin] ${masked} 已提升为 admin`);
     }
   } catch (err) {
     console.error('[ensureInvestAdmin] 失败(不影响启动):', err);
