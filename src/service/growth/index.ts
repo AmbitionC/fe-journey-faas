@@ -615,10 +615,13 @@ export class GrowthService {
         d.getDate()
       ).padStart(2, '0')}`;
 
-    const byDate: Record<string, { date: string; uv: number; revenue: number }> = {};
+    const byDate: Record<
+      string,
+      { date: string; uv: number; uvByIp: number; revenue: number }
+    > = {};
     for (let i = days - 1; i >= 0; i--) {
       const d = fmt(new Date(Date.now() - i * 86400000));
-      byDate[d] = { date: d, uv: 0, revenue: 0 };
+      byDate[d] = { date: d, uv: 0, uvByIp: 0, revenue: 0 };
     }
 
     try {
@@ -634,6 +637,27 @@ export class GrowthService {
       for (const r of uvRows) {
         const d = fmt(new Date(r.date));
         if (byDate[d]) byDate[d].uv = Number(r.uv);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 日趋势也要按 IP 出一条（同 funnel.countByIp 的理由）。只补 uv 不补这里，
+    // manager 的曲线会继续画每天 1~2，而漏斗写着一周 27——同一块看板两个数打架，
+    // 比只有一个错数更糟。
+    try {
+      const ipQb = this.eventLogModel
+        .createQueryBuilder('e')
+        .select('DATE(e.createTime)', 'date')
+        .addSelect('COUNT(DISTINCT e.ip)', 'uv')
+        .where("e.event = 'page_view'")
+        .andWhere('e.createTime >= :since', { since })
+        .andWhere("e.ip IS NOT NULL AND e.ip <> ''")
+        .groupBy('DATE(e.createTime)');
+      if (ex.length) ipQb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      for (const r of await ipQb.getRawMany()) {
+        const d = fmt(new Date(r.date));
+        if (byDate[d]) byDate[d].uvByIp = Number(r.uv);
       }
     } catch {
       /* ignore */
