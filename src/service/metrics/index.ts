@@ -111,6 +111,8 @@ export class MetricsService {
       aiCallsQb.getCount(),
     ]);
 
+    // members：isMember 标记为真的人数。**不看到期日**——这是历史口径，2026-07 起
+    // 的看板序列都按它画，改语义会让曲线断掉（复盘手册 §6 红线：要改就新增）。
     let members = 0;
     try {
       const qb = this.userModel
@@ -120,6 +122,28 @@ export class MetricsService {
       members = await qb.getCount();
     } catch {
       members = 0;
+    }
+
+    // activeMembers：**当前仍在有效期内**的会员数（2026-09-06 新增）。
+    // members 只看 isMember 列，而没有任何地方会在到期时把它改回 false——
+    // 试用期一过，人已经不是会员了，members 却永远不下降。8/25~8/26 那 39 个
+    // 注册号的 14 天试用在 9/8~9/9 到期，届时 members 仍会显示 84，
+    // 而真正还能用会员功能的只有个位数。看会员规模用这个数，不要用 members。
+    // 比较用固定格式字符串（memberDate 是 varchar，与 NOW() 比会走隐式类型转换，
+    // 空串还会告警）；库里的写法统一是 toISOString().slice(0,19).replace('T',' ')，
+    // 'YYYY-MM-DD HH:mm:ss' 定长，逐字符比较与时间序等价。
+    let activeMembers = 0;
+    try {
+      const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const qb = this.userModel
+        .createQueryBuilder('u')
+        .where('u.isMember = :m', { m: true })
+        .andWhere("u.memberDate <> ''")
+        .andWhere('u.memberDate > :now', { now: nowStr });
+      if (ex.length) qb.andWhere('u.phoneNumber NOT IN (:...ex)', { ex });
+      activeMembers = await qb.getCount();
+    } catch {
+      activeMembers = 0;
     }
 
     // AI token 总量
@@ -138,6 +162,7 @@ export class MetricsService {
     return {
       users,
       members,
+      activeMembers,
       readingDone,
       aiCalls,
       tokens,

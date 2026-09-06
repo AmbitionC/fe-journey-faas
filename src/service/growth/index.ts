@@ -13,6 +13,51 @@ import { GrowthReviewEntity } from '../../entity/growthReview';
 const HIGH_VALUE_ORDER_TYPES = ['member', 'consult'];
 
 /**
+ * AI 用量按「谁在花」归类。**这是一道脱敏边界，不是格式化**：
+ * ai_usage_log.userId 对真人就是手机号，而复盘导出是免登录（x-sync-secret）的，
+ * 所以真人一侧只能出计数，**只有非手机号形态的系统标识可以原样列出**
+ * （eval-bot / review / plan-ai / coach-plan 这类调用方自己传的假 userId）。
+ * 抽成纯函数是为了让这条边界可被测试直接钉住（见 test/aiUsageSubjects.test.ts）。
+ */
+export function classifyAiSubjects(
+  rows: { id?: string | null; calls?: number | string; tokens?: number | string }[]
+): {
+  bySubject: { subject: string; calls: number; tokens: number; distinct: number }[];
+  systemIds: { id: string; calls: number; tokens: number }[];
+} {
+  const isHuman = (id: string) => /^\d{11}$/.test(id);
+  // 能否原样打印，是一条**白名单**规则，与归桶分开判。
+  // 先前写成「不是 11 位手机号就打印」，被用例逮到：`+8617394940726`、
+  // `173-9494-0726` 都不满足 11 位纯数字，于是会被当系统标识原样输出——
+  // 免登录接口上就是泄号码。改为只放行「系统标识长相」：字母开头、
+  // 仅含字母数字下划线连字符，且不含 7 位以上连续数字。
+  const isPrintable = (id: string) =>
+    /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id) && !/\d{7,}/.test(id);
+  const human = { subject: '真人账号', calls: 0, tokens: 0, distinct: 0 };
+  const system = { subject: '系统任务', calls: 0, tokens: 0, distinct: 0 };
+  const systemIds: { id: string; calls: number; tokens: number }[] = [];
+
+  for (const r of rows || []) {
+    const id = String(r?.id ?? '');
+    const calls = Number(r?.calls || 0);
+    const tokens = Number(r?.tokens || 0);
+    const bucket = isHuman(id) ? human : system;
+    bucket.calls += calls;
+    bucket.tokens += tokens;
+    bucket.distinct += 1;
+    if (isHuman(id)) continue;
+    // 非真人一律计数；只有过了白名单的标识才带上原文，其余脱敏后仍可见其存在
+    systemIds.push({
+      id: isPrintable(id) ? id : id === '' ? '(空)' : '(其他标识)',
+      calls,
+      tokens,
+    });
+  }
+  systemIds.sort((a, b) => b.calls - a.calls);
+  return { bySubject: [human, system], systemIds };
+}
+
+/**
  * 增长复盘系统（数据口径见 front-end-journey 仓库 docs/growth-review-playbook.md）。
  * 漏斗四层：访问(uv) → 注册 → 破冰付费(pdf/书) → 高价付费(会员/咨询)。
  * 站内数据实时聚合（量级小无需预算表）；站外数据走 growth_stat 手动录入。
@@ -331,6 +376,75 @@ export class GrowthService {
       notFromThisFrontend: Math.max(0, signups - signupSuccessEvents),
       autoNickname,
     };
+  }
+
+
+  /**
+   * AI 用量拆解（近 N 天）——纯聚合，**不输出任何手机号**。
+   *
+   * 起因（2026-09-06 复盘）：本周站内 UV 只有 2、埋点事件一条没有、注册 0，
+   * 而 aiCalls 从 1106 涨到 1143（+37）、token 从 78.3 万涨到 82.3 万（+4 万）。
+   * 北极星是「月收入 ≥ 月成本」，token 又是唯一会自己长的可变成本，却没有任何
+   * 数据能回答「这 37 次是谁打的、烧在哪个功能上」。
+   *
+   * 主体分类只看形态，不外泄标识：11 位纯数字＝真人账号（userId 就是手机号），
+   * 其余是系统任务标识。**只有系统任务标识会被原样列出**（eval-bot / review /
+   * plan-ai 这类），真人一侧永远只给计数。
+   *
+   * 注意 module 列目前区分度很低：completeRaw(system, user, 'review') 的第三个参数
+   * 是 userId 不是 module，module 被写死成 'eval'——所以 review / plan-ai / coach-plan
+   * 三条链路都堆在同一个 module 下，只能从 bySubject 的标识把它们分开。
+   */
+  async aiUsage(days = 30, exclude?: string[]) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
+
+    const base = () => {
+      const qb = this.aiUsageLogModel
+        .createQueryBuilder('u')
+        .where('u.createTime >= :since', { since });
+      if (ex.length) qb.andWhere('u.userId NOT IN (:...ex)', { ex });
+      return qb;
+    };
+
+    try {
+      const totalRow = await base()
+        .select('COUNT(*)', 'calls')
+        .addSelect('COALESCE(SUM(u.tokenUsed), 0)', 'tokens')
+        .getRawOne();
+
+      const moduleRows = await base()
+        .select('u.module', 'module')
+        .addSelect('COUNT(*)', 'calls')
+        .addSelect('COALESCE(SUM(u.tokenUsed), 0)', 'tokens')
+        .groupBy('u.module')
+        .orderBy('calls', 'DESC')
+        .getRawMany();
+
+      const subjectRows = await base()
+        .select('u.userId', 'id')
+        .addSelect('COUNT(*)', 'calls')
+        .addSelect('COALESCE(SUM(u.tokenUsed), 0)', 'tokens')
+        .groupBy('u.userId')
+        .getRawMany();
+
+      const { bySubject, systemIds } = classifyAiSubjects(subjectRows);
+
+      return {
+        days,
+        calls: Number(totalRow?.calls || 0),
+        tokens: Number(totalRow?.tokens || 0),
+        byModule: moduleRows.map((r) => ({
+          module: r.module || '(未标注)',
+          calls: Number(r.calls || 0),
+          tokens: Number(r.tokens || 0),
+        })),
+        bySubject,
+        systemIds: systemIds.slice(0, 20),
+      };
+    } catch {
+      return { days, error: 'query_failed' };
+    }
   }
 
   /**

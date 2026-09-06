@@ -69,7 +69,7 @@ export class GrowthHTTPService {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const [dashboard, overview, funnel, pathFunnel, channels, daily, signupAudit] =
+    const [dashboard, overview, funnel, pathFunnel, channels, daily, signupAudit, aiUsage] =
       await Promise.all([
         this.metricsService.overview(excludeUsers).catch(() => null),
         this.growthService.overview(excludeUsers).catch(() => null),
@@ -78,6 +78,7 @@ export class GrowthHTTPService {
         this.growthService.channels(days, excludeUsers).catch(() => null),
         this.growthService.daily(days, excludeUsers).catch(() => null),
         this.growthService.signupAudit(days, excludeUsers).catch(() => null),
+        this.growthService.aiUsage(days, excludeUsers).catch(() => null),
       ]);
     return {
       success: true,
@@ -92,6 +93,7 @@ export class GrowthHTTPService {
         channels,
         daily,
         signupAudit,
+        aiUsage,
       },
     };
   }
