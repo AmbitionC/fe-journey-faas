@@ -60,9 +60,16 @@ export class MetricsHTTPService {
   @NoAuth()
   async track(@Body(ALL) body: TrackDTO) {
     if (!body?.event) return { success: true, data: {} };
-    const userId = (await this.resolveUserId()) || body.userId;
     const ip =
       this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() || this.ctx.ip || '';
+    // 游客要落 `guest:<ip>`——event_log.userId 的列注释从建表起就写着
+    // 「手机号 或 guest:ip」，复盘手册 §3.1 的 UV 口径也照此写，但在
+    // 2026-09-06 之前**没有任何地方真的写过 guest 形态**：前端 getUserId()
+    // 未登录时返回 ''，后端又原样存下，于是 UV = COUNT(DISTINCT userId) 把
+    // 所有游客并成了一个桶。ai.ts 的 resolveUser 一直是对的（guest:${ip}），
+    // 这里对齐它。
+    const userId =
+      (await this.resolveUserId()) || body.userId || (ip ? `guest:${ip}` : undefined);
     const ua = this.ctx.get('user-agent') || '';
     await this.metricsService.track({
       userId,

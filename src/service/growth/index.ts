@@ -211,6 +211,26 @@ export class GrowthService {
       /* ignore */
     }
 
+    // uvByIp：按去重 IP 数的访问量。**在 2026-09-06 之前，这才是唯一可信的流量读数。**
+    // 上面的 uv 数的是去重 userId，而在那天之前游客的 userId 一直落空串——
+    // 所有未登录访客被并进同一个桶，UV 实际上只数了登录用户。ip 列从建表起就
+    // 一直有值，因此这个口径**对全部历史都成立**，可以直接回看被低估了多少。
+    // 修好之后两者会趋同（游客改落 guest:<ip>），但历史段仍以本列为准。
+    let uvByIp = 0;
+    try {
+      const qb = this.eventLogModel
+        .createQueryBuilder('e')
+        .select('COUNT(DISTINCT e.ip)', 'uv')
+        .where("e.event = 'page_view'")
+        .andWhere('e.createTime >= :since', { since })
+        .andWhere("e.ip IS NOT NULL AND e.ip <> ''");
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const row = await qb.getRawOne();
+      uvByIp = Number(row?.uv || 0);
+    } catch {
+      /* ignore */
+    }
+
     let signups = 0;
     try {
       const qb = this.userModel
@@ -242,8 +262,8 @@ export class GrowthService {
     return {
       days,
       stages: [
-        { key: 'visit', label: '访问 UV', count: uv },
-        { key: 'signup', label: '注册', count: signups, rateFromPrev: rate(signups, uv) },
+        { key: 'visit', label: '访问 UV', count: uv, countByIp: uvByIp },
+        { key: 'signup', label: '注册', count: signups, rateFromPrev: rate(signups, uvByIp || uv) },
         {
           key: 'icebreaker',
           label: '破冰付费(PDF/书)',
