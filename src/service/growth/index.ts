@@ -242,6 +242,35 @@ export class GrowthService {
       /* ignore */
     }
 
+    // 访问质量：把「151 个 IP」拆成机器人 / 一次性 / 真在翻页三类。
+    // uvByIp 一出来就必须配这个——不然只是把一个不可信的数换成另一个：
+    // 爬虫会打 page_view（前端路由上报，Googlebot 一类会跑 JS），而
+    // 「有流量但零转化」和「根本没流量」是两个完全不同的问题，不能混着答。
+    // UA 只做模式匹配、不落任何原文；IP 只出计数。
+    const visitQuality = { ips: uvByIp, botIps: 0, singlePageIps: 0, multiPageIps: 0 };
+    try {
+      const qb = this.eventLogModel
+        .createQueryBuilder('e')
+        .select('e.ip', 'ip')
+        .addSelect('COUNT(*)', 'hits')
+        .addSelect(
+          "MAX(CASE WHEN LOWER(COALESCE(e.ua, '')) REGEXP 'bot|spider|crawl|slurp|headless|python-requests|curl/|wget|scrapy|http-client' THEN 1 ELSE 0 END)",
+          'bot'
+        )
+        .where("e.event = 'page_view'")
+        .andWhere('e.createTime >= :since', { since })
+        .andWhere("e.ip IS NOT NULL AND e.ip <> ''")
+        .groupBy('e.ip');
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      for (const r of await qb.getRawMany()) {
+        if (Number(r.bot) === 1) visitQuality.botIps += 1;
+        else if (Number(r.hits) <= 1) visitQuality.singlePageIps += 1;
+        else visitQuality.multiPageIps += 1;
+      }
+    } catch {
+      /* ignore */
+    }
+
     const byType = await this.paidOrders(since, undefined, exclude);
     const icebreaker =
       (byType.pdf?.count || 0) + (byType.book?.count || 0);
@@ -261,6 +290,9 @@ export class GrowthService {
 
     return {
       days,
+      // 三类之和 = countByIp。multiPageIps 是「翻过不止一页的非爬虫 IP」，
+      // 最接近「真人访客」；singlePageIps 里混着一次性访问与不带 bot 特征的抓取。
+      visitQuality,
       stages: [
         { key: 'visit', label: '访问 UV', count: uv, countByIp: uvByIp },
         { key: 'signup', label: '注册', count: signups, rateFromPrev: rate(signups, uvByIp || uv) },
