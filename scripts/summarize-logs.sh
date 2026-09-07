@@ -34,6 +34,16 @@ echo "===== HTTP 状态码计数 ====="
 printf '%s\n' "$IN" | grep -oE '\b(status|statusCode|code)[=: ]+[1-5][0-9]{2}\b' \
   | grep -oE '[1-5][0-9]{2}$' | sort | uniq -c | sort -rn || echo "(无)"
 
-echo "===== 异常类名 Top10（仅类名，不含消息体）====="
+echo "===== 异常类名计数（固定枚举；枚举外一律记 Other，不回显原文）====="
+# 2026-09-07 增量审查 P2-10：旧实现 grep -oE '\b[A-Za-z]+(Error|Exception)\b' 从任意原文提取，
+# token / 用户名字段里恰好以 Error/Exception 结尾的字符串会原样进公开日志。现在：只有下面
+# 白名单里的标准异常名可以被打印，其余匹配项只累计到 Other——输出集合是有限枚举，不含自由文本。
+KNOWN='TypeError ReferenceError RangeError SyntaxError EvalError URIError AggregateError Error
+TimeoutError AbortError FetchError AxiosError ValidationError SequelizeError MongoError
+UnhandledPromiseRejection MidwayError HttpError NotFoundError ForbiddenError UnauthorizedError
+ECONNRESETError JsonWebTokenError TokenExpiredError SqlError QueryError'
 printf '%s\n' "$IN" | grep -oE '\b[A-Za-z]+(Error|Exception)\b' \
-  | sort | uniq -c | sort -rn | head -10 || echo "(无)"
+  | awk -v known="$KNOWN" 'BEGIN{n=split(known,a,/[ \n]+/); for(i=1;i<=n;i++) if(a[i]!="") ok[a[i]]=1}
+         { if($1 in ok) c[$1]++; else c["Other"]++ }
+         END{ for(k in c) printf "%8d  %s\n", c[k], k }' \
+  | sort -rn | head -12 || echo "(无)"
