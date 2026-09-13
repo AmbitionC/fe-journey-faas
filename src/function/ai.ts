@@ -21,7 +21,11 @@ import { isEntitled } from '../common/entitlement';
 import { EntitlementService } from '../service/entitlement';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
-import { isMembershipFree, MembershipConfig } from '../common/membership';
+import {
+  isMembershipFree,
+  hasValidMemberColumn,
+  MembershipConfig,
+} from '../common/membership';
 
 class AIChatDTO {
   messages: ChatMessage[];
@@ -134,8 +138,9 @@ export class AiHTTPService {
     }
     try {
       const user = await this.userModel.findOneBy({ phoneNumber: userId });
-      if (!user?.isMember || !user?.memberDate) return false;
-      return new Date(user.memberDate) > new Date();
+      // 与 user.getUserById 共用同一个判定（common/membership），避免两处各写各的——
+      // 2026-09-13 之前这里带日期、那边不带，同一个过期用户两套答案。
+      return hasValidMemberColumn(user?.isMember, user?.memberDate);
     } catch {
       return false;
     }

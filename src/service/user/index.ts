@@ -12,7 +12,11 @@ import { R } from '../../common/base.error.utils';
 import { AiProxyService } from '../ai/proxy';
 import { EntitlementService, TRIAL_DAYS } from '../entitlement';
 import { OrderService } from '../order';
-import { isMembershipFree, MembershipConfig } from '../../common/membership';
+import {
+  isMembershipFree,
+  hasValidMemberColumn,
+  MembershipConfig,
+} from '../../common/membership';
 
 @Provide()
 export class UserService {
@@ -88,16 +92,21 @@ export class UserService {
     if (userInfo) {
       // 限时免费：所有人按会员对待，并下发远期到期日，让前端各处会员判定自动通过
       const freeForAll = !!isMembershipFree(this.membershipConfig);
-      const isMember = freeForAll || !!userInfo.isMember;
+      // 会员判定必须带上到期日。旧写法是 `freeForAll || !!userInfo.isMember`，
+      // 而 isMember 列到期后不会被改回 false ⟹ 试用过期的用户照样拿到
+      // isMember=true、会员额度和整套会员 UI；可 ai.ts 的限流是带日期判断的，
+      // 于是界面说你是会员、接口按非会员拒。两处口径现已统一到 hasValidMemberColumn。
+      const isMember =
+        freeForAll || hasValidMemberColumn(userInfo.isMember, userInfo.memberDate);
       const quota = await this.aiProxyService.getQuota(userId, isMember);
       const vo = userInfo.toVO();
       return {
         success: true,
         data: {
           ...vo,
-          ...(freeForAll
-            ? { isMember: true, memberDate: '2099-12-31 23:59:59' }
-            : {}),
+          // 回写计算后的会员态，别让前端读到库里那个只增不减的裸标记
+          isMember,
+          ...(freeForAll ? { memberDate: '2099-12-31 23:59:59' } : {}),
           aiQuota: quota,
         },
       };
