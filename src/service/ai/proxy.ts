@@ -175,7 +175,13 @@ export class AiProxyService {
       await this.redisService.expire(key, this.aiConfig.rateLimit.freeWindowSeconds);
     }
     if (current > limit) {
-      throw R.forbiddenError(`RATE_LIMIT:今日 AI 问答次数已用完（每天 ${limit} 次），开通会员享无限使用`);
+      // 游客的下一步是注册（免费、一步到位、送 14 天不限次），不是掏钱。
+      // 对还没有账号的人喊「开通会员」，是在他最弱的时刻要最大的承诺。
+      // 前端 Composer 按登录态渲染对应 CTA，这里的文案与之保持一致（非流式/其他客户端可见）。
+      const next = String(userId).startsWith('guest:')
+        ? '注册即可享 14 天不限次'
+        : '开通会员享无限使用';
+      throw R.forbiddenError(`RATE_LIMIT:今日 AI 问答次数已用完（每天 ${limit} 次），${next}`);
     }
   }
 
