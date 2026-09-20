@@ -69,8 +69,17 @@ export class GrowthHTTPService {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const [dashboard, overview, funnel, pathFunnel, channels, daily, signupAudit, aiUsage] =
-      await Promise.all([
+    const [
+      dashboard,
+      overview,
+      funnel,
+      pathFunnel,
+      channels,
+      daily,
+      signupAudit,
+      aiUsage,
+      events,
+    ] = await Promise.all([
         this.metricsService.overview(excludeUsers).catch(() => null),
         this.growthService.overview(excludeUsers).catch(() => null),
         this.growthService.funnel(days, excludeUsers).catch(() => null),
@@ -79,6 +88,11 @@ export class GrowthHTTPService {
         this.growthService.daily(days, excludeUsers).catch(() => null),
         this.growthService.signupAudit(days, excludeUsers).catch(() => null),
         this.growthService.aiUsage(days, excludeUsers).catch(() => null),
+        // 全量事件计数（非白名单）。channels 只统计 CONVERSION_EVENTS 里的那几个，
+        // 2026-09-20 复盘就卡在这上面：上周立的判据是「iris_quota_cta_click ≥ 1」，
+        // 而这个新埋点不在白名单里，导出里根本看不到它，自己定的判据自己验不了。
+        // 事件名与计数不含任何个人信息，直接全出。
+        this.metricsService.events(days, excludeUsers).catch(() => null),
       ]);
     return {
       success: true,
@@ -94,6 +108,7 @@ export class GrowthHTTPService {
         daily,
         signupAudit,
         aiUsage,
+        events,
       },
     };
   }

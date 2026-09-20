@@ -170,19 +170,26 @@ export class MetricsService {
   }
 
   /** 近 N 天事件计数 Top（PRD-04 F1-1）。 */
-  async events(days = 7) {
+  async events(days = 7, exclude?: string[]) {
     const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
     try {
-      const rows = await this.eventLogModel
+      const qb = this.eventLogModel
         .createQueryBuilder('e')
         .select('e.event', 'event')
         .addSelect('COUNT(*)', 'count')
+        .addSelect('COUNT(DISTINCT e.userId)', 'users')
         .where('e.createTime >= :since', { since })
         .groupBy('e.event')
         .orderBy('count', 'DESC')
-        .limit(30)
-        .getRawMany();
-      return rows.map((r) => ({ event: r.event, count: Number(r.count) }));
+        .limit(50);
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const rows = await qb.getRawMany();
+      return rows.map((r) => ({
+        event: r.event,
+        count: Number(r.count),
+        users: Number(r.users || 0),
+      }));
     } catch {
       return [];
     }
