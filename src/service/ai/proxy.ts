@@ -165,11 +165,19 @@ export class AiProxyService {
     }
   }
 
-  async checkRateLimit(userId: string, isMember: boolean): Promise<void> {
+  /**
+   * 免费用户的每日调用闸。
+   *
+   * @param bucket 配额桶。缺省＝用户自己提的问题；传 'aux' 走独立桶——
+   *   「猜你想问」这类由界面自动发起的辅助调用**不是用户的提问**，不该占用户的额度
+   *   （2026-09-20 复盘：访客开几篇文章，配额就被我们自己的自动调用吃掉了），
+   *   但它照样烧钱，所以给同等上限而不是放行。
+   */
+  async checkRateLimit(userId: string, isMember: boolean, bucket?: 'aux'): Promise<void> {
     if (isMembershipFree(this.membershipConfig)) return; // 限免期：全员不限流
     if (isMember) return; // members have no limit
     const limit = this.aiConfig.rateLimit.freeUserPerDay;
-    const key = `ai:rate:day:${userId}`;
+    const key = bucket ? `ai:rate:day:${bucket}:${userId}` : `ai:rate:day:${userId}`;
     const current = await this.redisService.incr(key);
     if (current === 1) {
       await this.redisService.expire(key, this.aiConfig.rateLimit.freeWindowSeconds);

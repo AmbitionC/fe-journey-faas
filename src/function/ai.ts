@@ -27,6 +27,13 @@ import {
   MembershipConfig,
 } from '../common/membership';
 
+/**
+ * 被服务端承认的「辅助调用」用途。这类调用由界面自动发起，不是用户提问：
+ * 计量上单独归到 module `aux:<purpose>`，限流上走独立桶。
+ * 新增用途时同步改前端发送方与本集合，否则会被当成用户提问计入。
+ */
+const AUX_PURPOSES = new Set(['suggest']);
+
 class AIChatDTO {
   messages: ChatMessage[];
   context: ChatContext;
@@ -35,6 +42,15 @@ class AIChatDTO {
   deepThink?: boolean;
   /** 结构化任务（算法提示/点评）：存在时提示词由服务端拼装 */
   task?: AiTask;
+  /**
+   * 辅助调用标记。前端「猜你想问」一直在发 purpose:'suggest'，而服务端从未读过它
+   * （注释里写着「当前后端忽略未知字段」）。后果见 2026-09-20 复盘：
+   * ① 这些**自动**调用与用户真问的问题在 ai_usage_log 里长得一模一样——近 30 天
+   *    232 次 AI 调用，而 iris_ask 埋点只有 4 次。我连着两周把「访客几乎都在用 Iris」
+   *    当成用户行为信号，其实大半是打开文章时我们自己替他问的；
+   * ② 它们还吃用户自己的提问额度——访客开几篇文章，配额就被我们的自动调用用掉了。
+   */
+  purpose?: string;
 }
 
 class AIHintDTO {
@@ -351,8 +367,16 @@ export class AiHTTPService {
     const res = this.ctx.res;
 
     try {
-      // 限流放在流内：超限时以 SSE error 帧返回，前端可识别 RATE_LIMIT
-      await this.aiProxyService.checkRateLimit(userId, isMember);
+      // 限流放在流内：超限时以 SSE error 帧返回，前端可识别 RATE_LIMIT。
+      // 辅助调用（猜你想问等）走独立配额桶：它不是用户提的问题，不该占用户的额度，
+      // 但仍然烧钱，所以照样有上限。
+      const aux = AUX_PURPOSES.has(String(body.purpose || ''));
+      await this.aiProxyService.checkRateLimit(userId, isMember, aux ? 'aux' : undefined);
+      // 计量上也要分得开：module 改成 aux:<purpose>，这样 /growth/export 的
+      // aiUsage.byModule 一眼看得出「多少 token 是用户在问、多少是界面自动问的」。
+      if (aux) {
+        body.context = { ...(body.context || {}), module: `aux:${body.purpose}` };
+      }
 
       // 教练地基：灰度开启且为普通问答（非结构化任务）且模型支持 tools 时，走 agentic 工具循环。
       // 关闭时逐字节等同现有链路（零线上影响）。
