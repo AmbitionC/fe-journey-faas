@@ -21,18 +21,12 @@ import { isEntitled } from '../common/entitlement';
 import { EntitlementService } from '../service/entitlement';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
+import { auxModuleFor, auxBucketFor } from '../common/aiPurpose';
 import {
   isMembershipFree,
   hasValidMemberColumn,
   MembershipConfig,
 } from '../common/membership';
-
-/**
- * 被服务端承认的「辅助调用」用途。这类调用由界面自动发起，不是用户提问：
- * 计量上单独归到 module `aux:<purpose>`，限流上走独立桶。
- * 新增用途时同步改前端发送方与本集合，否则会被当成用户提问计入。
- */
-const AUX_PURPOSES = new Set(['suggest']);
 
 class AIChatDTO {
   messages: ChatMessage[];
@@ -370,12 +364,12 @@ export class AiHTTPService {
       // 限流放在流内：超限时以 SSE error 帧返回，前端可识别 RATE_LIMIT。
       // 辅助调用（猜你想问等）走独立配额桶：它不是用户提的问题，不该占用户的额度，
       // 但仍然烧钱，所以照样有上限。
-      const aux = AUX_PURPOSES.has(String(body.purpose || ''));
-      await this.aiProxyService.checkRateLimit(userId, isMember, aux ? 'aux' : undefined);
-      // 计量上也要分得开：module 改成 aux:<purpose>，这样 /growth/export 的
-      // aiUsage.byModule 一眼看得出「多少 token 是用户在问、多少是界面自动问的」。
-      if (aux) {
-        body.context = { ...(body.context || {}), module: `aux:${body.purpose}` };
+      // 判定收在 common/aiPurpose，与 server.js 的 handleStream 共用同一份
+      // （线上这条路由实际走 server.js，见该文件顶部注释）。
+      await this.aiProxyService.checkRateLimit(userId, isMember, auxBucketFor(body.purpose));
+      const auxModule = auxModuleFor(body.purpose);
+      if (auxModule) {
+        body.context = { ...(body.context || {}), module: auxModule };
       }
 
       // 教练地基：灰度开启且为普通问答（非结构化任务）且模型支持 tools 时，走 agentic 工具循环。

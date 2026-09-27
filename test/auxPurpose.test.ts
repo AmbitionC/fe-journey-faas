@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { AiProxyService } from '../src/service/ai/proxy';
+import { isAuxPurpose, auxModuleFor, auxBucketFor } from '../src/common/aiPurpose';
 
 /**
  * 辅助调用（猜你想问）与用户提问的分离（2026-09-20）。
@@ -80,14 +81,57 @@ describe('辅助调用配额桶', () => {
   });
 });
 
-describe('辅助调用的计量标签', () => {
-  const src = readFileSync(join(__dirname, '..', 'src', 'function', 'ai.ts'), 'utf8');
-
-  it('服务端确实读取了 purpose（前端发了两个月一直没人读）', () => {
-    assert.ok(/AUX_PURPOSES\.has\(String\(body\.purpose/.test(src), '未读取 body.purpose');
+describe('辅助调用判定（共享模块）', () => {
+  it('只认白名单内的用途', () => {
+    assert.strictEqual(isAuxPurpose('suggest'), true);
+    for (const bad of ['', 'chat', 'SUGGEST', ' suggest', undefined, null, 0, {}]) {
+      assert.strictEqual(isAuxPurpose(bad as any), false, `${JSON.stringify(bad)} 不该算辅助调用`);
+    }
   });
 
-  it('辅助调用改写 module 为 aux:<purpose>，使 byModule 可分离成本', () => {
-    assert.ok(/module: `aux:\$\{body\.purpose\}`/.test(src), 'module 未改写为 aux:<purpose>');
+  it('module 与桶名成对出现', () => {
+    assert.strictEqual(auxModuleFor('suggest'), 'aux:suggest');
+    assert.strictEqual(auxBucketFor('suggest'), 'aux');
+    assert.strictEqual(auxModuleFor('chat'), undefined);
+    assert.strictEqual(auxBucketFor('chat'), undefined);
+  });
+});
+
+/**
+ * ⚠️ 这一组是本次事故的直接回归测试。
+ *
+ * `/api/ai/chat/stream` 有**两个**实现：src/function/ai.ts 的 Midway 处理器，
+ * 以及 server.js 里绕过框架直写 SSE 的 handleStream。**线上真正服务这条路由的是
+ * server.js**。2026-09-20 我只改了前者——六条测试全绿、CI 全绿、部署全绿，
+ * 线上却毫无变化；9/27 用一次带唯一标记的探针请求才发现（落的是 probe-0927 而非
+ * aux:suggest）。所以这里必须直接盯 server.js。
+ */
+describe('线上实际处理器（server.js）也必须认 purpose', () => {
+  const server = readFileSync(join(__dirname, '..', 'server.js'), 'utf8');
+
+  it('从共享模块引入判定，而不是自己再写一份', () => {
+    assert.ok(
+      /require\('\.\/dist\/common\/aiPurpose'\)/.test(server),
+      'server.js 未引用共享判定模块（两份实现必然漂移）'
+    );
+  });
+
+  it('限流传入 aux 桶', () => {
+    assert.ok(
+      /checkRateLimit\(userId, isMember, auxBucketFor\(body\.purpose\)\)/.test(server),
+      'server.js 的 checkRateLimit 未传 aux 桶'
+    );
+  });
+
+  it('辅助调用改写 context.module 为 aux:<purpose>', () => {
+    assert.ok(/auxModuleFor\(body\.purpose\)/.test(server), '未取 auxModuleFor');
+    assert.ok(/context\.module = auxModule/.test(server), '未改写 context.module');
+  });
+
+  it('改写发生在 forwardStream 之前（否则计量拿到的还是旧 module）', () => {
+    const iAssign = server.indexOf('context.module = auxModule');
+    const iStream = server.indexOf('aiProxyService.forwardStream(messages, context');
+    assert.ok(iAssign > 0 && iStream > 0, '未找到关键调用');
+    assert.ok(iAssign < iStream, 'module 改写必须早于 forwardStream');
   });
 });

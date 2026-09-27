@@ -8,6 +8,8 @@
  */
 const http = require('http');
 const { join } = require('path');
+// 辅助调用判定（与 src/function/ai.ts 共用；编译产物在 dist/common）
+const { auxModuleFor, auxBucketFor } = require('./dist/common/aiPurpose');
 const { BootstrapStarter } = require('@midwayjs/fc-starter');
 const core = require('@midwayjs/core');
 
@@ -172,9 +174,17 @@ async function handleStream(req, res) {
     /* 检索失败不影响回答 */
   }
 
+  // 辅助调用（前端「猜你想问」发 purpose:'suggest'）：不是用户提的问题。
+  // ① 走独立限流桶，不吃用户自己的每日提问额度；
+  // ② 计量上归到 module `aux:<purpose>`，让复盘能分开「用户在问」与「界面自动问」。
+  // 判定与 src/function/ai.ts 共用 common/aiPurpose——**线上这条路由走的是本文件**，
+  // 2026-09-20 只改了那边，测试与部署全绿而线上零变化，就是因为改在了不服务流量的一份上。
+  const auxModule = auxModuleFor(body.purpose);
+  if (auxModule) context.module = auxModule;
+
   let full = '';
   try {
-    await aiProxyService.checkRateLimit(userId, isMember);
+    await aiProxyService.checkRateLimit(userId, isMember, auxBucketFor(body.purpose));
     const gen = task
       ? aiProxyService.forwardTaskStream(task, userId, deepThink)
       : aiProxyService.forwardStream(messages, context, userId, deepThink);
