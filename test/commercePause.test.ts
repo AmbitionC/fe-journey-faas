@@ -22,7 +22,7 @@ describe('9.9 PDF / 会员停售安全边界', () => {
     await assert.rejects(svc.confirm('old-order'));
     assert.deepStrictEqual(writes, []);
   });
-  it('用户自报付款不能落 paid 或交付，即使伪造金额和商品', async () => {
+  it('旧通用订单入口仍不能伪造 paid 或商品金额', async () => {
     const svc = new OrderService();
     const writes: any[] = [];
     svc.orderModel = { create: (x: any) => x, save: async (x: any) => writes.push(x) } as any;
@@ -81,18 +81,22 @@ describe('9.9 PDF / 会员停售安全边界', () => {
     const svc = new MaterialsHTTPService();
     svc.ctx = { userInfo: { userId: 'u2', role: 'user' } } as any;
     svc.entitlementService = { check: async () => ({ allowed: false }) } as any;
+    svc.orderService = { getPdfPurchase: async () => null } as any;
     svc.materialsService = { groupedListReady: async () => assert.fail('不得读取交付清单') } as any;
     await assert.rejects(svc.list());
   });
 
-  it('公开商品只有990分待确认信息，不承诺资料范围或泄漏交付链接', async () => {
-    const response = await new MaterialsHTTPService().product();
+  it('公开商品按当前实际清单展示，空清单不能付款，不泄漏下载链接', async () => {
+    const svc = new MaterialsHTTPService();
+    svc.materialsService = { groupedListReady: async () => [] } as any;
+    const response = await svc.product();
     assert.strictEqual(response.data.priceCents, 990);
     assert.strictEqual(response.data.purchaseType, 'one_time');
     assert.strictEqual(response.data.purchasingEnabled, false);
     assert.strictEqual(response.data.includesMembership, false);
-    assert.strictEqual(response.data.scopeConfirmed, false);
-    assert.strictEqual(response.data.scopeStatus, 'pending_confirmation');
+    assert.strictEqual(response.data.scopeConfirmed, true);
+    assert.strictEqual(response.data.scopeStatus, 'confirmed');
+    assert.strictEqual(response.data.bankVerified, false);
     assert.ok(!/2024|180\+|12 万字|前端面试/.test(JSON.stringify(response)));
     assert.ok(!/https?:\/\//.test(JSON.stringify(response)));
   });

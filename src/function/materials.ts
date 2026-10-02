@@ -14,7 +14,8 @@ import { MaterialsService } from '../service/materials';
 import { EntitlementService } from '../service/entitlement';
 import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
-import { PDF_PRODUCT_PREVIEW } from '../common/commerce';
+import { AGENT_PDF_PRODUCT } from '../common/commerce';
+import { OrderService } from '../service/order';
 
 /**
  * 知识点资料（按一级分类 PDF）下载。会员权益：会员校验通过后签发 24h 临时链接。
@@ -23,7 +24,7 @@ import { PDF_PRODUCT_PREVIEW } from '../common/commerce';
 @Provide()
 export class MaterialsHTTPService {
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '9.9元PDF单次购买准备状态（范围待确认）',
+    description: 'Agent PDF 单次购买商品和已生成清单',
     functionName: 'materialsProduct',
     name: 'materialsProduct',
     path: '/materials/product',
@@ -31,7 +32,9 @@ export class MaterialsHTTPService {
   })
   @NoAuth()
   async product(): Promise<any> {
-    return { success: true, data: PDF_PRODUCT_PREVIEW };
+    const groups = await this.materialsService.groupedListReady();
+    const purchasingEnabled = groups.some(g => g.items.length > 0);
+    return { success: true, data: { ...AGENT_PDF_PRODUCT, groups, purchasingEnabled } };
   }
 
   @Inject()
@@ -46,19 +49,55 @@ export class MaterialsHTTPService {
   @Inject()
   entitlementService: EntitlementService;
 
+  @Inject()
+  orderService: OrderService;
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '当前账号的资料领取资格',
+    functionName: 'materialsPurchase', name: 'materialsPurchase',
+    path: '/materials/purchase', method: 'get',
+  })
+  @NoAuth()
+  async purchaseStatus(): Promise<any> {
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    const userId = info?.userId || '';
+    const entitlement = await this.entitlementService.check(userId, 'materials_pdf', {});
+    if (entitlement.allowed) return { success: true, data: { canDownload: true, basis: 'existing_entitlement' } };
+    const order = userId ? await this.orderService.getPdfPurchase(userId) : null;
+    return { success: true, data: { canDownload: !!order, basis: order ? 'self_reported' : null, needsLogin: !userId, order } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '记录当前账号的资料支付声明（未核验到账）',
+    functionName: 'materialsPurchaseConfirm', name: 'materialsPurchaseConfirm',
+    path: '/materials/purchase/confirm', method: 'post',
+  })
+  @NoAuth()
+  async confirmPurchase(@Body(ALL) body: { channel?: string }): Promise<any> {
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    if (!info?.userId) throw R.unauthorizedError('请先登录后购买资料');
+    const entitlement = await this.entitlementService.check(info.userId, 'materials_pdf', {});
+    if (entitlement.allowed) return { success: true, data: { created: false, canDownload: true, basis: 'existing_entitlement' } };
+    const groups = await this.materialsService.groupedListReady();
+    if (!groups.some(g => g.items.length > 0)) throw R.error('资料尚未生成，暂不可购买');
+    const result = await this.orderService.reportPdfPurchase(info.userId, body?.channel);
+    return { success: true, data: { ...result, canDownload: true, basis: 'self_reported', bankVerified: false } };
+  }
+
   /** 会员权益校验（限免期 freeForAll 自动放行）；返回 userId（游客为空串） */
   private async gateMember(): Promise<string> {
     const info = await resolveUserInfo(this.ctx, this.redisService);
     const userId = info?.userId || '';
     const res = await this.entitlementService.check(userId, 'materials_pdf', {});
     if (!res.allowed) {
-      throw R.forbiddenError(res.reason || 'ENTITLEMENT:materials_pdf:member_only');
+      const order = userId ? await this.orderService.getPdfPurchase(userId) : null;
+      if (!order) throw R.forbiddenError('请先购买资料；已有会员权益继续有效');
     }
     return userId;
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '资料 PDF 分类清单（会员）',
+    description: '资料 PDF 分类清单（已有权益或单次领取）',
     functionName: 'materialsList',
     name: 'materialsList',
     path: '/materials/list',
@@ -72,7 +111,7 @@ export class MaterialsHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '取某分类资料的 24h 下载签名链接（会员）',
+    description: '取某分类资料的 24h 下载签名链接',
     functionName: 'materialsDownload',
     name: 'materialsDownload',
     path: '/materials/download',

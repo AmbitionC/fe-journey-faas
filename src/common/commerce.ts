@@ -1,16 +1,14 @@
-/** 商品范围尚未获用户选定；仅发布不可购买的准备状态。
- * 不沿用历史公开网盘交付，不将当前会员资料默认并入9.9商品。
- * 真实收款核验和私有交付未接通前禁止开售。
- */
-export const PDF_PRODUCT_PREVIEW = Object.freeze({
-  sku: 'pdf-one-time-preview',
-  name: '学习资料（PDF）',
+/** 用户已选定当前 Agent 求职 PDF；支付声明不代表到账核验。 */
+export const AGENT_PDF_PRODUCT = Object.freeze({
+  sku: 'agent-career-pdf-v1',
+  name: 'Agent 求职资料（PDF）',
   priceCents: 990,
   purchaseType: 'one_time',
-  scopeStatus: 'pending_confirmation',
-  scopeConfirmed: false,
-  scope: '资料范围待确认，最终资料范围与交付清单会在开售前公布。',
+  scopeStatus: 'confirmed',
+  scopeConfirmed: true,
+  scope: '当前已生成的 Agent 求职知识点 PDF，具体主题与文件见下方清单。',
   includesMembership: false,
-  purchasingEnabled: false,
-  message: '资料范围与交付方式确认后开放购买，请暂勿转账。',
+  paymentBasis: 'user_self_reported',
+  bankVerified: false,
+  message: '使用微信个人收款码转账 ¥9.9 后，点击「我已支付」开放当前清单的下载。本站记录你的支付声明，未核验到账。',
 });
