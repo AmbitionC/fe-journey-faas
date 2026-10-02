@@ -283,6 +283,8 @@ jobs:
 
   # ── invest-model 定时函数（盯盘/复盘等，独立 job：与 fe-journey 部署互不阻塞）──
   deploy-invest-scheduler:
+    # 知识站专用发布不重部署投资定时函数；普通发布/手动运行保持原行为。
+    if: ${{ !contains(github.event.head_commit.message, '[journey-only]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

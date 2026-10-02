@@ -14,6 +14,7 @@ import { MaterialsService } from '../service/materials';
 import { EntitlementService } from '../service/entitlement';
 import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
+import { PDF_PRODUCT_PREVIEW } from '../common/commerce';
 
 /**
  * 知识点资料（按一级分类 PDF）下载。会员权益：会员校验通过后签发 24h 临时链接。
@@ -21,6 +22,18 @@ import { R } from '../common/base.error.utils';
  */
 @Provide()
 export class MaterialsHTTPService {
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '9.9元PDF单次购买准备状态（范围待确认）',
+    functionName: 'materialsProduct',
+    name: 'materialsProduct',
+    path: '/materials/product',
+    method: 'get',
+  })
+  @NoAuth()
+  async product(): Promise<any> {
+    return { success: true, data: PDF_PRODUCT_PREVIEW };
+  }
+
   @Inject()
   ctx: Context;
 

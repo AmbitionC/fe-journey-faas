@@ -2,6 +2,7 @@ import { Provide } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { BookOrderEntity } from '../../entity/bookOrder';
+import { R } from '../../common/base.error.utils';
 
 function generateOrderNo(): string {
   const now = new Date();
@@ -29,7 +30,11 @@ export class BookOrderService {
     channel?: string;
   }): Promise<any> {
     const entity = this.bookOrderModel.create({
-      ...data,
+      userId: data.userId,
+      bookId: data.bookId,
+      bookTitle: data.bookTitle,
+      versionType: data.versionType,
+      amount: data.amount,
       channel: data.channel ? String(data.channel).slice(0, 64) : undefined,
       orderNo: generateOrderNo(),
       status: 'pending',
@@ -38,19 +43,8 @@ export class BookOrderService {
     return { success: true, data: saved };
   }
 
-  async confirm(orderNo: string): Promise<any> {
-    const order = await this.bookOrderModel.findOne({ where: { orderNo } });
-    if (!order) {
-      return { success: false, message: '订单不存在' };
-    }
-    if (order.status === 'paid') {
-      return { success: true, message: '订单已支付', data: order };
-    }
-    await this.bookOrderModel.update(order.id, {
-      status: 'paid',
-      payTime: new Date(),
-    });
-    return { success: true, message: '支付确认成功' };
+  async confirm(_orderNo: string): Promise<any> {
+    throw R.forbiddenError('自报付款确认已停用，请联系站长核实历史收款');
   }
 
   async getOrders(userId: string): Promise<any> {

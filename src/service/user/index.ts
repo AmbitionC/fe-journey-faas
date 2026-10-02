@@ -10,8 +10,7 @@ import { UserDTO } from '../../dto/user';
 import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
 import { AiProxyService } from '../ai/proxy';
-import { EntitlementService, TRIAL_DAYS } from '../entitlement';
-import { OrderService } from '../order';
+import { EntitlementService } from '../entitlement';
 import {
   isMembershipFree,
   hasValidMemberColumn,
@@ -38,9 +37,6 @@ export class UserService {
   @Inject()
   entitlementService: EntitlementService;
 
-  @Inject()
-  orderService: OrderService;
-
   // 创建用户
   async createUser(user: UserDTO): Promise<any> {
     const entity = user.toEntity();
@@ -53,22 +49,11 @@ export class UserService {
     entity.password = password;
     entity.avatar = 'default';
     entity.inviteCode = uuid().slice(0, 8);
-    // 注册即送 14 天全功能会员——服务端权威发放。三条约束缺一不可：
-    // 1) isMember / memberDate 两列 NOT NULL 且无默认值，必须显式赋值，否则 save 被
-    //    库拒（"Field 'isMember' doesn't have a default value"，2026-08-10 踩过）；
-    // 2) 但不能赋 false/''：ai.ts、quiz.ts、metrics「会员数」与前端所有会员 UI 仍直接
-    //    读这两列（entitlement 受 ENTITLEMENT_ENABLED 灰度，尚未成为唯一判定）。赋假值
-    //    会让全站在售的「注册即送 14 天」变成空头承诺——2026-08-10~08-23 线上即如此，
-    //    期间注册用户实际只拿到免费额度（08-23 复盘发现：users 50 / members 45）；
-    // 3) 不采信前端传入的 isMember/memberDate：客户端可改参数白嫖长期会员。
-    const trialExpireAt = new Date(Date.now() + TRIAL_DAYS * 86400000);
-    entity.isMember = true;
-    entity.memberDate = trialExpireAt.toISOString().slice(0, 19).replace('T', ' ');
+    // 新会员权益暂停发放；仅初始化新用户，不改已有用户的会员列或权益记录。
+    // 两列 NOT NULL，显式赋值；客户端传来的会员标记始终不可信。
+    entity.isMember = false;
+    entity.memberDate = '1970-01-01 00:00:00';
     await this.userModel.save(entity);
-
-    // PRD-07：注册即发放 14 天全功能试用（服务端权威，每手机号一次；幂等）。
-    // 权益记录只在 ENTITLEMENT_ENABLED 开启后被消费，与上面的 isMember 列双写。
-    await this.entitlementService.grantTrial(phoneNumber);
 
     const { expire } = this.tokenConfig;
     const token = uuid();
@@ -129,40 +114,10 @@ export class UserService {
   }
 
   async activateMembership(
-    userId: string,
-    plan: 'monthly' | 'yearly',
-    channel?: string
+    _userId: string,
+    _plan: 'monthly' | 'yearly',
+    _channel?: string
   ): Promise<any> {
-    const user = await this.userModel.findOneBy({ phoneNumber: userId });
-    if (!user) throw R.error('用户不存在');
-
-    // If already a member with future date, extend from that date; otherwise start from now
-    const baseDate = (user.isMember && user.memberDate && new Date(user.memberDate) > new Date())
-      ? new Date(user.memberDate)
-      : new Date();
-
-    const days = plan === 'yearly' ? 365 : 30;
-    const newExpiry = new Date(baseDate);
-    newExpiry.setDate(newExpiry.getDate() + days);
-
-    user.isMember = true;
-    user.memberDate = newExpiry.toISOString().slice(0, 19).replace('T', ' ');
-    await this.userModel.save(user);
-
-    // PRD-07：同步写入权益记录，让新权益网关与存量 isMember 标记一致（过渡期双写）。
-    await this.entitlementService.grantFromOrder(userId, plan).catch(() => {});
-
-    // 订单落库：会员账单页与增长漏斗此前无数据源（order 表从未被写入）
-    await this.orderService
-      .create({
-        userId,
-        type: 'member',
-        name: plan === 'yearly' ? '年付会员 · Iris Pro' : '月付会员 · Iris Pro',
-        amount: plan === 'yearly' ? 199 : 29,
-        channel,
-      })
-      .catch(() => {});
-
-    return { success: true, data: user.toVO() };
+    throw R.forbiddenError('会员售卖已暂停，已有权益继续有效');
   }
 }

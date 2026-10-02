@@ -10,6 +10,7 @@ import {
 import { Context } from '@midwayjs/faas';
 import { VisitService } from '../service/visit';
 import { OrderService } from '../service/order';
+import { R } from '../common/base.error.utils';
 
 @Provide()
 export class ProfileHTTPService {
@@ -68,7 +69,7 @@ export class ProfileHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '订单落库（自证支付完成后记录，供账单页与增长漏斗）',
+    description: '旧自报付款接口（停用，不开通权益或交付）',
     functionName: 'recordOrder',
     name: 'recordOrder',
     path: '/order/record',
@@ -84,15 +85,14 @@ export class ProfileHTTPService {
       channel?: string;
     }
   ): Promise<any> {
-    const userId = this.ctx.userInfo?.userId || body?.userId;
-    // 未登录不落单（PDF 购买不强制登录），静默成功不阻断交付
-    if (!userId) return { success: true, data: null };
+    const userId = this.ctx.userInfo?.userId;
+    if (!userId) throw R.unauthorizedError('请先登录');
     const type = body?.type === 'member' ? 'member' : 'pdf';
     await this.orderService.create({
       userId,
       type,
-      name: String(body?.name || '学习资料（PDF）').slice(0, 100),
-      amount: Number(body?.amount) || 9.9,
+      name: '学习资料（PDF，待确认）',
+      amount: 9.9,
       channel: body?.channel,
     });
     return { success: true, data: {} };

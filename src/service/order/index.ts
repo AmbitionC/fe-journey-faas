@@ -1,4 +1,4 @@
-import { Provide } from '@midwayjs/core';
+import { Provide, httpError } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { OrderEntity } from '../../entity/order';
@@ -8,10 +8,7 @@ export class OrderService {
   @InjectEntityModel(OrderEntity)
   orderModel: Repository<OrderEntity>;
 
-  /**
-   * 订单落库（账单页与增长漏斗的数据源）。
-   * 支付本身是「收款码 + 手动确认」无网关，因此 status 直接记 paid，语义是"用户自证已付"。
-   */
+  /** 旧客户端的自报付款入口已停用。收款核验接入前禁止创建支付成功记录。 */
   async create(p: {
     userId: string;
     type: 'member' | 'pdf';
@@ -19,19 +16,8 @@ export class OrderService {
     amount: number;
     channel?: string;
   }): Promise<void> {
-    const orderNo = `FJ${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
-    await this.orderModel.save(
-      this.orderModel.create({
-        userId: p.userId,
-        orderNo,
-        type: p.type,
-        name: p.name,
-        amount: p.amount,
-        payTime: new Date(),
-        status: 'paid',
-        channel: p.channel ? String(p.channel).slice(0, 64) : null,
-      })
-    );
+    if (p.type === 'member') throw new httpError.ForbiddenError('会员售卖已暂停，已有权益继续有效');
+    throw new httpError.ServiceUnavailableError('资料购买暂未开放：尚未接入真实收款核验');
   }
 
   async getMemberOrders(userId: string): Promise<any> {
