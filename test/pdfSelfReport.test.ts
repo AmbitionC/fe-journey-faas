@@ -29,7 +29,7 @@ function controller(userId = 'u1') {
   const c = new MaterialsHTTPService();
   c.ctx = { userInfo: userId ? { userId, role: 'user' } : undefined } as any;
   c.entitlementService = { check: async () => ({ allowed: false }) } as any;
-  c.materialsService = { groupedListReady: async () => groups, isReady: async (key: string) => key === 'agent-basics', downloadUrl: async (key: string) => `https://fixture.invalid/${key}.pdf` } as any;
+  c.materialsService = { groupedListReady: async () => groups, legacyGift: async () => null, isReady: async (key: string) => key === 'agent-basics', downloadUrl: async (key: string) => `https://fixture.invalid/${key}.pdf` } as any;
   return c;
 }
 describe('Agent PDF 自报支付：范围、身份与幂等', () => {

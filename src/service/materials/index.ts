@@ -3,6 +3,7 @@ import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { OssService } from '../content/oss';
 import { NavConfigEntity } from '../../entity/navConfig';
+import { LEGACY_PDF_GIFT, LEGACY_PDF_KEY, LEGACY_PDF_METADATA_KEY, LEGACY_PDF_SHA256, LEGACY_PDF_SIZE, assertLegacyPdf } from '../../common/legacyPdfGift';
 
 /** OSS 上资料 PDF 的存放前缀与清单 key */
 const PREFIX = 'materials/knowledge/';
@@ -65,6 +66,22 @@ export class MaterialsService {
     return `${PREFIX}${itemKey}.pdf`;
   }
 
+  /** 独立元数据避免被资源仓库每次重建的 Agent manifest 覆盖。 */
+  async legacyGift(): Promise<(MaterialItem & typeof LEGACY_PDF_GIFT) | null> {
+    try {
+      const raw = await this.ossService.getRawText(LEGACY_PDF_METADATA_KEY);
+      if (!raw) return null;
+      const metadata = JSON.parse(raw);
+      if (metadata.key !== LEGACY_PDF_KEY || metadata.sha256 !== LEGACY_PDF_SHA256 ||
+          metadata.sizeBytes !== LEGACY_PDF_SIZE || !metadata.updatedAt ||
+          !Number.isFinite(Date.parse(metadata.updatedAt))) return null;
+      if (!(await this.ossService.rawMeta(this.pdfKey(LEGACY_PDF_KEY)))) return null;
+      return { ...LEGACY_PDF_GIFT, updatedAt: metadata.updatedAt, sizeBytes: LEGACY_PDF_SIZE, articleCount: 0, ready: true };
+    } catch {
+      return null;
+    }
+  }
+
   /** 读取 manifest（不存在 / 解析失败 → 空） */
   private async readManifest(): Promise<Manifest> {
     const raw = await this.ossService.getRawText(MANIFEST_KEY);
@@ -107,11 +124,15 @@ export class MaterialsService {
 
   /** 合并 nav 分类骨架 + manifest 已生成状态 → 分组列表（含未生成的） */
   async groupedList(): Promise<MaterialGroup[]> {
-    const [groups, manifest] = await Promise.all([
+    const [groups, manifest, gift] = await Promise.all([
       this.navGroups(),
       this.readManifest(),
+      this.legacyGift(),
     ]);
     const byKey = this.manifestItemMap(manifest);
+    const giftGroup: MaterialGroup = { key: 'historical-gift', label: '附赠（历史参考）', items: [
+      gift || { ...LEGACY_PDF_GIFT, updatedAt: null, sizeBytes: 0, articleCount: 0, ready: false },
+    ] };
 
     const build = (child: { key: string; label: string }): MaterialItem => {
       const m = byKey.get(child.key);
@@ -127,10 +148,10 @@ export class MaterialsService {
 
     // nav 无二级子节点时（形态异常）回退到 manifest 分组，避免整页空白
     if (groups.every((g) => g.children.length === 0) && manifest.groups?.length) {
-      return manifest.groups.map((g) => ({
+      return [...manifest.groups.map((g) => ({
         key: g.key,
         label: g.label || g.key,
-        items: (g.items || []).map((it) => ({
+        items: (g.items || []).filter(it => it.key !== LEGACY_PDF_KEY).map((it) => ({
           key: it.key,
           label: it.label || it.key,
           updatedAt: it.updatedAt || null,
@@ -138,14 +159,14 @@ export class MaterialsService {
           articleCount: it.articleCount || 0,
           ready: !!it.updatedAt,
         })),
-      }));
+      })).filter(g => g.items.length), giftGroup];
     }
 
-    return groups.map((g) => ({
+    return [...groups.map((g) => ({
       key: g.key,
       label: g.label,
-      items: g.children.map(build),
-    }));
+      items: g.children.filter(c => c.key !== LEGACY_PDF_KEY).map(build),
+    })), giftGroup];
   }
 
   /**
@@ -162,7 +183,7 @@ export class MaterialsService {
           key: g.key,
           label: g.label || g.key,
           items: (g.items || [])
-            .filter((it) => it.updatedAt)
+            .filter((it) => it.updatedAt && it.key !== LEGACY_PDF_KEY)
             .map((it) => ({
               key: it.key,
               label: it.label || it.key,
@@ -177,12 +198,13 @@ export class MaterialsService {
     // 兜底（v1 / 无 manifest）：走 nav 合并
     const groups = await this.groupedList();
     return groups
-      .map((g) => ({ ...g, items: g.items.filter((i) => i.ready) }))
+      .map((g) => ({ ...g, items: g.items.filter((i) => i.ready && i.key !== LEGACY_PDF_KEY) }))
       .filter((g) => g.items.length > 0);
   }
 
   /** 某二级分类是否已生成 PDF */
   async isReady(itemKey: string): Promise<boolean> {
+    if (itemKey === LEGACY_PDF_KEY) return !!(await this.legacyGift());
     const map = this.manifestItemMap(await this.readManifest());
     const it = map.get(itemKey);
     return !!it?.updatedAt;
@@ -190,6 +212,7 @@ export class MaterialsService {
 
   /** 取某二级分类的展示名（用于下载文件名） */
   private async itemLabel(itemKey: string): Promise<string> {
+    if (itemKey === LEGACY_PDF_KEY) return LEGACY_PDF_GIFT.label;
     for (const g of await this.navGroups()) {
       const c = g.children.find((x) => x.key === itemKey);
       if (c) return c.label;
@@ -212,6 +235,17 @@ export class MaterialsService {
    * 管理端手动上传/替换某二级分类 PDF（应急兜底，即时覆盖 CI 产物），并更新 manifest（v2）。
    */
   async adminUpload(itemKey: string, buf: Buffer): Promise<MaterialItem> {
+    if (itemKey === LEGACY_PDF_KEY) {
+      assertLegacyPdf(buf);
+      const sizeBytes = await this.ossService.putPrivate(this.pdfKey(itemKey), buf, 'application/pdf');
+      if (sizeBytes !== LEGACY_PDF_SIZE) throw new Error('附赠 PDF 上传大小校验失败');
+      const updatedAt = new Date().toISOString();
+      // 先完成私有对象上传和大小校验，再发布可领取状态；不改 Agent 清单。
+      await this.ossService.putRawText(LEGACY_PDF_METADATA_KEY, JSON.stringify({
+        key: itemKey, sha256: LEGACY_PDF_SHA256, sizeBytes, updatedAt,
+      }));
+      return { ...LEGACY_PDF_GIFT, sizeBytes, updatedAt, articleCount: 0, ready: true };
+    }
     const size = await this.ossService.putPrivate(
       this.pdfKey(itemKey),
       buf,

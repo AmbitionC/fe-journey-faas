@@ -88,7 +88,7 @@ describe('9.9 PDF / 会员停售安全边界', () => {
 
   it('公开商品按当前实际清单展示，空清单不能付款，不泄漏下载链接', async () => {
     const svc = new MaterialsHTTPService();
-    svc.materialsService = { groupedListReady: async () => [] } as any;
+    svc.materialsService = { groupedListReady: async () => [], legacyGift: async () => null } as any;
     const response = await svc.product();
     assert.strictEqual(response.data.priceCents, 990);
     assert.strictEqual(response.data.purchaseType, 'one_time');

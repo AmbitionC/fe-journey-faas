@@ -32,9 +32,11 @@ export class MaterialsHTTPService {
   })
   @NoAuth()
   async product(): Promise<any> {
-    const groups = await this.materialsService.groupedListReady();
+    const [groups, gift] = await Promise.all([
+      this.materialsService.groupedListReady(), this.materialsService.legacyGift(),
+    ]);
     const purchasingEnabled = groups.some(g => g.items.length > 0);
-    return { success: true, data: { ...AGENT_PDF_PRODUCT, groups, purchasingEnabled } };
+    return { success: true, data: { ...AGENT_PDF_PRODUCT, groups, purchasingEnabled, gift } };
   }
 
   @Inject()
