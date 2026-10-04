@@ -71,13 +71,24 @@ describe('辅助调用配额桶', () => {
     assert.strictEqual(Object.keys(redis.counts).length, 0, '会员不应写计数键');
   });
 
-  it('游客超限文案指向注册而非付费', async () => {
+  it('超限文案不再许诺试用、也不引导开通会员（2026-10-02 起两者均已停止）', async () => {
     const svc = makeProxy(fakeRedis(), 1);
     await svc.checkRateLimit('guest:5.5.5.5', false);
-    await assert.rejects(() => svc.checkRateLimit('guest:5.5.5.5', false), /注册即可享 14 天不限次/);
+    await assert.rejects(() => svc.checkRateLimit('guest:5.5.5.5', false), (e: any) => {
+      const m = String(e?.message || '');
+      assert.ok(/RATE_LIMIT/.test(m), '前端靠 RATE_LIMIT 识别额度用尽，前缀不能丢');
+      assert.ok(/登录后可保存学习记录/.test(m), `游客文案应与前端一致：${m}`);
+      assert.ok(!/14 *天|开通会员/.test(m), `不得再许诺已停止的权益：${m}`);
+      return true;
+    });
     const svc2 = makeProxy(fakeRedis(), 1);
     await svc2.checkRateLimit('13800138000', false);
-    await assert.rejects(() => svc2.checkRateLimit('13800138000', false), /开通会员/);
+    await assert.rejects(() => svc2.checkRateLimit('13800138000', false), (e: any) => {
+      const m = String(e?.message || '');
+      assert.ok(/明天再来/.test(m), `登录用户文案应与前端一致：${m}`);
+      assert.ok(!/14 *天|开通会员/.test(m), `不得再引导已暂停的会员售卖：${m}`);
+      return true;
+    });
   });
 });
 

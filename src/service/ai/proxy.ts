@@ -183,12 +183,14 @@ export class AiProxyService {
       await this.redisService.expire(key, this.aiConfig.rateLimit.freeWindowSeconds);
     }
     if (current > limit) {
-      // 游客的下一步是注册（免费、一步到位、送 14 天不限次），不是掏钱。
-      // 对还没有账号的人喊「开通会员」，是在他最弱的时刻要最大的承诺。
-      // 前端 Composer 按登录态渲染对应 CTA，这里的文案与之保持一致（非流式/其他客户端可见）。
+      // 文案须与前端 Composer 的额度用尽横幅一致（本文案在非流式路径与其他客户端可见）。
+      // 2026-10-02 起注册不再赠送试用、会员暂停售卖（user.createUser / loginModal /
+      // Composer 已同步改掉），所以这里**既不能许诺「注册送 14 天」，也不能引导
+      // 「开通会员」**——前者已不兑现，后者已买不到。与前端同口径：游客登录可保存
+      // 学习记录，额度次日重置。
       const next = String(userId).startsWith('guest:')
-        ? '注册即可享 14 天不限次'
-        : '开通会员享无限使用';
+        ? '登录后可保存学习记录，明天再来'
+        : '明天再来';
       throw R.forbiddenError(`RATE_LIMIT:今日 AI 问答次数已用完（每天 ${limit} 次），${next}`);
     }
   }
