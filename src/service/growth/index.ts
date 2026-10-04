@@ -499,6 +499,83 @@ export class GrowthService {
     }
   }
 
+
+  /**
+   * 「自报已支付」订单（近 N 天 + 本月）——与 paidOrders **分开**统计，不并入收入。
+   *
+   * 2026-10-02 起，¥9.9 Agent 求职 PDF 走「扫个人收款码 → 点我已支付」：
+   * 服务端记一笔 status='self_reported' 的订单并立即开放下载（未核验到账）。
+   * 收入口径 paidOrders 只认 status='paid'，于是这条新链路的成交**在复盘里完全看不见**——
+   * 有人买了，北极星仍显示 ¥0。这里把它单列出来；**不并入收入**是有意的：
+   * 自报与到账是两回事，核验之前算成收入就是在骗自己（创始人在订单上标
+   * bankVerified:false 也是同一个意思）。核验到账后由核验流程改状态，届时自然进 paid。
+   */
+  async selfReportedOrders(days = 30, exclude?: string[]) {
+    const ex = this.excludedUserIds(exclude);
+    const now = new Date();
+    const windowSince = new Date(Date.now() - days * 86400000);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const agg = async (since: Date) => {
+      try {
+        const qb = this.orderModel
+          .createQueryBuilder('o')
+          .select('COUNT(*)', 'count')
+          .addSelect('COALESCE(SUM(o.amount), 0)', 'amount')
+          .addSelect('COUNT(DISTINCT o.userId)', 'buyers')
+          .where("o.status = 'self_reported'")
+          .andWhere('o.payTime >= :since', { since });
+        if (ex.length) qb.andWhere('o.userId NOT IN (:...ex)', { ex });
+        const r = await qb.getRawOne();
+        return {
+          count: Number(r?.count || 0),
+          amount: Number(r?.amount || 0),
+          buyers: Number(r?.buyers || 0),
+        };
+      } catch {
+        return { count: 0, amount: 0, buyers: 0, error: 'query_failed' };
+      }
+    };
+    const [window, month] = await Promise.all([agg(windowSince), agg(monthStart)]);
+    return { days, window, month, countedAsRevenue: false };
+  }
+
+  /**
+   * 访问路径分布（近 N 天）：page_view 按 props.path 归并，按去重 IP 排序。
+   *
+   * 用来回答「访客到底去了哪」——比如 ¥9.9 资料放在 /services，有没有人走到那一页。
+   * 路径是站内路由，不是个人信息；IP 只出去重计数。
+   */
+  async topPaths(days = 30, exclude?: string[], limit = 15) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
+    try {
+      const pathExpr = "JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.path'))";
+      const qb = this.eventLogModel
+        .createQueryBuilder('e')
+        .select(pathExpr, 'path')
+        .addSelect('COUNT(DISTINCT e.ip)', 'visitors')
+        .addSelect('COUNT(*)', 'views')
+        .where("e.event = 'page_view'")
+        .andWhere('e.createTime >= :since', { since })
+        .andWhere("e.ip IS NOT NULL AND e.ip <> ''")
+        .groupBy(pathExpr)
+        .orderBy('visitors', 'DESC')
+        .limit(limit);
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const rows = await qb.getRawMany();
+      return {
+        days,
+        list: rows.map((r) => ({
+          path: String(r.path ?? '(未知)').slice(0, 120),
+          visitors: Number(r.visitors || 0),
+          views: Number(r.views || 0),
+        })),
+      };
+    } catch {
+      return { days, list: [], error: 'query_failed' };
+    }
+  }
+
   /**
    * 渠道拆解（近 N 天）：每个渠道的 uv + 关键转化事件计数。
    * 渠道来源于前端首触归因（?ch= 参数落 localStorage 后随埋点上报）。

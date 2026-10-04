@@ -79,6 +79,8 @@ export class GrowthHTTPService {
       signupAudit,
       aiUsage,
       events,
+      selfReported,
+      topPaths,
     ] = await Promise.all([
         this.metricsService.overview(excludeUsers).catch(() => null),
         this.growthService.overview(excludeUsers).catch(() => null),
@@ -93,6 +95,8 @@ export class GrowthHTTPService {
         // 而这个新埋点不在白名单里，导出里根本看不到它，自己定的判据自己验不了。
         // 事件名与计数不含任何个人信息，直接全出。
         this.metricsService.events(days, excludeUsers).catch(() => null),
+        this.growthService.selfReportedOrders(days, excludeUsers).catch(() => null),
+        this.growthService.topPaths(days, excludeUsers).catch(() => null),
       ]);
     return {
       success: true,
@@ -109,6 +113,8 @@ export class GrowthHTTPService {
         signupAudit,
         aiUsage,
         events,
+        selfReported,
+        topPaths,
       },
     };
   }
