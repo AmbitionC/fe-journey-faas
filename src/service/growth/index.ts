@@ -12,6 +12,9 @@ import { GrowthReviewEntity } from '../../entity/growthReview';
 /** 高价 SKU 的订单类型（order.type）；破冰 SKU = pdf + 书籍订单 */
 const HIGH_VALUE_ORDER_TYPES = ['member', 'consult'];
 
+/** 保留历史 paid 与有效资料自报主统计，不依赖尚未迁移的核实列。 */
+const ORDER_REVENUE_CONDITION = "(o.status = 'paid' OR (o.type = 'pdf' AND o.status = 'self_reported'))";
+
 /**
  * AI 用量按「谁在花」归类。**这是一道脱敏边界，不是格式化**：
  * ai_usage_log.userId 对真人就是手机号，而复盘导出是免登录（x-sync-secret）的，
@@ -118,7 +121,7 @@ export class GrowthService {
       .select('o.type', 'type')
       .addSelect('COUNT(*)', 'count')
       .addSelect('SUM(o.amount)', 'amount')
-      .where("o.status = 'paid'")
+      .where(ORDER_REVENUE_CONDITION)
       .andWhere('o.payTime >= :since', { since })
       .groupBy('o.type');
     if (until) qb1.andWhere('o.payTime < :until', { until });
@@ -176,6 +179,7 @@ export class GrowthService {
     return {
       month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
       monthRevenue,
+      monthRevenueBasis: 'reported_or_legacy_paid',
       monthOrderCount,
       monthRevenueByType: byType,
       monthCost,
@@ -745,7 +749,7 @@ export class GrowthService {
         .createQueryBuilder('o')
         .select('DATE(o.payTime)', 'date')
         .addSelect('SUM(o.amount)', 'amount')
-        .where("o.status = 'paid'")
+        .where(ORDER_REVENUE_CONDITION)
         .andWhere('o.payTime >= :since', { since })
         .groupBy('DATE(o.payTime)');
       if (ex.length) revQb.andWhere('o.userId NOT IN (:...ex)', { ex });
@@ -767,7 +771,7 @@ export class GrowthService {
       /* ignore */
     }
 
-    return { days, list: Object.values(byDate) };
+    return { days, revenueBasis: 'reported_or_legacy_paid', list: Object.values(byDate) };
   }
 
   /** 手动指标：按日期+指标名 upsert */

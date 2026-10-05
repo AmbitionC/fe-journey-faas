@@ -163,7 +163,10 @@ export default {
         password: DB_PASS,
         database: 'fe-journey',
         charset: 'utf8mb4',
-        synchronize: true,
+        // 过渡版本不自动改表；新增列只能在旧实例全部退出后显式迁移。
+        synchronize: false,
+        dropSchema: false,
+        migrationsRun: false,
         logging: true,
         entities: [
           UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity,

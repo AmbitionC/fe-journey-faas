@@ -39,7 +39,7 @@ export class OrderService {
       const where = { userId, orderNo: this.pdfOrderNo(userId), type: 'pdf' };
       const existing = await repo.findOneBy(where);
       if (existing) {
-        if (existing.status !== 'self_reported') throw new httpError.ConflictError('该领取记录已失效，请联系管理员');
+        if (!['self_reported', 'paid'].includes(existing.status)) throw new httpError.ConflictError('该领取记录已失效，请联系管理员');
         return { created: false, order: this.pdfReceipt(existing) };
       }
       const safeChannel = typeof channel === 'string' && /^[\w.-]{1,64}$/.test(channel) ? channel : undefined;
@@ -53,12 +53,12 @@ export class OrderService {
 
   async getPdfPurchase(userId: string): Promise<any> {
     if (!userId) return null;
-    const order = await this.orderModel.findOneBy({ userId, orderNo: this.pdfOrderNo(userId), type: 'pdf', status: 'self_reported' });
-    return order ? this.pdfReceipt(order) : null;
+    const order = await this.orderModel.findOneBy({ userId, orderNo: this.pdfOrderNo(userId), type: 'pdf' });
+    return order && ['self_reported', 'paid'].includes(order.status) ? this.pdfReceipt(order) : null;
   }
 
   private pdfReceipt(order: OrderEntity): any {
-    return { orderNo: order.orderNo, name: order.name, amount: Number(order.amount), status: 'self_reported', declaredAt: order.payTime, bankVerified: false };
+    return { orderNo: order.orderNo, name: order.name, amount: Number(order.amount), status: order.status, declaredAt: order.payTime, bankVerified: false };
   }
 
   async getMemberOrders(userId: string): Promise<any> {
