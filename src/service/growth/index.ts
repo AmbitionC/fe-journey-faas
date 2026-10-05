@@ -1,4 +1,4 @@
-import { Provide, Config } from '@midwayjs/core';
+import { Provide, Config, httpError } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../../entity/user';
@@ -8,6 +8,7 @@ import { EventLogEntity } from '../../entity/eventLog';
 import { AiUsageLogEntity } from '../../entity/aiUsageLog';
 import { GrowthStatEntity } from '../../entity/growthStat';
 import { GrowthReviewEntity } from '../../entity/growthReview';
+import { buildPdfSalesReport, pdfSalesWindow } from './pdfSales';
 
 /** 高价 SKU 的订单类型（order.type）；破冰 SKU = pdf + 书籍订单 */
 const HIGH_VALUE_ORDER_TYPES = ['member', 'consult'];
@@ -539,6 +540,24 @@ export class GrowthService {
   async selfReportedOrders(days = 30, exclude?: string[]) {
     const totals = await this.orderTotals("o.status = 'self_reported'", {}, days, exclude);
     return { ...totals, countedAsRevenue: false };
+  }
+
+  /** 现有增长页的当前 PDF 自报日趋势与订单归因；不改既有主统计。 */
+  async pdfSales(days = 30) {
+    const window = pdfSalesWindow(days);
+    const rows = await this.orderModel.createQueryBuilder('o')
+      .select(['o.id', 'o.userId', 'o.orderNo', 'o.type', 'o.amount', 'o.payTime', 'o.status', 'o.channel'])
+      .where('o.type = :type', { type: 'pdf' })
+      .andWhere('o.orderNo LIKE :prefix', { prefix: 'PDF-%' })
+      // 窗口内候选的所有副本一起读取；窗口外首次声明/失效状态也参与去重。
+      .andWhere(qb => `EXISTS ${qb.subQuery().select('1').from(OrderEntity, 'candidate')
+        .where('candidate.type = :type')
+        .andWhere('candidate.orderNo = o.orderNo')
+        .andWhere('candidate.payTime >= :start AND candidate.payTime <= :end').getQuery()}`)
+      .setParameters({ start: window.start, end: window.end })
+      .orderBy('o.payTime', 'ASC').take(20001).getMany();
+    if (rows.length > 20000) throw new httpError.ServiceUnavailableError('本期记录过多，请缩短时间范围后重试');
+    return buildPdfSalesReport({ orders: rows, days: window.days, now: window.end, excludedUserIds: this.excludedUserIds() });
   }
 
   /** 明确命名的人工核实子集；已在主统计内，不可重复加总。 */
