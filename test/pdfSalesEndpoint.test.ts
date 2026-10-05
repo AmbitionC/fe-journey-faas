@@ -23,14 +23,16 @@ describe('PDF自报补充接口：管理员及最小只读查询', () => {
   it('匿名、普通用户拒绝，管理员Redis登录身份才能读取', async () => {
     const c = new GrowthHTTPService(); let called = 0;
     c.growthService = { pdfSales: async (days: number) => { called++; return { days, basis: 'self_reported' }; } } as any;
+    // 标准FaaS入口从首参.query提取；裸方法读取days。与既有支付分页回归保持同一请求契约。
+    const request = { days: 7, query: { days: 7 } } as any;
     c.ctx = { query: { days: 7 }, request: { query: { days: 7 } } } as any;
-    await assert.rejects(c.pdfSales({ days: 7 }));
+    await assert.rejects(c.pdfSales(request));
     c.ctx.userInfo = { userId: 'user-fixture', role: 'user' };
-    await assert.rejects(c.pdfSales({ days: 7 }));
+    await assert.rejects(c.pdfSales(request));
     assert.strictEqual(called, 0);
     c.ctx = { headers: { token: 'fixture' }, query: { days: 7 }, request: { query: { days: 7 } } } as any;
     c.redisService = { get: async () => JSON.stringify({ userId: 'admin-fixture', role: 'admin' }) } as any;
-    const r = await c.pdfSales({ days: 7 });
+    const r = await c.pdfSales(request);
     assert.strictEqual(r.success, true);
     assert.strictEqual(r.data.days, 7);
     assert.strictEqual(called, 1);
