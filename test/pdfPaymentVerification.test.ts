@@ -132,8 +132,8 @@ describe('资料人工核实与下载资格兼容', () => {
     assert.strictEqual(listed[0].userId, 'u1');
     assert.strictEqual(listed[0].bankVerifiedBy, 'real-admin');
     await assert.rejects(admin.adminPaymentVerification({ orderNo: order.orderNo, bankVerified: 'true' } as any));
-    (admin.ctx as any).query = { take: 101 }; // 标准入口的 @Query(ALL) 从 HTTP 上下文取值。
-    await assert.rejects(admin.adminPurchases({ take: 101 }));
+    // FaaS 参数装饰器从首参的 query 取值；裸方法直接读取 take。
+    await assert.rejects(admin.adminPurchases({ take: 101, query: { take: 101 } } as any));
     await assert.rejects(f.service.setPdfPaymentVerification('missing', true, 'real-admin'));
   });
 
