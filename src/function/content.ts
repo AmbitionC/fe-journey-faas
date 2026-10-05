@@ -65,6 +65,7 @@ import {
   updateManifestWithRetry,
   listChangedSince,
   syncChanged,
+  createPinnedGithubSyncIO,
 } from '../service/content/sync';
 import { OssService } from '../service/content/oss';
 import { ArticleContentService } from '../service/content/articleContent';
@@ -327,6 +328,9 @@ export class ContentHTTPService {
       throw R.unauthorizedError('sync 需要有效的 x-sync-secret');
     }
 
+    // afterSha 存在时，manifest、正文、图片和重同步清单共用同一提交。
+    const pinnedIO = body.afterSha === undefined ? undefined : createPinnedGithubSyncIO(body.afterSha);
+
     // 获取变更文件列表：优先使用请求体中的 files，否则调 GitHub compare API
     let files = body.files;
     if (!files && body.beforeSha && body.afterSha) {
@@ -377,8 +381,13 @@ export class ContentHTTPService {
       }
     };
 
-    const result = await syncChanged(files, saveNavToDb, oss);
-    return { success: true, data: result };
+    const result = await syncChanged(files, saveNavToDb, oss, pinnedIO);
+    return { success: true, data: {
+      ...result,
+      sourceCommit: pinnedIO?.sourceCommit ?? null,
+      readMode: pinnedIO ? 'commit_pinned' : 'legacy_unversioned_manual',
+      sourceInputs: pinnedIO?.sourceInputs() ?? [],
+    } };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

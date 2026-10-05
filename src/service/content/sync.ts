@@ -17,6 +17,7 @@
  *    最多重试 3 次，保证并发操作不会丢更新。
  */
 import fetch from 'node-fetch';
+import { createHash } from 'node:crypto';
 import { OssService } from './oss';
 import {
   ALL_MODULES,
@@ -205,8 +206,9 @@ export async function listChangedSince(
  * 从 GitHub 读取文件的原始 Buffer（用于图片等二进制文件）。
  * 返回 null 表示文件不存在（404）。
  */
-export async function getRawBuffer(path: string): Promise<Buffer | null> {
-  const url = `${GH_API_BASE}/contents/${path}`;
+export async function getRawBuffer(path: string, ref?: string): Promise<Buffer | null> {
+  const encodedPath = ref === undefined ? path : path.split('/').map(encodeURIComponent).join('/');
+  const url = `${GH_API_BASE}/contents/${encodedPath}${ref === undefined ? '' : `?ref=${encodeURIComponent(ref)}`}`;
 
   // Contents API 的 JSON/base64 content 字段只适用于小文件。图片超过
   // 1 MB 时必须使用 raw media type，否则可能得到空内容或被截断的数据。
@@ -295,6 +297,52 @@ export interface SyncChangedIO {
   fetchText: (repoPath: string) => Promise<string>;
   /** 从仓库读取二进制内容（用于图片）；返回 null 表示文件不存在 */
   fetchBuffer: (repoPath: string) => Promise<Buffer | null>;
+  /** 固定提交同步先校验全部路径，包括删除；旧手动 IO 不受影响。 */
+  validatePath?: (repoPath: string) => void;
+}
+
+/** CI 增量同步只从一个完整提交读取；旧的无 ref 手动调用保留原行为。 */
+export function createPinnedGithubSyncIO(sourceCommit: string): SyncChangedIO & {
+  sourceCommit: string;
+  sourceInputs: () => Array<{ path: string; sha256: string; bytes: number }>;
+} {
+  if (typeof sourceCommit !== 'string' || !/^[0-9a-f]{40}$/i.test(sourceCommit)) {
+    throw new Error('版本固定同步需要完整 40 位 Git commit SHA');
+  }
+  const ref = sourceCommit.toLowerCase();
+  const inputs = new Map<string, { path: string; sha256: string; bytes: number }>();
+  const validatePath = (repoPath: string): void => {
+    if (typeof repoPath !== 'string' || !repoPath || /[\0\r\n]/.test(repoPath) ||
+        repoPath.startsWith('/') || repoPath.includes('\\') ||
+        repoPath.split('/').some(part => !part || part === '.' || part === '..')) {
+      throw new Error('非法的版本固定同步路径');
+    }
+  };
+  const load = async (repoPath: string): Promise<Buffer> => {
+    validatePath(repoPath);
+    const bytes = await getRawBuffer(repoPath, ref);
+    if (!bytes) throw new Error('提交中的同步输入不存在');
+    inputs.set(repoPath, {
+      path: repoPath,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.length,
+    });
+    return bytes;
+  };
+  return {
+    sourceCommit: ref,
+    sourceInputs: () => [...inputs.values()].sort((a, b) => a.path.localeCompare(b.path)),
+    validatePath,
+    fetchBuffer: load,
+    fetchText: async repoPath => {
+      const bytes = await load(repoPath);
+      const text = bytes.toString('utf8');
+      if (!Buffer.from(text, 'utf8').equals(bytes)) {
+        throw new Error('版本固定文本输入不是有效 UTF-8');
+      }
+      return text;
+    },
+  };
 }
 
 /** 默认 IO：直接调用内部 GitHub 辅助函数 */
@@ -320,6 +368,7 @@ export async function syncChanged(
   oss: { put: (m: string, fp: string, k: string, c: string) => Promise<void>; delete: (m: string, fp: string, k: string) => Promise<void>; putImage: (name: string, buf: Buffer) => Promise<string> },
   io: SyncChangedIO = defaultSyncIO,
 ): Promise<SyncChangedResult> {
+  for (const file of files) io.validatePath?.(file.path);
   const result: SyncChangedResult = { manifests: 0, articles: 0, images: 0, deleted: 0, errors: [] };
   const syncFiles = [...files];
   const queuedPaths = new Set(syncFiles.map(file => file.path));
