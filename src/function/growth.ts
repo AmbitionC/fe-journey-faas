@@ -13,7 +13,7 @@ import { RedisService } from '@midwayjs/redis';
 import { GrowthService } from '../service/growth';
 import { MetricsService } from '../service/metrics';
 import { NoAuth } from '../decorator/noAuth';
-import { resolveUserInfo } from '../common/admin.guard';
+import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
 
 /**
@@ -139,6 +139,15 @@ export class GrowthHTTPService {
     await this.requireLogin();
     const data = await this.growthService.overview();
     return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '当前 PDF 自报销售日趋势与订单归因（管理员只读）',
+    functionName: 'growthPdfSales', name: 'growthPdfSales', path: '/growth/pdf-sales', method: 'get',
+  })
+  async pdfSales(@Query(ALL) query: { days?: number }) {
+    await assertAdmin(this.ctx, this.redisService);
+    return { success: true, data: await this.growthService.pdfSales(Number(query?.days)) };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
