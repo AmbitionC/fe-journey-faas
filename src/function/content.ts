@@ -333,6 +333,12 @@ export class ContentHTTPService {
 
     // 获取变更文件列表：优先使用请求体中的 files，否则调 GitHub compare API
     let files = body.files;
+    if (pinnedIO && files !== undefined && !Array.isArray(files)) {
+      throw new Error('固定提交同步的 files 必须是明确的数组');
+    }
+    if (pinnedIO && files === undefined && !body.beforeSha) {
+      throw new Error('固定提交同步需要明确的 files 数组或 beforeSha');
+    }
     if (!files && body.beforeSha && body.afterSha) {
       files = await listChangedSince(body.beforeSha, body.afterSha);
     }

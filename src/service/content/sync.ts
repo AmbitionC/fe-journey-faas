@@ -197,9 +197,17 @@ export async function listChangedSince(
   beforeSha: string,
   afterSha: string
 ): Promise<ChangedFile[]> {
+  if (typeof beforeSha !== 'string' || typeof afterSha !== 'string' ||
+      !/^[0-9a-f]{40}$/i.test(beforeSha) || !/^[0-9a-f]{40}$/i.test(afterSha)) {
+    throw new Error('compare 起止版本必须是完整 40 位 Git commit SHA');
+  }
   const json = await ghApiGet(`compare/${beforeSha}...${afterSha}`);
-  const files: any[] = json.files || [];
-  return files.map((f: any) => ({ path: String(f.filename), status: String(f.status) }));
+  if (!Array.isArray(json?.files) || json.files.some((f: any) =>
+    !f || typeof f.filename !== 'string' || !f.filename ||
+    typeof f.status !== 'string' || !f.status)) {
+    throw new Error('GitHub compare 缺少有效的 files 数组');
+  }
+  return json.files.map((f: any) => ({ path: f.filename, status: f.status }));
 }
 
 /**
@@ -299,6 +307,8 @@ export interface SyncChangedIO {
   fetchBuffer: (repoPath: string) => Promise<Buffer | null>;
   /** 固定提交同步先校验全部路径，包括删除；旧手动 IO 不受影响。 */
   validatePath?: (repoPath: string) => void;
+  /** CI 固定提交同步的删除失败必须入 errors，不能虚报成功。 */
+  strictDeletion?: boolean;
 }
 
 /** CI 增量同步只从一个完整提交读取；旧的无 ref 手动调用保留原行为。 */
@@ -333,6 +343,7 @@ export function createPinnedGithubSyncIO(sourceCommit: string): SyncChangedIO & 
     sourceCommit: ref,
     sourceInputs: () => [...inputs.values()].sort((a, b) => a.path.localeCompare(b.path)),
     validatePath,
+    strictDeletion: true,
     fetchBuffer: load,
     fetchText: async repoPath => {
       const bytes = await load(repoPath);
@@ -408,13 +419,21 @@ export async function syncChanged(
       // ---- image ----
       if (file.path.startsWith('images/')) {
         if (file.status === 'removed') {
-          // OSS 图片删除（尽力而为，key 与 repoPath 一致）
-          try {
+          if (io.strictDeletion) {
             const ossClient = oss as any;
-            if (typeof ossClient.deleteRaw === 'function') {
-              await ossClient.deleteRaw(file.path);
+            if (typeof ossClient.deleteRaw !== 'function') {
+              throw new Error('固定提交图片删除缺少 OSS deleteRaw 能力');
             }
-          } catch { /* 忽略，图片删除失败不阻断 */ }
+            await ossClient.deleteRaw(file.path);
+          } else {
+            // 旧手动同步保留原有尽力删除语义。
+            try {
+              const ossClient = oss as any;
+              if (typeof ossClient.deleteRaw === 'function') {
+                await ossClient.deleteRaw(file.path);
+              }
+            } catch { /* 忽略，图片删除失败不阻断 */ }
+          }
           result.deleted++;
         } else {
           const buf = await io.fetchBuffer(file.path);
@@ -431,9 +450,13 @@ export async function syncChanged(
       if (!parsed) continue;
 
       if (file.status === 'removed') {
-        try {
+        if (io.strictDeletion) {
           await oss.delete(parsed.module, parsed.filePath, parsed.key);
-        } catch { /* 忽略，OSS 删除失败不阻断 */ }
+        } else {
+          try {
+            await oss.delete(parsed.module, parsed.filePath, parsed.key);
+          } catch { /* 忽略，OSS 删除失败不阻断 */ }
+        }
         result.deleted++;
       } else {
         // added / modified / renamed / copied

@@ -11,6 +11,7 @@ describe('固定提交的 GitHub 同步输入', () => {
   let bytes: Record<string, Buffer>;
   let truncated: boolean;
   let missing: boolean;
+  let compareResponse: any;
 
   before(() => {
     // Use the real Contents URL construction and byte validation with a bounded
@@ -23,6 +24,10 @@ describe('固定提交的 GitHub 同步输入', () => {
     const fakeFetch: any = async (url: string, options: any) => {
       calls.push({ url, accept: options.headers.Accept });
       const parsed = new URL(url);
+      if (parsed.pathname.includes('/compare/')) {
+        assert.strictEqual(parsed.pathname.split('/compare/')[1], commit + '...' + commit);
+        return { status: 200, ok: true, json: async () => compareResponse };
+      }
       assert.strictEqual(parsed.searchParams.get('ref'), commit);
       const repoPath = decodeURIComponent(parsed.pathname.split('/contents/')[1]);
       const body = bytes[repoPath];
@@ -44,7 +49,7 @@ describe('固定提交的 GitHub 同步输入', () => {
     }
   });
 
-  beforeEach(() => { calls = []; bytes = {}; truncated = false; missing = false; });
+  beforeEach(() => { calls = []; bytes = {}; truncated = false; missing = false; compareResponse = { files: [] }; });
 
   it('manifest、正文、大图、图片重同步清单共用 afterSha，并报告实际字节哈希', async () => {
     bytes = {
@@ -118,5 +123,40 @@ describe('固定提交的 GitHub 同步输入', () => {
     }, sync.createPinnedGithubSyncIO(commit));
     assert.strictEqual(result.images, 0); assert.strictEqual(result.errors.length, 1);
     assert.match(result.errors[0], /不存在/);
+  });
+
+  it('删除正文失败保留 errors 且 deleted=0，旧手工 IO 保持兼容', async () => {
+    const oss = { put: async () => {}, delete: async () => { throw Error('Local simulated delete failure'); }, putImage: async () => '' };
+    const files = [{ path: 'knowledge/basics/a.md', status: 'removed' }];
+    const pinned = await sync.syncChanged(files, async () => {}, oss, sync.createPinnedGithubSyncIO(commit));
+    assert.strictEqual(pinned.deleted, 0); assert.strictEqual(pinned.errors.length, 1);
+    const legacy = await sync.syncChanged(files, async () => {}, oss, { fetchText: async () => '', fetchBuffer: async () => null });
+    assert.strictEqual(legacy.deleted, 1); assert.strictEqual(legacy.errors.length, 0);
+  });
+
+  it('固定提交删除图片必须有实际成功的 deleteRaw，失败或缺能力不记成功', async () => {
+    const base = { put: async () => {}, delete: async () => {}, putImage: async () => '' };
+    const files = [{ path: 'images/a.png', status: 'removed' }];
+    for (const oss of [base, { ...base, deleteRaw: async () => { throw Error('Local simulated image delete failure'); } }]) {
+      const result = await sync.syncChanged(files, async () => {}, oss, sync.createPinnedGithubSyncIO(commit));
+      assert.strictEqual(result.deleted, 0); assert.strictEqual(result.errors.length, 1);
+    }
+    const deleted: string[] = [];
+    const result = await sync.syncChanged(files, async () => {}, { ...base, deleteRaw: async p => { deleted.push(p); } } as any, sync.createPinnedGithubSyncIO(commit));
+    assert.strictEqual(result.deleted, 1); assert.strictEqual(result.errors.length, 0); assert.deepStrictEqual(deleted, ['images/a.png']);
+  });
+
+  it('compare 起点不能逃逸仓库URL，不完整SHA在请求前拒绝', async () => {
+    for (const before of ['../../../../user?probe=1#', '', 'master', 'ab1234']) {
+      await assert.rejects(sync.listChangedSince(before, commit), /40/);
+    }
+    assert.strictEqual(calls.length, 0);
+  });
+
+  it('非compare JSON或畸形files不默认为空同步，真实空diff保持合法', async () => {
+    for (const response of [{ login: 'test' }, { files: null }, { files: {} }, { files: [null] }, { files: [{ filename: 123, status: 'added' }] }]) {
+      compareResponse = response; await assert.rejects(sync.listChangedSince(commit, commit), /files/);
+    }
+    compareResponse = { files: [] }; assert.deepStrictEqual(await sync.listChangedSince(commit, commit), []);
   });
 });
