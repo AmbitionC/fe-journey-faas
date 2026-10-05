@@ -83,7 +83,30 @@ export class MaterialsHTTPService {
     const groups = await this.materialsService.groupedListReady();
     if (!groups.some(g => g.items.length > 0)) throw R.error('资料尚未生成，暂不可购买');
     const result = await this.orderService.reportPdfPurchase(info.userId, body?.channel);
-    return { success: true, data: { ...result, canDownload: true, basis: 'self_reported', bankVerified: false } };
+    return { success: true, data: { ...result, canDownload: true, basis: 'self_reported', bankVerified: result.order?.bankVerified === true } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '资料管理：自报与历史资料订单的人工核实记录',
+    functionName: 'materialsAdminPurchases', name: 'materialsAdminPurchases',
+    path: '/materials/admin/purchases', method: 'get',
+  })
+  async adminPurchases(@Query(ALL) query: { take?: number; skip?: number }): Promise<any> {
+    await assertAdmin(this.ctx, this.redisService);
+    const data = await this.orderService.listPdfPurchases(Number(query?.take ?? 50), Number(query?.skip ?? 0));
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '资料管理：人工核实到账标记（不影响下载资格）',
+    functionName: 'materialsAdminPaymentVerification', name: 'materialsAdminPaymentVerification',
+    path: '/materials/admin/payment-verification', method: 'post',
+  })
+  async adminPaymentVerification(@Body(ALL) body: { orderNo?: string; bankVerified?: boolean }): Promise<any> {
+    await assertAdmin(this.ctx, this.redisService);
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    const data = await this.orderService.setPdfPaymentVerification(body?.orderNo, body?.bankVerified, info?.userId);
+    return { success: true, data };
   }
 
   /** 会员权益校验（限免期 freeForAll 自动放行）；返回 userId（游客为空串） */

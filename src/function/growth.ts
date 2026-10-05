@@ -80,6 +80,9 @@ export class GrowthHTTPService {
       aiUsage,
       events,
       selfReported,
+      manuallyVerifiedPdf,
+      unverifiedSelfReportedPdf,
+      legacyPaidPdf,
       topPaths,
     ] = await Promise.all([
         this.metricsService.overview(excludeUsers).catch(() => null),
@@ -96,6 +99,9 @@ export class GrowthHTTPService {
         // 事件名与计数不含任何个人信息，直接全出。
         this.metricsService.events(days, excludeUsers).catch(() => null),
         this.growthService.selfReportedOrders(days, excludeUsers).catch(() => null),
+        this.growthService.manuallyVerifiedPdfOrders(days, excludeUsers).catch(() => null),
+        this.growthService.unverifiedSelfReportedPdfOrders(days, excludeUsers).catch(() => null),
+        this.growthService.legacyPaidPdfOrders(days, excludeUsers).catch(() => null),
         this.growthService.topPaths(days, excludeUsers).catch(() => null),
       ]);
     return {
@@ -114,6 +120,9 @@ export class GrowthHTTPService {
         aiUsage,
         events,
         selfReported,
+        manuallyVerifiedPdf,
+        unverifiedSelfReportedPdf,
+        legacyPaidPdf,
         topPaths,
       },
     };

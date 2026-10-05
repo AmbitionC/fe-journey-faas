@@ -163,7 +163,7 @@ export default {
         password: DB_PASS,
         database: 'fe-journey',
         charset: 'utf8mb4',
-        // 过渡版本不自动改表；新增列只能在旧实例全部退出后显式迁移。
+        // 结构变更走显式迁移；旧实体启动/回退也不能删除新增核实记录。
         synchronize: false,
         dropSchema: false,
         migrationsRun: false,

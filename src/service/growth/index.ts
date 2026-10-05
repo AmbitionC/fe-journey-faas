@@ -12,7 +12,7 @@ import { GrowthReviewEntity } from '../../entity/growthReview';
 /** 高价 SKU 的订单类型（order.type）；破冰 SKU = pdf + 书籍订单 */
 const HIGH_VALUE_ORDER_TYPES = ['member', 'consult'];
 
-/** 保留历史 paid 与有效资料自报主统计，不依赖尚未迁移的核实列。 */
+/** 主统计按有效资料自报及历史 paid；人工核实是子集，不增减主统计。 */
 const ORDER_REVENUE_CONDITION = "(o.status = 'paid' OR (o.type = 'pdf' AND o.status = 'self_reported'))";
 
 /**
@@ -147,7 +147,7 @@ export class GrowthService {
   }
 
   /**
-   * 北极星概览：本月收入/成本/净现金流（第一里程碑：收入 ≥ 成本）+ 私域/小红书存量。
+   * 经营概览：销售额与录入成本；兼容派生差额字段，不证明真实现金流。
    */
   async overview(exclude?: string[]) {
     const ex = this.excludedUserIds(exclude);
@@ -158,10 +158,11 @@ export class GrowthService {
     const monthRevenue = Object.values(byType).reduce((s, v) => s + v.amount, 0);
     const monthOrderCount = Object.values(byType).reduce((s, v) => s + v.count, 0);
 
-    const [cost, groupMembers, xhsFollowers] = await Promise.all([
+    const [cost, groupMembers, xhsFollowers, manuallyVerifiedPdf] = await Promise.all([
       this.latestStat('monthly_cost'),
       this.latestStat('group_members'),
       this.latestStat('xhs_followers'),
+      this.manuallyVerifiedPdfOrders(30, exclude).catch(() => null),
     ]);
 
     let monthNewUsers = 0;
@@ -182,8 +183,12 @@ export class GrowthService {
       monthRevenueBasis: 'reported_or_legacy_paid',
       monthOrderCount,
       monthRevenueByType: byType,
+      monthManuallyVerifiedPdf: manuallyVerifiedPdf?.month && !manuallyVerifiedPdf.month.error
+        ? { ...manuallyVerifiedPdf.month, verificationMethod: 'manual', scope: 'pdf', subsetOfPrimary: true }
+        : null,
       monthCost,
       netCashflow: monthCost == null ? null : Number((monthRevenue - monthCost).toFixed(2)),
+      netCashflowBasis: 'reported_sales_minus_recorded_cost',
       breakeven: monthCost == null ? null : monthRevenue >= monthCost,
       monthNewUsers,
       groupMembers: groupMembers?.value ?? null,
@@ -504,17 +509,8 @@ export class GrowthService {
   }
 
 
-  /**
-   * 「自报已支付」订单（近 N 天 + 本月）——与 paidOrders **分开**统计，不并入收入。
-   *
-   * 2026-10-02 起，¥9.9 Agent 求职 PDF 走「扫个人收款码 → 点我已支付」：
-   * 服务端记一笔 status='self_reported' 的订单并立即开放下载（未核验到账）。
-   * 收入口径 paidOrders 只认 status='paid'，于是这条新链路的成交**在复盘里完全看不见**——
-   * 有人买了，北极星仍显示 ¥0。这里把它单列出来；**不并入收入**是有意的：
-   * 自报与到账是两回事，核验之前算成收入就是在骗自己（创始人在订单上标
-   * bankVerified:false 也是同一个意思）。核验到账后由核验流程改状态，届时自然进 paid。
-   */
-  async selfReportedOrders(days = 30, exclude?: string[]) {
+  /** 资料订单聚合：自报、人工核实和未核实历史 paid 分列，不改变下载资格。 */
+  private async orderTotals(condition: string, params: Record<string, any>, days: number, exclude?: string[]) {
     const ex = this.excludedUserIds(exclude);
     const now = new Date();
     const windowSince = new Date(Date.now() - days * 86400000);
@@ -526,21 +522,40 @@ export class GrowthService {
           .select('COUNT(*)', 'count')
           .addSelect('COALESCE(SUM(o.amount), 0)', 'amount')
           .addSelect('COUNT(DISTINCT o.userId)', 'buyers')
-          .where("o.status = 'self_reported'")
+          .where(condition, params)
           .andWhere('o.payTime >= :since', { since });
         if (ex.length) qb.andWhere('o.userId NOT IN (:...ex)', { ex });
         const r = await qb.getRawOne();
-        return {
-          count: Number(r?.count || 0),
-          amount: Number(r?.amount || 0),
-          buyers: Number(r?.buyers || 0),
-        };
+        return { count: Number(r?.count || 0), amount: Number(r?.amount || 0), buyers: Number(r?.buyers || 0) };
       } catch {
         return { count: 0, amount: 0, buyers: 0, error: 'query_failed' };
       }
     };
     const [window, month] = await Promise.all([agg(windowSince), agg(monthStart)]);
-    return { days, window, month, countedAsRevenue: false };
+    return { days, window, month };
+  }
+
+  /** 保留 bd0666d 自报订单总数/金额；人工核实后仍计入，不从主指标移走。 */
+  async selfReportedOrders(days = 30, exclude?: string[]) {
+    const totals = await this.orderTotals("o.status = 'self_reported'", {}, days, exclude);
+    return { ...totals, countedAsRevenue: false };
+  }
+
+  /** 明确命名的人工核实子集；已在主统计内，不可重复加总。 */
+  async manuallyVerifiedPdfOrders(days = 30, exclude?: string[]) {
+    const totals = await this.orderTotals("o.type = 'pdf' AND o.status IN ('self_reported', 'paid') AND o.bankVerified = :bankVerified", { bankVerified: true }, days, exclude);
+    return { ...totals, subsetOfPrimary: true, verificationMethod: 'manual' };
+  }
+
+  async unverifiedSelfReportedPdfOrders(days = 30, exclude?: string[]) {
+    const totals = await this.orderTotals("o.type = 'pdf' AND o.status = 'self_reported' AND COALESCE(o.bankVerified, 0) = :bankVerified", { bankVerified: false }, days, exclude);
+    return { ...totals, subsetOfPrimary: true };
+  }
+
+  /** 历史 paid 保留主统计，但不能凭状态推定已人工核实。 */
+  async legacyPaidPdfOrders(days = 30, exclude?: string[]) {
+    const totals = await this.orderTotals("o.type = 'pdf' AND o.status = 'paid' AND COALESCE(o.bankVerified, 0) = :bankVerified", { bankVerified: false }, days, exclude);
+    return { ...totals, subsetOfPrimary: true, manuallyVerified: false };
   }
 
   /**
