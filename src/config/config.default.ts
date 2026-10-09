@@ -142,6 +142,8 @@ export default {
   health: {
     // 独立访问令牌（前端 + iOS 快捷指令共用）。为空时模块拒绝所有请求。
     apiToken: process.env.HEALTH_API_TOKEN || '',
+    // 记餐专用令牌（可选）：只允许读当日饮食/预算、增删改餐次，给 AI 助手看图估算后落库用
+    agentToken: process.env.HEALTH_AGENT_TOKEN || '',
     // 拍照识别热量：OpenAI 兼容的视觉模型（如 qwen-vl-max / gpt-4o）。未配置则该功能降级。
     vision: {
       baseUrl:
