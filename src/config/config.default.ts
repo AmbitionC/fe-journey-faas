@@ -130,6 +130,15 @@ export default {
     password: DB_PASS,
     database: process.env.HEALTH_DB_NAME || 'health',
   },
+  // Personal OS（/pos/*）：个人上下文库（笔记/事件/财务手录/收入/画像/目标），独立 pos 库 + 惰性连接，
+  // 与 health/invest 同一解耦模式。鉴权复用 health.apiToken（同一个人、同一前端、同一快捷指令）。
+  posDb: {
+    host: DB_HOST,
+    port: 3306,
+    username: DB_USER,
+    password: DB_PASS,
+    database: process.env.POS_DB_NAME || 'pos',
+  },
   health: {
     // 独立访问令牌（前端 + iOS 快捷指令共用）。为空时模块拒绝所有请求。
     apiToken: process.env.HEALTH_API_TOKEN || '',
@@ -139,7 +148,13 @@ export default {
         process.env.HEALTH_VISION_BASE_URL ||
         'https://dashscope.aliyuncs.com/compatible-mode/v1',
       apiKey: process.env.HEALTH_VISION_API_KEY || '',
-      model: process.env.HEALTH_VISION_MODEL || '',
+      // 配了 key 没配模型、且走 DashScope 默认端点时，默认 qwen-vl-max（少配一个变量也能用）
+      model:
+        process.env.HEALTH_VISION_MODEL ||
+        (process.env.HEALTH_VISION_API_KEY &&
+        (process.env.HEALTH_VISION_BASE_URL || 'dashscope').includes('dashscope')
+          ? 'qwen-vl-max'
+          : ''),
     },
     // 饮食建议文本模型：默认复用全站 LLM 配置（deepseek）。
     chat: {
