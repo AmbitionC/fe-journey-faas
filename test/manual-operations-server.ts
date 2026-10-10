@@ -1,13 +1,17 @@
 /** Local browser verification only: synthetic login + durable test adapter, never production. */
 import { createServer } from 'http';
-import { mkdtempSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { OperationsService } from '../src/service/operations';
 import { OperationsHTTPService } from '../src/function/operations';
 import { FileOperationsRepository } from './operations.repo';
 
-const directory = mkdtempSync(join(tmpdir(), 'operations-browser-'));
+// Optional owned test directory lets browser verification restart the service and reload its fixture.
+const directory =
+  process.env.OPERATIONS_TEST_DIRECTORY ||
+  mkdtempSync(join(tmpdir(), 'operations-browser-'));
+mkdirSync(directory, { recursive: true });
 const service = new OperationsService();
 service.model = new FileOperationsRepository(
   join(directory, 'rows.json')
@@ -51,7 +55,16 @@ createServer(async (req, res) => {
   }
   if (url.pathname === '/asset') {
     try {
-      res.setHeader('Content-Type', 'image/png');
+      const key = url.searchParams.get('key');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader(
+        'Content-Type',
+        key.endsWith('.webp')
+          ? 'image/webp'
+          : key.endsWith('.jpg')
+            ? 'image/jpeg'
+            : 'image/png'
+      );
       res.end(
         readFileSync(
           join(directory, url.searchParams.get('key').split('/').pop())

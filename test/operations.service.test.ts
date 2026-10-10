@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { OperationsService } from '../src/service/operations';
 import { OperationsHTTPService } from '../src/function/operations';
 import { OssService } from '../src/service/content/oss';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { FileOperationsRepository } from './operations.repo';
@@ -13,6 +13,30 @@ const input = {
   platform: 'xiaohongshu',
   images: [],
 };
+function webpChunk(kind: string, data: Buffer): Buffer {
+  const header = Buffer.alloc(8);
+  header.write(kind, 0, 'ascii');
+  header.writeUInt32LE(data.length, 4);
+  return Buffer.concat([header, data, Buffer.alloc(data.length % 2)]);
+}
+function animatedWebp(frameData: Buffer): Buffer {
+  const extended = Buffer.alloc(10);
+  extended[0] = 2;
+  const payload = Buffer.concat([
+    Buffer.from('WEBP'),
+    webpChunk('VP8X', extended),
+    webpChunk('ANIM', Buffer.alloc(6)),
+    webpChunk('ANMF', Buffer.concat([Buffer.alloc(16), frameData])),
+  ]);
+  const header = Buffer.alloc(8);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(payload.length, 4);
+  return Buffer.concat([header, payload]);
+}
+const tinyWebp = Buffer.from(
+  'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA',
+  'base64'
+);
 function service() {
   const rows = new Map<string, any>();
   const copy = (value: any) =>
@@ -135,10 +159,10 @@ describe('operations storage commands and authorization', () => {
         throw new Error('should not sign');
       },
     } as any;
-    const png = Buffer.concat([
-      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-      Buffer.alloc(20),
-    ]);
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+      'base64'
+    );
     await assert.rejects(
       s.upload({ name: 'a.png', dataBase64: png.toString('base64') }),
       /upload failed/
@@ -161,6 +185,110 @@ describe('operations storage commands and authorization', () => {
       /大小校验失败/
     );
     assert.strictEqual(signed, false);
+  });
+  it('accepts real synthetic PNG/JPG/WebP containers without changing their bytes', async () => {
+    const s = service();
+    const written: Buffer[] = [];
+    s.ossService = {
+      putPrivate: async (_key, bytes) => {
+        written.push(bytes);
+      },
+      signedUrl: () => 'signed',
+    } as any;
+    const fixtures = [
+      [
+        'png',
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+          'base64'
+        ),
+      ],
+      [
+        'jpg',
+        readFileSync(join(__dirname, 'fixtures/operations-synthetic-6x8.jpg')),
+      ],
+      [
+        'jpg',
+        readFileSync(
+          join(__dirname, 'fixtures/operations-synthetic-progressive.jpg')
+        ),
+      ],
+      ['webp', tinyWebp],
+      ['webp', animatedWebp(tinyWebp.subarray(12))],
+    ] as [string, Buffer][];
+    for (const [extension, bytes] of fixtures) {
+      const result = await s.upload({
+        name: `[SYNTHETIC] fixture.${extension}`,
+        dataBase64: bytes.toString('base64'),
+      });
+      assert.ok(result.key.endsWith('.' + extension));
+      assert.deepStrictEqual(written[written.length - 1], bytes);
+    }
+  });
+  it('rejects truncated and corrupt image containers before writing OSS', async () => {
+    const s = service();
+    let writes = 0;
+    s.ossService = {
+      putPrivate: async () => {
+        writes++;
+      },
+      signedUrl: () => 'signed',
+    } as any;
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+      'base64'
+    );
+    const corrupt = Buffer.from(png);
+    corrupt[20] ^= 1;
+    for (const bytes of [
+      png.subarray(0, 40),
+      corrupt,
+      Buffer.from([255, 216, 255, 224]),
+      Buffer.from('RIFFxxxxWEBPxxxx'),
+    ]) {
+      await assert.rejects(
+        s.upload({
+          name: 'synthetic-damaged.png',
+          dataBase64: bytes.toString('base64'),
+        }),
+        /图片损坏/
+      );
+    }
+    assert.strictEqual(writes, 0);
+  });
+  it('checks later JPEG scan segments and every animated WebP frame before OSS', async () => {
+    const s = service();
+    let writes = 0;
+    s.ossService = {
+      putPrivate: async () => {
+        writes++;
+      },
+      signedUrl: () => 'signed',
+    } as any;
+    const progressive = readFileSync(
+      join(__dirname, 'fixtures/operations-synthetic-progressive.jpg')
+    );
+    const corruptJpeg = Buffer.from(progressive);
+    const scan = corruptJpeg.indexOf(Buffer.from([255, 218]));
+    const laterTable = corruptJpeg.indexOf(Buffer.from([255, 196]), scan + 2);
+    assert.ok(laterTable > scan);
+    corruptJpeg.writeUInt16BE(65535, laterTable + 2);
+    const oversizedFrameChunk = Buffer.from(tinyWebp.subarray(12));
+    oversizedFrameChunk.writeUInt32LE(65535, 4);
+    for (const bytes of [
+      corruptJpeg,
+      animatedWebp(Buffer.alloc(1)),
+      animatedWebp(oversizedFrameChunk),
+    ]) {
+      await assert.rejects(
+        s.upload({
+          name: 'synthetic-damaged',
+          dataBase64: bytes.toString('base64'),
+        }),
+        /图片损坏/
+      );
+    }
+    assert.strictEqual(writes, 0);
   });
   it('retrying an import keeps one document and rejects changed material under the same key', async () => {
     const s = service();

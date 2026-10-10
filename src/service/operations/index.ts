@@ -4,6 +4,7 @@ import { Repository, Like } from 'typeorm';
 import { randomUUID, createHash } from 'crypto';
 import { OperationsContentEntity } from '../../entity/operationsContent';
 import { OssService } from '../content/oss';
+import { completeRaster } from './image';
 import {
   applyCommand,
   createDocument,
@@ -145,6 +146,8 @@ export class OperationsService {
     const ext = png ? 'png' : jpg ? 'jpg' : webp ? 'webp' : '';
     if (!ext || buf.length > 5 * 1024 * 1024)
       throw new httpError.BadRequestError('仅支持 PNG/JPG/WebP，最大 5MB');
+    if (!completeRaster(buf, ext))
+      throw new httpError.BadRequestError('图片损坏或不完整，请重新导出后上传');
     const name =
       typeof input.name === 'string' ? input.name.trim().slice(0, 200) : '';
     if (!name) throw new httpError.BadRequestError('图片名称必填');
