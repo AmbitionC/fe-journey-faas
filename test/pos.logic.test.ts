@@ -6,6 +6,9 @@ import {
   freshness,
   guardEventStatus,
   movingAvg,
+  muscleTrend,
+  sleepSummary,
+  strengthDays,
   normDate,
   summarizeWealth,
   BalanceLine,
@@ -168,5 +171,66 @@ describe('pos/logic 纯函数口径', () => {
       r.map(x => x.value),
       [90, 89, 87]
     );
+  });
+
+  it('muscleTrend：体重降、肌肉降 ≥0.5kg 判掉肌；跨度不足不比较', () => {
+    const r = muscleTrend([
+      { date: '2026-09-01', weightKg: 90, muscleMassKg: 60 },
+      { date: '2026-09-15', weightKg: 89, muscleMassKg: 59.8 },
+      { date: '2026-10-08', weightKg: 87, muscleMassKg: 59 },
+    ])!;
+    // 取 ≥21 天前最近的一条（09-15），不是最早一条
+    assert.strictEqual(r.days, 23);
+    assert.strictEqual(r.delta, -0.8);
+    assert.strictEqual(r.deltaWeight, -2);
+    assert.strictEqual(r.loss, true);
+    assert.strictEqual(r.lossShare, 0.4);
+    const gain = muscleTrend([
+      { date: '2026-09-01', weightKg: 90, muscleMassKg: 60 },
+      { date: '2026-10-08', weightKg: 88, muscleMassKg: 60.2 },
+    ])!;
+    assert.strictEqual(gain.loss, false);
+    const short = muscleTrend([
+      { date: '2026-10-01', weightKg: 90, muscleMassKg: 60 },
+      { date: '2026-10-08', weightKg: 88, muscleMassKg: 58 },
+    ])!;
+    assert.strictEqual(short.delta, null);
+    assert.strictEqual(short.loss, false);
+    assert.strictEqual(muscleTrend([{ date: '2026-10-08', weightKg: 88, muscleMassKg: null }]), null);
+  });
+
+  it('sleepSummary：只算近 7 天有记录的夜，<7h 标不足', () => {
+    const s = sleepSummary(
+      [
+        { date: '2026-10-10', sleepHours: 6.5 },
+        { date: '2026-10-09', sleepHours: 7 },
+        { date: '2026-10-08', sleepHours: null },
+        { date: '2026-10-01', sleepHours: 9 },
+      ],
+      '2026-10-10'
+    )!;
+    assert.strictEqual(s.avg7, 6.8);
+    assert.strictEqual(s.nights, 2);
+    assert.strictEqual(s.short, true);
+    assert.strictEqual(s.series[0].date, '2026-10-01');
+    assert.strictEqual(sleepSummary([{ date: '2026-09-01', sleepHours: 8 }], '2026-10-10'), null);
+  });
+
+  it('strengthDays：14 天无任何训练记录返回 null，不臆造 0', () => {
+    const today = '2026-10-10';
+    assert.strictEqual(strengthDays([{ date: '2026-10-09', workouts: [] }], today), null);
+    assert.strictEqual(
+      strengthDays(
+        [
+          { date: '2026-10-09', workouts: [{ type: 'Traditional Strength Training' }] },
+          { date: '2026-10-08', workouts: [{ type: 'Running' }] },
+          { date: '2026-10-06', workouts: [{ type: '功能性力量训练' }, { type: 'Walking' }] },
+          { date: '2026-10-01', workouts: [{ type: 'Strength' }] },
+        ],
+        today
+      ),
+      2
+    );
+    assert.strictEqual(strengthDays([{ date: '2026-10-08', workouts: [{ type: 'Running' }] }], today), 0);
   });
 });

@@ -429,3 +429,87 @@ export function movingAvg(
     return { date: p.date, value: Math.round(avg * 100) / 100 };
   });
 }
+
+// ---------------------------------------------------------------- 身体成分 / 睡眠 / 力量训练
+
+/**
+ * 肌肉量变化与掉肌判断：取最近一条有肌肉量的体成分记录，与 ≥21 天前最近的一条比
+ * （没有那么早的，用最早一条，但跨度要 ≥14 天）。体重在降、肌肉量降 ≥0.5 kg 判为掉肌。
+ */
+export function muscleTrend(
+  records: Array<{ date: string; weightKg: number; muscleMassKg: number | null }>,
+  minGapDays = 21
+): {
+  value: number;
+  asOf: string;
+  delta: number | null;
+  deltaWeight: number | null;
+  days: number | null;
+  loss: boolean;
+  lossShare: number | null;
+} | null {
+  const withM = records
+    .filter(r => r.muscleMassKg != null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const last = withM[withM.length - 1];
+  if (!last) return null;
+  const earlier = withM.filter(r => daysBetween(r.date, last.date) >= minGapDays);
+  const ref = earlier.length
+    ? earlier[earlier.length - 1]
+    : withM[0] && daysBetween(withM[0].date, last.date) >= 14
+      ? withM[0]
+      : null;
+  if (!ref) return { value: last.muscleMassKg!, asOf: last.date, delta: null, deltaWeight: null, days: null, loss: false, lossShare: null };
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const delta = r2(last.muscleMassKg! - ref.muscleMassKg!);
+  const deltaWeight = r2(last.weightKg - ref.weightKg);
+  const loss = deltaWeight < 0 && delta <= -0.5;
+  return {
+    value: last.muscleMassKg!,
+    asOf: last.date,
+    delta,
+    deltaWeight,
+    days: daysBetween(ref.date, last.date),
+    loss,
+    lossShare: loss ? Math.round((-delta / -deltaWeight) * 100) / 100 : null,
+  };
+}
+
+/** 近 7 天平均睡眠（有记录的天才算），低于 7 小时标为不足。 */
+export function sleepSummary(
+  days: Array<{ date: string; sleepHours: number | null }>,
+  today: string
+): { avg7: number; nights: number; short: boolean; series: Array<{ date: string; hours: number | null }> } | null {
+  const inRange = (d: string, n: number) => {
+    const diff = daysBetween(d, today);
+    return diff >= 0 && diff < n;
+  };
+  const last7 = days.filter(a => a.sleepHours != null && a.sleepHours > 0 && inRange(a.date, 7));
+  if (!last7.length) return null;
+  const avg7 = Math.round((last7.reduce((s, a) => s + (a.sleepHours as number), 0) / last7.length) * 10) / 10;
+  const series = days
+    .filter(a => inRange(a.date, 14))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(a => ({ date: a.date, hours: a.sleepHours }));
+  return { avg7, nights: last7.length, short: avg7 < 7, series };
+}
+
+const STRENGTH_RE = /strength|resistance|weight|力量|抗阻|举重|器械|功能性/i;
+
+/**
+ * 近 7 天做过力量训练的天数。14 天内一条训练记录都没有时返回 null
+ * （分不清是没练还是快捷指令没带训练数据，不臆造成 0）。
+ */
+export function strengthDays(
+  days: Array<{ date: string; workouts: Array<{ type: string }> }>,
+  today: string
+): number | null {
+  const recent = days.filter(a => {
+    const diff = daysBetween(a.date, today);
+    return diff >= 0 && diff < 14;
+  });
+  if (!recent.some(a => (a.workouts || []).length)) return null;
+  return recent.filter(
+    a => daysBetween(a.date, today) < 7 && (a.workouts || []).some(w => STRENGTH_RE.test(String(w.type || '')))
+  ).length;
+}

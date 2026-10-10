@@ -7,7 +7,7 @@ import { HealthActivityService } from '../health/activity';
 import { HealthBudgetService } from '../health/budget';
 import { HealthProfileService } from '../health/profile';
 import { GrowthService } from '../growth';
-import { computeGaps, daysBetween, freshness, movingAvg, todayCN } from './logic';
+import { computeGaps, daysBetween, freshness, movingAvg, muscleTrend, sleepSummary, strengthDays, todayCN } from './logic';
 
 /** 单块失败不拖垮整页：返回 { error } 由前端显示「该块暂不可用」。 */
 async function safe<T>(fn: () => Promise<T>): Promise<T | { error: string }> {
@@ -129,6 +129,9 @@ export class PosDashboardService {
           }
         : null,
       sleep: lastSleep ? { date: lastSleep.date, hours: lastSleep.sleepHours } : null,
+      muscle: muscleTrend(trend),
+      sleep7: sleepSummary(activity, today),
+      strengthDays7: strengthDays(activity, today),
       tdee: { value: budget.basis.tdee, source: budget.basis.tdeeSource },
       weightSeries: points.map((p, i) => ({ date: p.date, value: p.value, ma7: ma[i].value })),
       kcalSeries,
