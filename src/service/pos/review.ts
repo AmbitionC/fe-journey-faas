@@ -1,5 +1,5 @@
 import { daysBetween, movingAvg, muscleTrend, STRENGTH_RE } from './logic';
-import { AlertInput, deficitDays, intakeFloor, maAt, shift } from './alerts';
+import { AlertInput, deficitDays, deficitHigh, intakeFloor, maAt, shift } from './alerts';
 
 /**
  * 健康周复盘（纯函数，无 IO）。一周＝周一到周日（北京时间）。
@@ -164,7 +164,7 @@ export function judge(cur: WeekStats, input: ReviewInput): { focus: string[]; wi
   if (m?.loss) focus.push(`掉肌 ${sgn(m.delta as number)} kg（${m.days} 天）：缺口收一收，蛋白和力量训练补上`);
   if (k.avgDeficit != null && k.completeDays >= 3) {
     if (k.avgDeficit < t * 0.6) focus.push(`热量缺口不够：日均 ${sgn(k.avgDeficit)} kcal，目标 ${t}`);
-    else if (k.avgDeficit > t + 500) focus.push(`热量缺口偏大：日均 ${k.avgDeficit} kcal，目标 ${t}，容易掉肌`);
+    else if (k.avgDeficit > deficitHigh(t)) focus.push(`热量缺口偏大：日均 ${k.avgDeficit} kcal，目标 ${t}，容易掉肌`);
     else wins.push(`热量缺口达标：日均 ${sgn(k.avgDeficit)} kcal`);
   }
   if (k.completeDays >= 3) {

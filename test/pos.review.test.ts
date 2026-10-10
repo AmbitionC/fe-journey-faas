@@ -74,6 +74,14 @@ describe('pos/review 健康周复盘', () => {
     assert.ok(r.focus.some(f => f.startsWith('蛋白')));
   });
 
+  it('缺口是目标的 1.5 倍以上算偏大，不算达标', () => {
+    const inp = base();
+    inp.meals.forEach(m => (m.kcal = 1600)); // 缺口 800 > 750
+    const r = weeklyReview(inp, '2026-10-05');
+    assert.ok(r.focus.some(f => f.startsWith('热量缺口偏大')), r.focus.join('|'));
+    assert.ok(!r.wins.some(w => w.startsWith('热量缺口达标')));
+  });
+
   it('掉肌进重点；热量账对不上进重点', () => {
     let inp = base();
     inp.body = inp.body.map((b, i) => ({ ...b, muscleMassKg: 62 - i * 0.06 }));

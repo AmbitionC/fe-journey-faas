@@ -57,6 +57,9 @@ const cnDate = (iso: string) => new Date(Date.parse(iso) + 8 * 3600 * 1000).toIS
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const sgn = (x: number, unit = '') => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x)}${unit}`;
 
+/** 缺口「偏大」线：目标的 1.5 倍（目标 500 → 750）。预警与周复盘同一口径。 */
+export const deficitHigh = (target: number) => Math.round(target * 1.5);
+
 /** 吃得太少的下限：同预算引擎 max(1500, BMR×0.9)。 */
 export const intakeFloor = (bmr: number) => Math.max(1500, Math.round(bmr * 0.9));
 
@@ -155,7 +158,7 @@ export function healthAlerts(input: AlertInput): PosAlert[] {
         title: `近 7 天平均缺口 ${sgn(sum.avg7)} kcal`,
         detail: `目标 ${budget.deficitTarget}`,
       });
-    else if (sum.avg7 > budget.deficitTarget + 500)
+    else if (sum.avg7 > deficitHigh(budget.deficitTarget))
       out.push({
         key: 'kcal-week-big',
         level: 'warn',
