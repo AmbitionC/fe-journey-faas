@@ -178,7 +178,7 @@ suite('operations real MySQL storage in disposable CI', function () {
     for (const [title, platform] of [
       [`${tag}%_ literal`, 'xiaohongshu'],
       [`${tag}AB literal`, 'xiaohongshu'],
-      [`${tag} different platform`, 'zhihu'],
+      [`${tag} different platform`, 'other'],
     ]) {
       const row = await s.create(
         { ...input, title, platform },
@@ -201,11 +201,11 @@ suite('operations real MySQL storage in disposable CI', function () {
       1
     );
     assert.strictEqual(
-      (await s.list({ q: tag, status: 'ready', platform: 'zhihu' })).total,
+      (await s.list({ q: tag, status: 'ready', platform: 'other' })).total,
       0
     );
     assert.strictEqual(
-      (await s.list({ q: tag, status: 'draft', platform: 'zhihu' })).items[0]
+      (await s.list({ q: tag, status: 'draft', platform: 'other' })).items[0]
         .id,
       rows[2].id
     );
