@@ -171,4 +171,43 @@ suite('operations real MySQL storage in disposable CI', function () {
     assert.strictEqual(stored.revision, 2);
     assert.strictEqual(stored.document.versions.length, 2);
   });
+  it('filters the stored list by literal title, platform and internal status', async () => {
+    const s = service(db);
+    const tag = randomUUID();
+    const rows = [];
+    for (const [title, platform] of [
+      [`${tag}%_ literal`, 'xiaohongshu'],
+      [`${tag}AB literal`, 'xiaohongshu'],
+      [`${tag} different platform`, 'zhihu'],
+    ]) {
+      const row = await s.create(
+        { ...input, title, platform },
+        'synthetic-admin'
+      );
+      ownedIds.push(row.id);
+      rows.push(row);
+    }
+    await s.command(
+      { id: rows[0].id, revision: 1, type: 'status', status: 'ready' },
+      'synthetic-admin'
+    );
+    assert.strictEqual((await s.list({ q: tag })).total, 3);
+    const literal = await s.list({ q: `${tag}%_` });
+    assert.strictEqual(literal.total, 1);
+    assert.strictEqual(literal.items[0].id, rows[0].id);
+    assert.strictEqual(
+      (await s.list({ q: tag, status: 'ready', platform: 'xiaohongshu' }))
+        .total,
+      1
+    );
+    assert.strictEqual(
+      (await s.list({ q: tag, status: 'ready', platform: 'zhihu' })).total,
+      0
+    );
+    assert.strictEqual(
+      (await s.list({ q: tag, status: 'draft', platform: 'zhihu' })).items[0]
+        .id,
+      rows[2].id
+    );
+  });
 });
