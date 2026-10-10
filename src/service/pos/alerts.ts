@@ -51,7 +51,7 @@ export interface AlertInput {
 }
 
 const KCAL_PER_KG = 7700;
-const shift = (d: string, n: number) =>
+export const shift = (d: string, n: number) =>
   new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 const cnDate = (iso: string) => new Date(Date.parse(iso) + 8 * 3600 * 1000).toISOString().slice(0, 10);
 const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -60,12 +60,16 @@ const sgn = (x: number, unit = '') => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math
 /** 吃得太少的下限：同预算引擎 max(1500, BMR×0.9)。 */
 export const intakeFloor = (bmr: number) => Math.max(1500, Math.round(bmr * 0.9));
 
-/** 近 days 天（含今天）每日热量缺口，升序。 */
-export function deficitDays(input: AlertInput, days = 14): DeficitDay[] {
+/** 截至 end（默认今天，含）的近 days 天每日热量缺口，升序。 */
+export function deficitDays(
+  input: Pick<AlertInput, 'today' | 'budget' | 'meals' | 'activity'>,
+  days = 14,
+  end = input.today
+): DeficitDay[] {
   const mealMap = new Map(input.meals.map(m => [m.date, m]));
   const actMap = new Map(input.activity.map(a => [a.date, a]));
   return Array.from({ length: days }, (_, i) => {
-    const date = shift(input.today, i - days + 1);
+    const date = shift(end, i - days + 1);
     const m = mealMap.get(date);
     const a = actMap.get(date);
     const final = !!a?.updatedAt && cnDate(a.updatedAt) > date;
@@ -99,7 +103,7 @@ export function deficitSummary(input: AlertInput) {
 }
 
 /** 体重 7 日均线在某日（含）之前、且不早于 maxLag 天的最后一个点。 */
-function maAt(ma: Array<{ date: string; value: number }>, date: string, maxLag: number) {
+export function maAt(ma: Array<{ date: string; value: number }>, date: string, maxLag: number) {
   const p = [...ma].reverse().find(x => x.date <= date);
   return p && daysBetween(p.date, date) <= maxLag ? p : null;
 }

@@ -313,4 +313,12 @@ export async function ensurePosSchema(
       last_pushed DATETIME NULL,
       ${STAMPS}
     ) ${TABLE_TAIL}`);
+
+  // 健康周复盘：每周一份（周一到周日），推送后记 pushed_at 防重复
+  await run(`CREATE TABLE IF NOT EXISTS pos_weekly_review (
+      week_start DATE PRIMARY KEY,
+      data_json MEDIUMTEXT NOT NULL,
+      pushed_at DATETIME NULL,
+      ${STAMPS}
+    ) ${TABLE_TAIL}`);
 }

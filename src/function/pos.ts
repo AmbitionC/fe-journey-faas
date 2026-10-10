@@ -13,6 +13,7 @@ import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
 import { PosDashboardService } from '../service/pos/dashboard';
 import { PosAlertService } from '../service/pos/alertPush';
+import { PosReviewService } from '../service/pos/reviewService';
 import { PosFinanceService } from '../service/pos/finance';
 import { PosContextService, MANUAL_METRICS } from '../service/pos/context';
 import { todayCN } from '../service/pos/logic';
@@ -41,6 +42,9 @@ export class PosHTTPService {
 
   @Inject()
   alertService: PosAlertService;
+
+  @Inject()
+  reviewService: PosReviewService;
 
   @Inject()
   contextService: PosContextService;
@@ -93,6 +97,22 @@ export class PosHTTPService {
   async alertsPush(@Query(ALL) query: { dryRun?: string }) {
     this.assertToken();
     return this.ok(await this.alertService.push({ dryRun: query?.dryRun === '1' }));
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/review/weekly', method: 'get', functionName: 'posReviewWeekly', name: 'posReviewWeekly', description: '健康周复盘：本周至今 + 历史周' })
+  @NoAuth()
+  async reviewWeekly(@Query(ALL) query: { limit?: string }) {
+    this.assertToken();
+    return this.ok(await this.reviewService.list(Math.min(52, Math.max(1, Number(query?.limit) || 12))));
+  }
+
+  /** 定时函数调用（每周一北京 09:00）：上一周复盘存档 + 推送（同一周只推一次）。dryRun=1 只算不存不推。 */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/review/weekly/run', method: 'post', functionName: 'posReviewWeeklyRun', name: 'posReviewWeeklyRun', description: '生成并推送上周复盘' })
+  @NoAuth()
+  async reviewWeeklyRun(@Query(ALL) query: { dryRun?: string; week?: string }) {
+    this.assertToken();
+    const week = query?.week && /^\d{4}-\d{2}-\d{2}$/.test(query.week) ? query.week : undefined;
+    return this.ok(await this.reviewService.run({ dryRun: query?.dryRun === '1', weekStart: week }));
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/career', method: 'get', functionName: 'posCareer', name: 'posCareer', description: '主业收入 + 副业经营' })

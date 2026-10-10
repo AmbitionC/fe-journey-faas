@@ -45,10 +45,10 @@ export class PosAlertService {
     let posted = false;
     let reason: string | undefined;
     if (toPush.length) {
-      // 评论由机器人账号发出，@ 本人才走「@mentions」通知通道发邮件（同 invest-model gh_notify）
-      const mention = process.env.POS_ALERT_MENTION || process.env.LIVE_WATCH_MENTION || '@AmbitionC';
-      const body = `${renderComment(today, hour, h.deficit, alerts, new Set(toPush.map(a => a.key)))}\n\n${mention}`;
-      const r = await this.postComment(body);
+      const r = await postIssueComment(
+        process.env.POS_ALERT_ISSUE || '285',
+        renderComment(today, hour, h.deficit, alerts, new Set(toPush.map(a => a.key)))
+      );
       posted = r.ok;
       reason = r.reason;
     }
@@ -78,27 +78,32 @@ export class PosAlertService {
 
     return { alerts, toPush: toPush.map(a => a.key), posted, reason };
   }
+}
 
-  private async postComment(body: string): Promise<{ ok: boolean; reason?: string }> {
-    const token = process.env.POS_ALERT_GH_TOKEN || '';
-    const repo = process.env.POS_ALERT_REPO || 'AmbitionC/invest-model';
-    const issue = process.env.POS_ALERT_ISSUE || '285';
-    if (!token) return { ok: false, reason: 'no_token' };
-    try {
-      const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issue}/comments`, {
-        method: 'POST',
-        headers: {
-          Authorization: `token ${token}`,
-          Accept: 'application/vnd.github+json',
-          'Content-Type': 'application/json',
-          'User-Agent': 'fe-journey-pos-alert',
-        },
-        body: JSON.stringify({ body }),
-      });
-      return res.ok ? { ok: true } : { ok: false, reason: `github_${res.status}` };
-    } catch (e: any) {
-      return { ok: false, reason: String(e?.message || e).slice(0, 120) };
-    }
+
+/**
+ * 在 invest-model 的 Issue 下追评。评论由机器人账号发出，末尾 @ 本人才走「@mentions」通知通道发邮件
+ * （同 invest-model faas/gh_notify.py）。令牌缺失/失败不抛错，返回 reason。
+ */
+export async function postIssueComment(issue: string, text: string): Promise<{ ok: boolean; reason?: string }> {
+  const token = process.env.POS_ALERT_GH_TOKEN || '';
+  const repo = process.env.POS_ALERT_REPO || 'AmbitionC/invest-model';
+  const mention = process.env.POS_ALERT_MENTION || process.env.LIVE_WATCH_MENTION || '@AmbitionC';
+  if (!token) return { ok: false, reason: 'no_token' };
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issue}/comments`, {
+      method: 'POST',
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'fe-journey-pos-alert',
+      },
+      body: JSON.stringify({ body: `${text}\n\n${mention}` }),
+    });
+    return res.ok ? { ok: true } : { ok: false, reason: `github_${res.status}` };
+  } catch (e: any) {
+    return { ok: false, reason: String(e?.message || e).slice(0, 120) };
   }
 }
 

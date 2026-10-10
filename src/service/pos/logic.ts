@@ -494,7 +494,7 @@ export function sleepSummary(
   return { avg7, nights: last7.length, short: avg7 < 7, series };
 }
 
-const STRENGTH_RE = /strength|resistance|weight|力量|抗阻|举重|器械|功能性/i;
+export const STRENGTH_RE = /strength|resistance|weight|力量|抗阻|举重|器械|功能性/i;
 
 /**
  * 近 7 天做过力量训练的天数。14 天内一条训练记录都没有时返回 null
