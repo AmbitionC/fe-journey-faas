@@ -179,6 +179,45 @@ export const NAME_ZH: Record<string, string> = {
   '0178': '绳索侧平举',
   '1409': '杠铃臀桥',
   '0597': '坐姿髋外展',
+  '0770': '史密斯深蹲',
+  '0743': '器械哈克深蹲',
+  '0493': '上斜俯卧撑',
+  '2144': '坐姿绳索推胸',
+  '0198': '绳索下拉',
+  '0292': '单臂哑铃划船',
+  '0293': '哑铃俯身划船',
+  '0027': '杠铃俯身划船',
+  '0765': '史密斯坐姿推肩',
+  '0361': '单臂哑铃推肩',
+  '1460': '行走箭步蹲',
+  '0768': '史密斯分腿蹲',
+  '0582': '跪姿腿弯举',
+  '0380': '哑铃俯身侧平举',
+  '0464': '平板支撑转体',
+  '0979': '弹力带抗旋转推',
+  '0194': '绳索过头臂屈伸',
+  '0868': '绳索弯举',
+  '0165': '绳索锤式弯举',
+};
+
+/**
+ * 按动作模式的替代动作（上游没有「动作模式」字段，只按目标肌群找替代会跑偏——
+ * 例如倒蹬被标成「臀」，按肌群会推荐臀桥、硬拉）。换动作时这些排最前，其后才是同目标肌群的。
+ */
+export const PATTERN_ALTS: Record<string, string[]> = {
+  squat: ['0739', '1760', '0770', '0743', '0043', '0585'],
+  hinge: ['0573', '1459', '0085', '0811', '1409', '0489'],
+  hpush: ['0577', '0289', '0025', '0314', '2144', '0493'],
+  vpull: ['2330', '0818', '0017', '0198'],
+  hpull: ['1350', '0861', '0292', '0293', '0027'],
+  vpush: ['0603', '0405', '0765', '0361'],
+  single: ['0431', '0410', '1460', '0768'],
+  legcurl: ['0599', '0586', '0582'],
+  reardelt: ['0602', '0203', '0383', '0380'],
+  core: ['0276', '2135', '0464', '0979'],
+  triceps: ['0201', '0200', '0194'],
+  biceps: ['0313', '0294', '0868', '0165'],
+  carry: ['2133'],
 };
 
 const BY_ID = new Map(EXERCISES.map(e => [e.id, e]));
@@ -238,14 +277,21 @@ export function view(e: ExerciseRow): ExerciseView {
 }
 
 /**
- * 替代动作：同一目标肌群、健身房有的器械；有中文名的（计划/常用动作）排前，其次同器械，再按名称。
+ * 替代动作：先按动作模式（传了槽位时，PATTERN_ALTS），再补同一目标肌群、健身房有的器械的；
+ * 后者有中文名的排前，其次同器械，再按名称。
  * 上游有同一动作多个视角的重复条目（如 side pov / back pov），按去掉括号后的名称去重。
  */
-export function alternatives(id: string, limit = 12): ExerciseView[] {
+export function alternatives(id: string, slot?: string, limit = 12): ExerciseView[] {
   const e = BY_ID.get(id);
   if (!e) return [];
   const seen = new Set<string>([e.name.replace(/\s*\(.*?\)\s*/g, '').trim()]);
-  return EXERCISES.filter(x => x.id !== id && x.target === e.target && GYM_EQ.has(x.eq))
+  const curated = (slot && PATTERN_ALTS[slot] ? PATTERN_ALTS[slot] : [])
+    .filter(x => x !== id)
+    .map(x => BY_ID.get(x))
+    .filter((x): x is ExerciseRow => !!x);
+  for (const x of curated) seen.add(x.name.replace(/\s*\(.*?\)\s*/g, '').trim());
+  const curatedIds = new Set(curated.map(x => x.id));
+  const byTarget = EXERCISES.filter(x => x.id !== id && !curatedIds.has(x.id) && x.target === e.target && GYM_EQ.has(x.eq))
     .sort(
       (a, b) =>
         Number(!!NAME_ZH[b.id]) - Number(!!NAME_ZH[a.id]) ||
@@ -258,8 +304,8 @@ export function alternatives(id: string, limit = 12): ExerciseView[] {
       seen.add(k);
       return true;
     })
-    .slice(0, limit)
-    .map(view);
+    .slice(0, Math.max(0, limit - curated.length));
+  return [...curated, ...byTarget].map(view);
 }
 
 /** 动作库搜索：关键词匹配英文名/中文名，可按部位、器械筛。 */

@@ -1,6 +1,6 @@
 import { Provide, Inject } from '@midwayjs/core';
 import { HealthDbService } from '../db';
-import { PLAN, SessionKey, SessionLog, SetLog, today as planToday, volumeByGroup, weekOf } from './plan';
+import { PLAN, SessionKey, SessionLog, SetLog, today as planToday, unitOf, volumeByGroup, weekOf } from './plan';
 import { alternatives, exerciseById, NAME_ZH, search, view } from './catalog';
 
 const toDateStr = (v: any): string => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
@@ -118,10 +118,10 @@ export class HealthTrainingService {
     return h.filter(s => s.date >= from).flatMap(s => s.sets.map(x => ({ ...x, date: s.date })));
   }
 
-  exercise(id: string) {
+  exercise(id: string, slot?: string) {
     const e = exerciseById(id);
     if (!e) throw new Error('动作不存在');
-    return { ...view(e), alternatives: alternatives(id) };
+    return { ...view(e), alternatives: alternatives(id, slot) };
   }
 
   search(p: { q?: string; part?: string; eq?: string }) {
@@ -149,6 +149,7 @@ export class HealthTrainingService {
             name: NAME_ZH[id] || id,
             sets: s.sets[i],
             reps: s.reps[i],
+            unit: unitOf(s, id),
           })),
         })),
       })),

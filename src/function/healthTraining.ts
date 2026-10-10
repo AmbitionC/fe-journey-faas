@@ -65,9 +65,9 @@ export class HealthTrainingHTTPService {
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/health/exercise/detail', method: 'get', functionName: 'healthExerciseDetail', name: 'healthExerciseDetail', description: '动作详情 + 替代动作' })
   @NoAuth()
-  async exercise(@Query(ALL) q: { id?: string }) {
+  async exercise(@Query(ALL) q: { id?: string; slot?: string }) {
     this.assertToken();
-    return { success: true, data: this.training.exercise(String(q?.id || '')) };
+    return { success: true, data: this.training.exercise(String(q?.id || ''), q?.slot || undefined) };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/health/exercise/search', method: 'get', functionName: 'healthExerciseSearch', name: 'healthExerciseSearch', description: '动作库搜索' })

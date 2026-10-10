@@ -97,6 +97,12 @@ describe('training 动作库与 12 周计划', () => {
     assert.strictEqual(v['肩'], 0.5);
   });
 
+  it('按槽位换动作：倒蹬的替代是蹲类动作，不是臀桥硬拉（上游把倒蹬标成「臀」）', () => {
+    const alts = alternatives('0739', 'squat').slice(0, 5).map(a => a.id);
+    assert.deepStrictEqual(alts, ['1760', '0770', '0743', '0043', '0585']);
+    for (const s of [...PLAN.sessions.A, ...PLAN.sessions.B]) for (const id of s.ex) assert.ok(exerciseById(id));
+  });
+
   it('替代动作同目标肌群、健身房有的器械、不重复视角；搜索支持中文名', () => {
     const alts = alternatives('0577');
     assert.ok(alts.length > 5);
