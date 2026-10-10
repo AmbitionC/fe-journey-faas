@@ -301,4 +301,16 @@ export async function ensurePosSchema(
       why TEXT NULL,
       ${STAMPS}
     ) ${TABLE_TAIL}`);
+
+  // 预警推送去重状态（健康 / 热量差预警，每个 key 一行）
+  await run(`CREATE TABLE IF NOT EXISTS pos_alert_state (
+      alert_key VARCHAR(80) PRIMARY KEY,
+      level VARCHAR(8) NOT NULL,
+      title VARCHAR(200) NOT NULL,
+      active TINYINT NOT NULL DEFAULT 1,
+      first_seen DATE NOT NULL,
+      last_seen DATE NOT NULL,
+      last_pushed DATETIME NULL,
+      ${STAMPS}
+    ) ${TABLE_TAIL}`);
 }

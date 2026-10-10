@@ -12,6 +12,7 @@ import { Context } from '@midwayjs/faas';
 import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
 import { PosDashboardService } from '../service/pos/dashboard';
+import { PosAlertService } from '../service/pos/alertPush';
 import { PosFinanceService } from '../service/pos/finance';
 import { PosContextService, MANUAL_METRICS } from '../service/pos/context';
 import { todayCN } from '../service/pos/logic';
@@ -37,6 +38,9 @@ export class PosHTTPService {
 
   @Inject()
   financeService: PosFinanceService;
+
+  @Inject()
+  alertService: PosAlertService;
 
   @Inject()
   contextService: PosContextService;
@@ -74,6 +78,21 @@ export class PosHTTPService {
   async dashboard() {
     this.assertToken();
     return this.ok(await this.dashboardService.dashboard());
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/alerts', method: 'get', functionName: 'posAlerts', name: 'posAlerts', description: '健康 / 热量差预警' })
+  @NoAuth()
+  async alerts() {
+    this.assertToken();
+    return this.ok(await this.alertService.current());
+  }
+
+  /** 定时函数调用（北京 08:30 / 20:30）：去重后有新预警才推送。dryRun=1 只算不推不记。 */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/alerts/push', method: 'post', functionName: 'posAlertsPush', name: 'posAlertsPush', description: '预警去重推送' })
+  @NoAuth()
+  async alertsPush(@Query(ALL) query: { dryRun?: string }) {
+    this.assertToken();
+    return this.ok(await this.alertService.push({ dryRun: query?.dryRun === '1' }));
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/career', method: 'get', functionName: 'posCareer', name: 'posCareer', description: '主业收入 + 副业经营' })

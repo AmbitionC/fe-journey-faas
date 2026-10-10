@@ -126,6 +126,17 @@ jobs:
               output.write(f"url={url}\n")
           EOF
 
+      # Personal OS 健康预警定时器（北京 08:30 / 20:30 调 /pos/alerts/push）。
+      # 公网地址取上一步输出；冒烟用 dryRun 真实调一次（只算不推），令牌/地址不对即变红。
+      - name: Deploy pos-alert-cron (timer) + smoke
+        env:
+          POS_API_BASE: ${{ steps.function_url.outputs.url }}
+        run: |
+          set -o pipefail
+          s posAlertCron deploy -y --access aliyun
+          s posAlertCron invoke -e '{"dryRun":true}' --access aliyun | tee /tmp/pos-alert-smoke.out
+          ! grep -qE "Error Type|InvocationError|InternalServerError|failed to \[invoke\]" /tmp/pos-alert-smoke.out
+
       # 资源仓库的 Actions 被停用时，可通过一次带 [resync-content] 的发布提交
       # 使用本仓库已配置的运行时凭证，分批恢复 OSS 图片与最新知识目录。
       - name: Repair published knowledge content

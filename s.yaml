@@ -64,6 +64,9 @@ resources:
         # HEALTH_API_TOKEN 未配置时模块拒绝所有请求，不影响其他功能。
         HEALTH_DB_NAME: ${env('HEALTH_DB_NAME', 'health')}
         HEALTH_API_TOKEN: ${env('HEALTH_API_TOKEN', '')}
+        # 健康预警推送（/pos/alerts/push）：借 invest-model Issue 评论 → 邮件，PAT 需该仓 Issues RW
+        POS_ALERT_GH_TOKEN: ${env('INVEST_GH_PAT', '')}
+        POS_ALERT_MENTION: ${env('LIVE_WATCH_MENTION', '')}
         # 限时免费：当前未收费阶段，所有人按会员对待（AI 无限、不限流）。将来收费时改 'false'。
         # 显式写死是因为不设时可能残留旧值导致会员被误限流（RATE_LIMIT）。
         MEMBERSHIP_FREE: 'true'
@@ -94,6 +97,41 @@ resources:
               - DELETE
               - OPTIONS
               - HEAD
+
+  # ══ Personal OS 健康预警定时器 ══════════════════════════════════════
+  # 只按时调 Web 函数 /pos/alerts/push（计算/去重/推送都在 Web 函数里）。
+  # POS_API_BASE 由 deploy.yml 从 Web 函数 httpTrigger 公网地址注入。
+  posAlertCron:
+    component: fc3
+    props:
+      region: cn-hangzhou
+      functionName: pos-alert-cron
+      description: 'Personal OS 健康/热量差预警：北京 08:30、20:30 触发推送'
+      runtime: python3.10
+      handler: index.handler
+      cpu: 0.05
+      memorySize: 128
+      diskSize: 512
+      timeout: 60
+      code: ./cron/pos-alert
+      environmentVariables:
+        POS_API_BASE: ${env('POS_API_BASE', '')}
+        HEALTH_API_TOKEN: ${env('HEALTH_API_TOKEN', '')}
+      triggers:
+        - triggerName: morning
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 30 0 * * *'    # 北京 08:30：昨天热量差已结算 + 体成分/睡眠/数据断档
+            enable: true
+            payload: 'morning'
+        - triggerName: evening
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 30 12 * * *'   # 北京 20:30：今天超预算 / 蛋白缺口 / 还没记餐
+            enable: true
+            payload: 'evening'
 
   # ══ invest-model 定时任务（盯盘/复盘等，从 GitHub Actions 迁来）═══════════
   # 与 fe-journey 完全解耦：独立代码包 / 独立环境变量 / 独立触发器 / 独立部署 job，

@@ -8,6 +8,7 @@ import { HealthBudgetService } from '../health/budget';
 import { HealthProfileService } from '../health/profile';
 import { GrowthService } from '../growth';
 import { computeGaps, daysBetween, freshness, movingAvg, muscleTrend, sleepSummary, strengthDays, todayCN } from './logic';
+import { AlertInput, deficitSummary, healthAlerts } from './alerts';
 
 /** 单块失败不拖垮整页：返回 { error } 由前端显示「该块暂不可用」。 */
 async function safe<T>(fn: () => Promise<T>): Promise<T | { error: string }> {
@@ -53,7 +54,7 @@ export class PosDashboardService {
   @Inject()
   growthService: GrowthService;
 
-  async health(today = todayCN()) {
+  async health(today = todayCN(), hour = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours()) {
     const [trend, day, range, budget, activity, waist, profile] = await Promise.all([
       this.bodyService.trend(180),
       this.mealService.day(today),
@@ -84,6 +85,21 @@ export class PosDashboardService {
       return { date: d, kcal: r ? r.totalKcal : null, budget: budget.intakeKcal };
     });
     const loggedDays = kcalSeries.filter(k => k.kcal != null && k.date !== today);
+    const alertInput: AlertInput = {
+      today,
+      hour,
+      budget: {
+        intake: budget.intakeKcal,
+        protein: budget.proteinG,
+        tdee: budget.basis.tdee,
+        deficitTarget: budget.basis.deficitKcal,
+        bmr: budget.basis.bmr,
+      },
+      meals: range.map(r => ({ date: r.date, kcal: r.totalKcal, proteinG: r.proteinG, meals: r.mealsLogged })),
+      activity,
+      body: trend,
+    };
+    const def = deficitSummary(alertInput);
     return {
       weight: latest
         ? {
@@ -132,6 +148,14 @@ export class PosDashboardService {
       muscle: muscleTrend(trend),
       sleep7: sleepSummary(activity, today),
       strengthDays7: strengthDays(activity, today),
+      alerts: healthAlerts(alertInput),
+      deficit: {
+        yesterday: def.yesterday,
+        avg7: def.avg7,
+        completeDays7: def.completeDays7,
+        target: def.target,
+        series: def.days.map(d => ({ date: d.date, deficit: d.complete ? d.deficit : null })),
+      },
       tdee: { value: budget.basis.tdee, source: budget.basis.tdeeSource },
       weightSeries: points.map((p, i) => ({ date: p.date, value: p.value, ma7: ma[i].value })),
       kcalSeries,
