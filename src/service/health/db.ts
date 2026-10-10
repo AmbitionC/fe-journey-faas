@@ -8,8 +8,8 @@ import { DataSource } from 'typeorm';
  * - 独立数据库（默认 `health`，同 RDS 实例），不注册进 @midwayjs/typeorm 全局
  *   数据源——避免启动时强制建连，库不可达只影响 /health/* 请求，不殃及主站。
  * - 惰性初始化：首次 /health/* 请求才建连；失败清空缓存允许下次重试。
- * - 表结构由本模块唯一拥有：首次建连后幂等执行 CREATE TABLE IF NOT EXISTS，
- *   并在空表时植入基线数据（2026-07-15 体成分 + 个人档案），无需手工初始化。
+ * - 表结构由本模块唯一拥有：首次建连后幂等执行 CREATE TABLE IF NOT EXISTS。
+ * - 个人数据（体成分、健康档案）不写在代码里（本仓公开）：由网页录入或私有数据通道同步写入。
  */
 @Provide()
 @Scope(ScopeEnum.Singleton)
@@ -165,52 +165,6 @@ export class HealthDbService {
       preferences TEXT NULL,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
-
-    // ---- 基线种子（幂等：仅空表写入）----
-    const [{ c: bodyCount }] = await ds.query(
-      'SELECT COUNT(*) AS c FROM body_composition'
-    );
-    if (Number(bodyCount) === 0) {
-      await ds.query(
-        `INSERT INTO body_composition
-          (record_date, weight_kg, bmi, body_fat_pct, body_fat_mass_kg, muscle_mass_kg,
-           skeletal_muscle_mass_kg, visceral_fat_level, subcutaneous_fat_pct, protein_pct, water_pct, notes)
-         VALUES ('2026-07-15', 89.75, 28.30, 27.0, 24.2, 62.0, 34.2, 12, 19.3, 16.4, 51.9,
-                 '基线测量（由 health 仓库 data/body-composition/2026-07-15.json 迁移）')`
-      );
-    }
-
-    const [{ c: profileCount }] = await ds.query(
-      'SELECT COUNT(*) AS c FROM health_profile'
-    );
-    if (Number(profileCount) === 0) {
-      const goals = JSON.stringify([
-        {
-          horizon: '3个月',
-          target: '体重 ≤ 85 kg',
-          metric: 'weight_kg',
-          value: 85,
-        },
-        {
-          horizon: '6个月',
-          target: '体重 ≤ 80 kg，内脏脂肪等级 ≤ 10',
-          metric: 'weight_kg',
-          value: 80,
-        },
-        {
-          horizon: '12个月',
-          target: '体重 74–78 kg，体脂率 18–20%',
-          metric: 'weight_kg',
-          value: 76,
-        },
-      ]);
-      await ds.query(
-        `INSERT INTO health_profile
-          (id, height_cm, birth_year, sex, activity_factor, deficit_kcal, protein_per_kg, goal_weight_kg, goals_json)
-         VALUES (1, 178.2, 1995, 'male', 1.25, 400, 1.80, 76.0, ?)`,
-        [goals]
-      );
-    }
   }
 
   private withTimeout<T>(p: Promise<T>, label: string): Promise<T> {

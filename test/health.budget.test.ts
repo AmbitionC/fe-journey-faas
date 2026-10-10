@@ -10,13 +10,13 @@ function makeService(opts: {
   const svc = new HealthBudgetService();
   (svc as any).profileService = {
     get: async () => ({
-      heightCm: 178.2,
-      birthYear: 1995,
+      heightCm: 175,
+      birthYear: 1990,
       sex: 'male',
       activityFactor: 1.25,
       deficitKcal: 400,
       proteinPerKg: 1.8,
-      goalWeightKg: 76,
+      goalWeightKg: 70,
       goals: [],
       preferences: null,
       updatedAt: null,
@@ -37,23 +37,22 @@ function makeService(opts: {
 }
 
 describe('health/budget.ts 预算引擎', () => {
-  it('基线数据（89.75kg/27%体脂）：BMR 取 Mifflin 与 Katch 均值，TDEE 走系数估算', async () => {
+  it('有体成分（80kg/25%体脂）：BMR 取 Mifflin 与 Katch 均值，TDEE 走系数估算', async () => {
     const svc = makeService({
-      body: { weightKg: 89.75, bodyFatPct: 27.0 },
+      body: { weightKg: 80, bodyFatPct: 25 },
     });
     const b = await svc.current();
-    // Mifflin: 10*89.75 + 6.25*178.2 - 5*31 + 5 ≈ 1861；Katch: 370+21.6*65.52 ≈ 1785
-    assert.ok(b.basis.bmrMifflin >= 1855 && b.basis.bmrMifflin <= 1870);
-    assert.ok(
-      b.basis.bmrKatch != null && b.basis.bmrKatch >= 1780 && b.basis.bmrKatch <= 1790
-    );
+    // 夹具为虚构数据（本仓公开）。Mifflin: 10*80 + 6.25*175 - 5*年龄 + 5；Katch: 370 + 21.6*60 = 1666
+    const age = new Date().getFullYear() - 1990;
+    assert.strictEqual(b.basis.bmrMifflin, Math.round(800 + 1093.75 - 5 * age + 5));
+    assert.strictEqual(b.basis.bmrKatch, 1666);
     assert.strictEqual(b.basis.tdeeSource, 'estimated');
     assert.strictEqual(b.basis.tdee, Math.round(b.basis.bmr * 1.25));
     // 摄入 = TDEE - 400，且不低于下限
     assert.strictEqual(b.intakeKcal, b.basis.tdee - 400);
-    // 蛋白 = 76 * 1.8 = 137
-    assert.strictEqual(b.proteinG, 137);
-    assert.deepStrictEqual(b.proteinRange, [122, 152]);
+    // 蛋白 = 70 * 1.8 = 126
+    assert.strictEqual(b.proteinG, 126);
+    assert.deepStrictEqual(b.proteinRange, [112, 140]);
   });
 
   it('近14天实测能量 ≥3 天时 TDEE 升级为实测均值', async () => {
@@ -85,7 +84,7 @@ describe('health/budget.ts 预算引擎', () => {
 
   it('摄入预算不会跌破 max(1500, BMR×0.9) 下限（防过度节食）', async () => {
     const svc = makeService({
-      body: { weightKg: 89.75, bodyFatPct: 27.0 },
+      body: { weightKg: 80, bodyFatPct: 25 },
       profile: { deficitKcal: 2000 },
     });
     const b = await svc.current();
@@ -113,7 +112,7 @@ describe('health/budget.ts 预算引擎', () => {
   });
 
   it('宏量拆分：蛋白4+脂肪9+碳水4 卡路里合计不超过预算', async () => {
-    const svc = makeService({ body: { weightKg: 89.75, bodyFatPct: 27.0 } });
+    const svc = makeService({ body: { weightKg: 80, bodyFatPct: 25 } });
     const b = await svc.current();
     const kcalSum = b.proteinG * 4 + b.fatG * 9 + b.carbsG * 4;
     assert.ok(Math.abs(kcalSum - b.intakeKcal) <= 8, `拆分误差过大：${kcalSum} vs ${b.intakeKcal}`);
