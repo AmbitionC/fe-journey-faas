@@ -54,7 +54,7 @@ describe('pos/review 健康周复盘', () => {
     assert.strictEqual(c.body.weightDelta, -0.7);
     assert.strictEqual(c.body.expectedLossKg, 0.5);
     assert.deepStrictEqual(r.focus, ['保持现在的节奏']);
-    assert.strictEqual(r.wins.length, 2);
+    assert.strictEqual(r.wins.length, 3);
     assert.ok(r.prev, '有上周对比');
     assert.ok(r.goal && r.goal.remainingKg > 0 && r.goal.weeksAtPace! > 0);
   });
@@ -93,6 +93,33 @@ describe('pos/review 健康周复盘', () => {
     inp.body = inp.body.map(b => ({ ...b, weightKg: 88 }));
     r = weeklyReview(inp, '2026-10-05');
     assert.ok(r.focus.some(f => f.startsWith('热量账对不上')), r.focus.join('|'));
+  });
+
+  it('按计划练：次数不够进重点；够了且加了重量进做得好；某块练太少提示', () => {
+    const set = (date: string, id: string, w: number) =>
+      [1, 2, 3].map(n => ({ date, exerciseId: id, setNo: n, weightKg: w, reps: 12 }));
+    // 上周练过推胸 40kg；本周 10-06 / 10-08 / 10-10 三次，推胸加到 42.5，倒蹬、下拉、划船都练
+    const prevWeek = set('2026-09-30', '0577', 40);
+    const week = ['2026-10-06', '2026-10-08', '2026-10-10'].flatMap(d => [
+      ...set(d, '0577', 42.5),
+      ...set(d, '0739', 80),
+      ...set(d, '2330', 40),
+      ...set(d, '1350', 40),
+    ]);
+    let inp = base();
+    inp.training = { planned: 3, sets: [...prevWeek, ...week] };
+    let r = weeklyReview(inp, '2026-10-05');
+    assert.strictEqual(r.cur.train.sessions, 3);
+    assert.strictEqual(r.cur.train.progressed, 1);
+    assert.ok(r.wins.includes('力量训练 3/3 次，1 个动作加了重量'), r.wins.join('|'));
+    assert.ok(!r.focus.some(f => f.startsWith('力量训练')));
+    assert.ok(renderWeekly(r).includes('| 力量训练 | 3/3 次 |'));
+    assert.ok(renderWeekly(r).includes('训练量（组）：胸 9'));
+
+    inp = base();
+    inp.training = { planned: 3, sets: set('2026-10-06', '0577', 40) };
+    r = weeklyReview(inp, '2026-10-05');
+    assert.ok(r.focus.some(f => f === '力量训练：本周 1/3 次'), r.focus.join('|'));
   });
 
   it('进行中的周只算已结束的日子', () => {

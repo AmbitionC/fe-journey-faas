@@ -7,7 +7,9 @@ import { HealthActivityService } from '../health/activity';
 import { HealthBudgetService } from '../health/budget';
 import { HealthProfileService } from '../health/profile';
 import { GrowthService } from '../growth';
-import { computeGaps, daysBetween, freshness, movingAvg, muscleTrend, sleepSummary, strengthDays, todayCN } from './logic';
+import { computeGaps, daysBetween, freshness, movingAvg, muscleTrend, sleepSummary, strengthDays, todayCN, withTrainingDays } from './logic';
+import { HealthTrainingService } from '../health/training/service';
+import { ActivityRecord } from '../health/activity';
 import { AlertInput, deficitSummary, healthAlerts } from './alerts';
 
 /** 单块失败不拖垮整页：返回 { error } 由前端显示「该块暂不可用」。 */
@@ -19,6 +21,20 @@ async function safe<T>(fn: () => Promise<T>): Promise<T | { error: string }> {
   }
 }
 const isErr = (v: any): v is { error: string } => v && typeof v === 'object' && 'error' in v && Object.keys(v).length === 1;
+
+const blankActivity = (date: string): ActivityRecord => ({
+  date,
+  steps: null,
+  activeKcal: null,
+  restingKcal: null,
+  exerciseMinutes: null,
+  standHours: null,
+  workouts: [],
+  sleepHours: null,
+  weightKg: null,
+  source: 'training-log',
+  updatedAt: null,
+});
 
 const shiftDate = (d: string, days: number) =>
   new Date(Date.parse(`${d}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
@@ -54,8 +70,11 @@ export class PosDashboardService {
   @Inject()
   growthService: GrowthService;
 
+  @Inject()
+  trainingService: HealthTrainingService;
+
   async health(today = todayCN(), hour = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours()) {
-    const [trend, day, range, budget, activity, waist, profile] = await Promise.all([
+    const [trend, day, range, budget, watch, waist, profile, trained] = await Promise.all([
       this.bodyService.trend(180),
       this.mealService.day(today),
       this.mealService.range(shiftDate(today, -13), today),
@@ -63,7 +82,9 @@ export class PosDashboardService {
       this.activityService.list(14),
       this.context.latestMetric('health.waist').catch(() => null),
       this.profileService.get(),
+      this.trainingService.trainedDates(14, today).catch(() => [] as string[]),
     ]);
+    const activity = withTrainingDays(watch, trained, blankActivity);
     const points = trend.map(b => ({ date: b.date, value: b.weightKg }));
     const ma = movingAvg(points, 7);
     const latest = trend[trend.length - 1] || null;

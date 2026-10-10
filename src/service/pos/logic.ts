@@ -513,3 +513,20 @@ export function strengthDays(
     a => daysBetween(a.date, today) < 7 && (a.workouts || []).some(w => STRENGTH_RE.test(String(w.type || '')))
   ).length;
 }
+
+/**
+ * 把网站上记的力量训练日并进 Watch 活动数据（加一条「力量训练（记录）」workout），
+ * 让力量训练天数、预警、周复盘同时认 Watch 和训练记录。没有 Watch 记录的日子补一条空行。
+ */
+export function withTrainingDays<T extends { date: string; workouts: Array<{ type: string }> }>(
+  activity: T[],
+  dates: string[],
+  blank: (date: string) => T
+): T[] {
+  const set = new Set(dates);
+  const out = activity.map(a =>
+    set.has(a.date) ? { ...a, workouts: [...(a.workouts || []), { type: 'strength training (logged)' }] } : a
+  );
+  for (const d of set) if (!activity.some(a => a.date === d)) out.push({ ...blank(d), workouts: [{ type: 'strength training (logged)' }] });
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}

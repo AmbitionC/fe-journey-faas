@@ -152,6 +152,32 @@ export class HealthDbService {
       UNIQUE KEY uk_activity_date (record_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
+    // 训练计划（单人，id=1）：计划模板 key、开练日、本人换过的动作（槽位 → 数据集 ID）
+    await ds.query(`CREATE TABLE IF NOT EXISTS training_plan (
+      id INT PRIMARY KEY,
+      plan_key VARCHAR(48) NOT NULL,
+      start_date DATE NOT NULL,
+      overrides_json TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+    // 力量训练记录：一天一节课（A/B），一行一组；同一天同动作同组号幂等覆盖
+    await ds.query(`CREATE TABLE IF NOT EXISTS workout_set (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      session_date DATE NOT NULL,
+      session_key CHAR(1) NOT NULL,
+      exercise_id VARCHAR(8) NOT NULL,
+      slot VARCHAR(24) NULL,
+      set_no INT NOT NULL,
+      weight_kg DECIMAL(6,2) NULL,
+      reps INT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uk_set (session_date, exercise_id, set_no),
+      KEY idx_date (session_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
     await ds.query(`CREATE TABLE IF NOT EXISTS health_profile (
       id INT PRIMARY KEY,
       height_cm DECIMAL(5,1) NOT NULL,

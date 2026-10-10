@@ -9,6 +9,10 @@ import { nowCN, todayCN } from './logic';
 import { shift } from './alerts';
 import { ReviewInput, WeeklyReview, renderWeekly, weekStartOf, weeklyReview } from './review';
 import { postIssueComment } from './alertPush';
+import { HealthTrainingService } from '../health/training/service';
+import { PLAN } from '../health/training/plan';
+import { withTrainingDays } from './logic';
+import { ActivityRecord } from '../health/activity';
 
 /**
  * 健康周复盘：每周一（北京 09:00，pos-alert-cron 触发）对上一周出一份，
@@ -35,14 +39,33 @@ export class PosReviewService {
   @Inject()
   profileService: HealthProfileService;
 
+  @Inject()
+  trainingService: HealthTrainingService;
+
   private async input(today: string): Promise<ReviewInput> {
-    const [budget, range, activity, body, profile] = await Promise.all([
+    const [budget, range, watch, body, profile, plan, sets] = await Promise.all([
       this.budgetService.current(),
       this.mealService.range(shift(today, -21), today),
       this.activityService.list(25),
       this.bodyService.trend(180),
       this.profileService.get(),
+      this.trainingService.plan().catch(() => null),
+      this.trainingService.setsBetween(shift(today, -120), today).catch(() => []),
     ]);
+    const blank = (date: string): ActivityRecord => ({
+      date,
+      steps: null,
+      activeKcal: null,
+      restingKcal: null,
+      exerciseMinutes: null,
+      standHours: null,
+      workouts: [],
+      sleepHours: null,
+      weightKg: null,
+      source: 'training-log',
+      updatedAt: null,
+    });
+    const activity = withTrainingDays(watch, [...new Set(sets.map(x => x.date))], blank);
     const latest = body[body.length - 1];
     const goal =
       latest != null
@@ -61,6 +84,7 @@ export class PosReviewService {
       activity,
       body,
       goalKg: goal?.value ?? null,
+      training: { planned: plan ? PLAN.perWeek : null, sets },
     };
   }
 

@@ -1,5 +1,6 @@
 import { daysBetween, movingAvg, muscleTrend, STRENGTH_RE } from './logic';
 import { AlertInput, deficitDays, deficitHigh, intakeFloor, maAt, shift } from './alerts';
+import { SetLog, volumeByGroup } from '../health/training/plan';
 
 /**
  * 健康周复盘（纯函数，无 IO）。一周＝周一到周日（北京时间）。
@@ -17,6 +18,8 @@ export interface ReviewInput {
   body: Array<{ date: string; weightKg: number; bodyFatPct?: number | null; muscleMassKg: number | null }>;
   /** 下一阶段体重目标（kg），没有就 null */
   goalKg?: number | null;
+  /** 网站记的力量训练：计划每周几次（没开始计划为 null）+ 近几周的全部组 */
+  training?: { planned: number | null; sets: Array<SetLog & { date: string }> };
 }
 
 export interface WeekStats {
@@ -47,7 +50,18 @@ export interface WeekStats {
     expectedLossKg: number | null;
   };
   sleep: { avg: number | null; nights: number; shortNights: number };
-  train: { strengthDays: number; workoutDays: number; avgSteps: number | null; avgExerciseMin: number | null; watchDays: number };
+  train: {
+    strengthDays: number;
+    workoutDays: number;
+    avgSteps: number | null;
+    avgExerciseMin: number | null;
+    watchDays: number;
+    /** 网站记录的训练次数 / 计划次数 / 各大肌群组数 / 本周加了重量的动作数 */
+    sessions: number;
+    planned: number | null;
+    volume: Record<string, number> | null;
+    progressed: number;
+  };
 }
 
 export interface WeeklyReview {
@@ -100,6 +114,13 @@ export function weekStats(input: ReviewInput, weekStart: string): WeekStats {
   const mus0 = beforeWeek('muscleMassKg');
 
   const acts = input.activity.filter(a => inWeek(a.date));
+  const tsets = (input.training?.sets || []).filter(x => inWeek(x.date) && x.reps > 0);
+  const before = (input.training?.sets || []).filter(x => x.date < weekStart && x.reps > 0);
+  const topOf = (xs: SetLog[], id: string) => Math.max(0, ...xs.filter(x => x.exerciseId === id).map(x => x.weightKg ?? 0));
+  const progressed = [...new Set(tsets.map(x => x.exerciseId))].filter(id => {
+    const prevTop = topOf(before, id);
+    return prevTop > 0 && topOf(tsets, id) > prevTop;
+  }).length;
   const sleeps = acts.filter(a => a.sleepHours != null && a.sleepHours > 0).map(a => a.sleepHours as number);
   const steps = acts.filter(a => a.steps != null && (a.steps as number) > 0).map(a => a.steps as number);
   const exMin = acts.filter(a => a.exerciseMinutes != null).map(a => a.exerciseMinutes as number);
@@ -144,13 +165,17 @@ export function weekStats(input: ReviewInput, weekStart: string): WeekStats {
       avgSteps: rnd(avg(steps)),
       avgExerciseMin: rnd(avg(exMin)),
       watchDays: acts.filter(a => a.activeKcal != null || a.steps != null || a.sleepHours != null).length,
+      sessions: new Set(tsets.map(x => x.date)).size,
+      planned: input.training?.planned ?? null,
+      volume: tsets.length ? volumeByGroup(tsets) : null,
+      progressed,
     },
   };
 }
 
 const sgn = (x: number) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x).toLocaleString('en-US')}`;
 
-/** 下周重点（最多 3 条，按优先级）与做得好的地方（最多 2 条）。 */
+/** 下周重点与做得好的地方（各最多 3 条，按优先级）。 */
 export function judge(cur: WeekStats, input: ReviewInput): { focus: string[]; wins: string[] } {
   const focus: string[] = [];
   const wins: string[] = [];
@@ -176,9 +201,20 @@ export function judge(cur: WeekStats, input: ReviewInput): { focus: string[]; wi
     if ((cur.sleep.avg as number) < 7) focus.push(`睡眠：日均 ${cur.sleep.avg} 小时，${cur.sleep.shortNights} 晚不到 7 小时`);
     else wins.push(`睡眠日均 ${cur.sleep.avg} 小时`);
   }
-  if (cur.train.watchDays >= 3) {
-    if (cur.train.strengthDays < 2) focus.push(`力量训练：本周 ${cur.train.strengthDays} 次，至少 2 次`);
-    else wins.push(`力量训练 ${cur.train.strengthDays} 次`);
+  const tr = cur.train;
+  if (tr.planned != null) {
+    // 按计划：次数够不够、有没有哪块大肌群练得太少
+    if (tr.sessions < Math.min(tr.planned, Math.ceil((tr.planned * cur.days) / 7)))
+      focus.push(`力量训练：本周 ${tr.sessions}/${tr.planned} 次`);
+    // 按计划练够是这一阶段最该看到的正反馈，排在做得好第一条
+    else wins.unshift(`力量训练 ${tr.sessions}/${tr.planned} 次${tr.progressed ? `，${tr.progressed} 个动作加了重量` : ''}`);
+    if (tr.sessions >= 2 && tr.volume) {
+      const low = ['胸', '背', '腿前侧', '臀腿后侧'].filter(g => (tr.volume as Record<string, number>)[g] < 4);
+      if (low.length) focus.push(`训练量偏少：${low.map(g => `${g} ${(tr.volume as Record<string, number>)[g]} 组`).join('、')}（每块至少 4 组）`);
+    }
+  } else if (tr.watchDays >= 3) {
+    if (tr.strengthDays < 2) focus.push(`力量训练：本周 ${tr.strengthDays} 次，至少 2 次`);
+    else wins.push(`力量训练 ${tr.strengthDays} 次`);
   }
   if (cur.body.weighIns === 0) focus.push('这周没称重，至少称一次（带体脂）');
   else if (cur.body.weightDelta != null && cur.body.weightDelta < 0 && !m?.loss)
@@ -188,7 +224,7 @@ export function judge(cur: WeekStats, input: ReviewInput): { focus: string[]; wi
     focus.push(`热量账对不上：按记账应减 ${e} kg，实际 ${sgn(cur.body.weightDelta)} kg，查漏记`);
   if (cur.train.watchDays === 0) focus.push('Watch 一周没同步，检查快捷指令');
 
-  return { focus: focus.slice(0, 3), wins: wins.slice(0, 2) };
+  return { focus: focus.slice(0, 3), wins: wins.slice(0, 3) };
 }
 
 export function weeklyReview(input: ReviewInput, weekStart: string): WeeklyReview {
@@ -215,6 +251,8 @@ export function weeklyReview(input: ReviewInput, weekStart: string): WeeklyRevie
   };
 }
 
+const trainText = (s: WeekStats) =>
+  s.train.planned != null ? `${s.train.sessions}/${s.train.planned} 次` : `${s.train.strengthDays} 次`;
 const num = (x: number | null, unit = '') => (x == null ? '—' : `${x.toLocaleString('en-US')}${unit}`);
 const sgnU = (x: number | null, unit = '') => (x == null ? '—' : `${sgn(x)}${unit}`);
 
@@ -241,7 +279,7 @@ export function renderWeekly(r: WeeklyReview): string {
     row('蛋白达标', `${c.protein.hitDays} 天`, p ? `${p.protein.hitDays} 天` : '—'),
     row('体重（7 日均变化）', sgnU(c.body.weightDelta, ' kg'), sgnU(p?.body.weightDelta ?? null, ' kg')),
     row('睡眠（日均）', num(c.sleep.avg, ' h'), num(p?.sleep.avg ?? null, ' h')),
-    row('力量训练', `${c.train.strengthDays} 次`, p ? `${p.train.strengthDays} 次` : '—'),
+    row('力量训练', trainText(c), p ? trainText(p) : '—'),
     row('日均步数', num(c.train.avgSteps), num(p?.train.avgSteps ?? null))
   );
   const tail: string[] = [];
@@ -249,6 +287,13 @@ export function renderWeekly(r: WeeklyReview): string {
     tail.push(`记账理论减重 ${c.body.expectedLossKg} kg · 实际 ${sgnU(c.body.weightDelta, ' kg')}`);
   if (c.body.bodyFat != null) tail.push(`体脂 ${c.body.bodyFat}%（${sgnU(c.body.bodyFatDelta, ' pt')}）`);
   if (c.body.muscle != null) tail.push(`肌肉 ${c.body.muscle} kg（${sgnU(c.body.muscleDelta, ' kg')}）`);
+  if (c.train.volume)
+    tail.push(
+      `训练量（组）：${Object.entries(c.train.volume)
+        .filter(([, v]) => v > 0)
+        .map(([g, v]) => `${g} ${v}`)
+        .join(' · ')}`
+    );
   if (r.goal)
     tail.push(
       `距 ${r.goal.targetKg} kg 还差 ${r.goal.remainingKg} kg${r.goal.weeksAtPace ? `，按本周速度约 ${r.goal.weeksAtPace} 周` : ''}`
