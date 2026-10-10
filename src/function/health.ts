@@ -17,7 +17,6 @@ import { HealthActivityService } from '../service/health/activity';
 import { HealthBudgetService } from '../service/health/budget';
 import { HealthProfileService } from '../service/health/profile';
 import { HealthAdviceService } from '../service/health/advice';
-import { resolveHealthToken } from '../service/health/auth';
 
 /** 北京时间今天（FC 实例时区不可控，显式按 UTC+8 折算）。 */
 function todayCN(): string {
@@ -37,7 +36,7 @@ export class HealthHTTPService {
   ctx: Context;
 
   @Config('health')
-  healthConfig: { apiToken: string; agentToken?: string };
+  healthConfig: { apiToken: string };
 
   @Inject()
   bodyService: HealthBodyService;
@@ -57,21 +56,17 @@ export class HealthHTTPService {
   @Inject()
   adviceService: HealthAdviceService;
 
-  /**
-   * 独立鉴权：未配置 HEALTH_API_TOKEN 时一律拒绝（安全兜底）。
-   * allowMealAgent=true 的路由额外接受记餐专用令牌（HEALTH_AGENT_TOKEN，见 service/health/auth.ts）。
-   */
-  private assertToken(allowMealAgent = false) {
+  /** 独立鉴权：未配置 HEALTH_API_TOKEN 时一律拒绝（安全兜底）。 */
+  private assertToken() {
     const expected = this.healthConfig?.apiToken;
     if (!expected)
       throw R.forbiddenError('健康模块未配置访问令牌（HEALTH_API_TOKEN）');
     const headers: any =
       (this.ctx as any).headers || (this.ctx as any).header || {};
-    const scope = resolveHealthToken(headers, this.healthConfig);
-    if (scope === 'full') return;
-    if (scope === 'meal' && allowMealAgent) return;
-    if (scope === 'meal') throw R.forbiddenError('记餐令牌无权访问该接口');
-    throw R.unauthorizedError('健康模块令牌无效');
+    const got =
+      headers['x-health-token'] ||
+      (headers.authorization || '').replace('Bearer ', '');
+    if (got !== expected) throw R.unauthorizedError('健康模块令牌无效');
   }
 
   // ---------- 总览 ----------
@@ -85,7 +80,7 @@ export class HealthHTTPService {
   })
   @NoAuth()
   async ping() {
-    this.assertToken(true);
+    this.assertToken();
     return { success: true, data: { pong: true, today: todayCN() } };
   }
 
@@ -213,7 +208,7 @@ export class HealthHTTPService {
   })
   @NoAuth()
   async mealDay(@Query(ALL) q: { date?: string }) {
-    this.assertToken(true);
+    this.assertToken();
     return {
       success: true,
       data: await this.mealService.day(q.date || todayCN()),
@@ -229,7 +224,7 @@ export class HealthHTTPService {
   })
   @NoAuth()
   async mealRange(@Query(ALL) q: { start?: string; end?: string }) {
-    this.assertToken(true);
+    this.assertToken();
     const end = q.end || todayCN();
     const start =
       q.start ||
@@ -248,7 +243,7 @@ export class HealthHTTPService {
   })
   @NoAuth()
   async mealAdd(@Body(ALL) body: any) {
-    this.assertToken(true);
+    this.assertToken();
     return { success: true, data: await this.mealService.add(body) };
   }
 
@@ -261,7 +256,7 @@ export class HealthHTTPService {
   })
   @NoAuth()
   async mealUpdate(@Body(ALL) body: any) {
-    this.assertToken(true);
+    this.assertToken();
     const { id, ...patch } = body || {};
     if (!id) throw R.validateError('缺少 id');
     return {
@@ -279,7 +274,7 @@ export class HealthHTTPService {
   })
   @NoAuth()
   async mealDelete(@Body(ALL) body: { id: number }) {
-    this.assertToken(true);
+    this.assertToken();
     if (!body?.id) throw R.validateError('缺少 id');
     await this.mealService.remove(Number(body.id));
     return { success: true };
@@ -348,7 +343,7 @@ export class HealthHTTPService {
   })
   @NoAuth()
   async budget() {
-    this.assertToken(true);
+    this.assertToken();
     return { success: true, data: await this.budgetService.current() };
   }
 
