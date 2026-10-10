@@ -44,6 +44,7 @@ export interface AlertInput {
     activeKcal: number | null;
     restingKcal: number | null;
     sleepHours: number | null;
+    steps?: number | null;
     workouts: Array<{ type: string }>;
     updatedAt: string | null;
   }>;
@@ -286,7 +287,7 @@ export function healthAlerts(input: AlertInput): PosAlert[] {
 
   // ── 数据断了（不然上面的预警全部失效） ──
   const lastAct = [...input.activity]
-    .filter(a => a.activeKcal != null || a.sleepHours != null)
+    .filter(a => a.steps != null || a.activeKcal != null || a.restingKcal != null || a.sleepHours != null)
     .sort((a, b) => a.date.localeCompare(b.date))
     .pop();
   const actAge = lastAct ? daysBetween(lastAct.date, today) : null;

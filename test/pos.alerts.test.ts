@@ -155,6 +155,12 @@ describe('pos/alerts 健康与热量差预警', () => {
     assert.ok(!k.includes('strength-none'));
   });
 
+  it('只同步了步数也算 Watch 在同步（线上实况：有步数、无能量和睡眠）', () => {
+    const inp = base();
+    inp.activity = inp.activity.map(a => ({ ...a, steps: 7000, activeKcal: null, restingKcal: null, sleepHours: null }));
+    assert.ok(!keys(inp).includes('watch-stale'));
+  });
+
   it('推送去重：新出现 / 升级 / 满 7 天才再推', () => {
     const a = [
       { key: 'sleep-low', level: 'warn' as const, domain: 'sleep' as const, title: 't' },
