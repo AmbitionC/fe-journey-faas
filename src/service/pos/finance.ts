@@ -429,26 +429,6 @@ export class PosFinanceService {
     }
   }
 
-  /** 美股账户快照（invest 库 us_account_snapshot，USD 原币）。 */
-  async investUs(): Promise<{
-    latest: { asOf: string; total: number } | null;
-    series: Array<{ date: string; total: number }>;
-    error?: string;
-  }> {
-    try {
-      const rows = await this.investDb.q(
-        'SELECT snapshot_date, total_asset FROM us_account_snapshot ORDER BY snapshot_date'
-      );
-      const series = rows
-        .map((r: any) => ({ date: normDate(r.snapshot_date)!, total: Number(r.total_asset) }))
-        .filter(r => r.date && Number.isFinite(r.total) && r.total > 0);
-      const last = series[series.length - 1];
-      return { latest: last ? { asOf: last.date, total: last.total } : null, series };
-    } catch (e: any) {
-      return { latest: null, series: [], error: e?.message || String(e) };
-    }
-  }
-
   /**
    * 美元兑人民币：优先手录（pos_metric fx.usdcny，你确认过的数），其次 invest 库宏观序列；
    * 两者都无则返回 null——绝不使用默认汇率。
@@ -482,12 +462,9 @@ export class PosFinanceService {
 
   async wealth() {
     const today = todayCN();
-    const [accounts, a, us, fx] = await Promise.all([
-      this.accounts(),
-      this.investA(),
-      this.investUs(),
-      this.fxUsd(),
-    ]);
+    // 美股不取 invest 库 us_account_snapshot：那是美股模型的模拟账户（以起步资金播种），不是真实持仓；
+    // 真实美股账户作为 USD 手录账户记录（按汇率折算）。
+    const [accounts, a, fx] = await Promise.all([this.accounts(), this.investA(), this.fxUsd()]);
     const lines: BalanceLine[] = [];
     if (a.latest)
       lines.push({
@@ -504,22 +481,6 @@ export class PosFinanceService {
         investable: true,
         includeNetWorth: true,
         freshness: freshness('invest_a', a.latest.asOf, today).status,
-      });
-    if (us.latest)
-      lines.push({
-        key: 'invest_us',
-        name: '美股账户',
-        kind: 'broker',
-        side: 'asset',
-        currency: 'USD',
-        amount: us.latest.total,
-        asOf: us.latest.asOf,
-        factType: 'imported',
-        source: 'invest 系统·美股快照',
-        liquid: false,
-        investable: true,
-        includeNetWorth: true,
-        freshness: freshness('invest_us', us.latest.asOf, today).status,
       });
     for (const acc of accounts) {
       lines.push({
@@ -547,8 +508,7 @@ export class PosFinanceService {
       summary,
       accounts,
       investA: a,
-      investUs: us,
-      series: await this.netWorthSeries(accounts, a.series, us.series, fx),
+      series: await this.netWorthSeries(accounts, a.series, fx),
     };
   }
 
@@ -559,7 +519,6 @@ export class PosFinanceService {
   private async netWorthSeries(
     accounts: PosAccount[],
     aSeries: Array<{ date: string; total: number }>,
-    usSeries: Array<{ date: string; total: number }>,
     fx: FxRate | null
   ) {
     const all = await this.db.q('SELECT account_id, as_of, amount FROM pos_balance ORDER BY as_of');
@@ -590,11 +549,6 @@ export class PosFinanceService {
       const a = lastAt(aSeries, d);
       if (a) {
         assets += a.total;
-        any = true;
-      }
-      const u = lastAt(usSeries, d);
-      if (u && fx) {
-        assets += u.total * fx.rate;
         any = true;
       }
       for (const acc of accounts) {

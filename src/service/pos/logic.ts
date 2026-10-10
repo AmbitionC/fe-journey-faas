@@ -73,7 +73,6 @@ export function isDate(s: any): s is string {
 /** 各数据源「超过多少天算陈旧」（PRD 规划 §6.2，周末节假日对行情放宽到 5 天）。 */
 export const STALE_DAYS: Record<string, number> = {
   invest_a: 5,
-  invest_us: 5,
   fx: 10,
   body_weight: 7,
   body_fat: 30,
@@ -102,7 +101,7 @@ export function freshness(
 // ---------------------------------------------------------------- 净资产
 
 export interface BalanceLine {
-  key: string; // 'pos:12' | 'invest_a' | 'invest_us'
+  key: string; // 'pos:12' | 'invest_a'
   name: string;
   kind: string;
   side: 'asset' | 'liability';
@@ -296,8 +295,6 @@ export interface GapInput {
   salaryLatest: { period: string; basis: string } | null;
   overduePlanned: Array<{ id: number; title: string; plannedDate: string }>;
   investA: string | null;
-  investUs: string | null;
-  usHoldingExpected: boolean;
   fxMissing: boolean;
   bodyFatAsOf: string | null;
   weightAsOf: string | null;
@@ -364,14 +361,6 @@ export function computeGaps(g: GapInput): Gap[] {
       domain: 'wealth',
       level: 'medium',
       text: 'A 股账户快照为空（invest 系统未录入持仓快照）',
-    });
-  if (g.usHoldingExpected && !g.investUs)
-    out.push({
-      key: 'invest_us',
-      domain: 'wealth',
-      level: 'medium',
-      text: '美股账户无快照，可在财富页手录一个美元账户',
-      action: '/wealth?tab=accounts',
     });
   if (g.fxMissing)
     out.push({

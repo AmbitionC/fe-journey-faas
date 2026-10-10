@@ -138,8 +138,6 @@ describe('pos/logic 纯函数口径', () => {
         salaryLatest: { period: '2026-09', basis: 'unknown' },
         overduePlanned: [{ id: 1, title: '提前还贷', plannedDate: '2026-10-15' }],
         investA: '2026-10-19',
-        investUs: null,
-        usHoldingExpected: false,
         fxMissing: false,
         bodyFatAsOf: null,
         weightAsOf: '2026-10-19',

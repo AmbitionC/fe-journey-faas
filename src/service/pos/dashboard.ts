@@ -191,9 +191,7 @@ export class PosDashboardService {
         .filter(e => e.plannedDate && e.plannedDate < today)
         .map(e => ({ id: e.id, title: e.title, plannedDate: e.plannedDate })),
       investA: w?.investA?.latest?.asOf || null,
-      investUs: w?.investUs?.latest?.asOf || null,
-      usHoldingExpected: !w?.investUs?.latest && !accounts.some(a => a.currency === 'USD'),
-      fxMissing: !!w && !w.fx?.USD && (!!w.investUs?.latest || accounts.some(a => a.currency === 'USD')),
+      fxMissing: !!w && !w.fx?.USD && accounts.some(a => a.currency === 'USD'),
       bodyFatAsOf: h?.bodyFat?.asOf || null,
       weightAsOf: h?.weight?.asOf || null,
       waistAsOf: h?.waist?.asOf || null,
@@ -221,7 +219,6 @@ export class PosDashboardService {
       src('activity', 'Apple Watch 活动', 'health', h?.activity?.date || null, 'iOS 快捷指令推送'),
       src('waist', '腰围', 'health', h?.waist?.asOf || null, '每周手录'),
       src('invest_a', 'A 股账户', 'wealth', w?.investA?.latest?.asOf || null, w?.investA?.error ? `invest 库不可达：${w.investA.error}` : 'invest 系统 · 每日收盘重估'),
-      src('invest_us', '美股账户', 'wealth', w?.investUs?.latest?.asOf || null, w?.investUs?.error ? `invest 库不可达：${w.investUs.error}` : 'invest 系统 · 美股快照（USD）'),
       src('fx', '美元汇率', 'wealth', w?.fx?.USD?.asOf || null, w?.fx?.USD ? `${w.fx.USD.source} ${w.fx.USD.rate}` : '未取到：可在财富页手录'),
       src('balance', '现金/负债手录', 'wealth', latestBalance, `${accounts.length} 个手录账户 · 建议每月核对`),
       src('income', '主业收入', 'career', c?.salary?.receivedDate || (c?.salary ? `${c.salary.period}-28` : null), '每月到账后手录'),
@@ -248,7 +245,6 @@ export class PosDashboardService {
             fx: w.fx,
             aShare: w.investA.latest,
             aTop: w.investA.top,
-            usShare: w.investUs.latest,
             series: w.series,
             aSeries: (w.investA.series || []).slice(-250),
           }
