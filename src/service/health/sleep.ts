@@ -1,6 +1,7 @@
 /**
  * 睡眠样本 → 当晚睡眠（纯函数）。快捷指令「查找健康样本：睡眠分析」把每段样本按行发来：
  *   开始|结束|值      例：2026-10-11 23:42|2026-10-12 01:05|核心睡眠
+ * 多段之间用换行或分号分隔（快捷指令拼进 JSON 时用分号，避免换行破坏 JSON）。
  * 时间按北京时间、格式 yyyy-MM-dd HH:mm(:ss)（也接受 ISO）。也接受 [{start,end,value}] 数组。
  *
  * - 「在床上 / 清醒」不算睡着，其余（核心 / 深度 / 快速动眼 / 睡眠中 / Asleep…）都算；
@@ -45,7 +46,7 @@ export function parseSleepSamples(input: unknown, date: string): SleepNight | nu
   if (Array.isArray(input)) rows = input.map((x: any) => ({ start: x?.start, end: x?.end, value: String(x?.value ?? '') }));
   else if (typeof input === 'string')
     rows = input
-      .split(/\r?\n/)
+      .split(/\r?\n|;/)
       .map(l => l.split('|'))
       .filter(p => p.length >= 2)
       .map(p => ({ start: p[0], end: p[1], value: p[2] || '' }));

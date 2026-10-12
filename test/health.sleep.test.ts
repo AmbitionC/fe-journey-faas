@@ -32,6 +32,11 @@ describe('health/sleep 睡眠样本', () => {
     assert.strictEqual(n.hours, 7.83);
   });
 
+  it('分号分隔也行（快捷指令拼 JSON 时用）', () => {
+    const n = parseSleepSamples('2026-10-11 23:42|2026-10-12 02:10|核心睡眠;2026-10-12 02:10|2026-10-12 07:15|深度睡眠', '2026-10-12')!;
+    assert.strictEqual(n.hours, 7.55);
+  });
+
   it('没有睡着的样本返回 null', () => {
     assert.strictEqual(parseSleepSamples('2026-10-11 23:20|2026-10-12 07:40|在床上', '2026-10-12'), null);
     assert.strictEqual(parseSleepSamples('', '2026-10-12'), null);
