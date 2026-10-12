@@ -321,4 +321,50 @@ export async function ensurePosSchema(
       pushed_at DATETIME NULL,
       ${STAMPS}
     ) ${TABLE_TAIL}`);
+
+  // 时间：预算（每周每类几小时）与作息模板（每周循环的时间段）。assume=1 的模板段（上班/睡觉/周末陪娃）
+  // 在没有实报时按「模板推定」计入时间账；assume=0 的是计划（副业/训练），只有实报了才算做了
+  await run(`CREATE TABLE IF NOT EXISTS pos_time_rule (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      kind VARCHAR(12) NOT NULL,
+      category VARCHAR(16) NOT NULL,
+      title VARCHAR(100) NULL,
+      days VARCHAR(20) NULL,
+      start_min INT NULL,
+      end_min INT NULL,
+      assume TINYINT NOT NULL DEFAULT 0,
+      hours_per_week DECIMAL(5,2) NULL,
+      note VARCHAR(200) NULL,
+      ${STAMPS}
+    ) ${TABLE_TAIL}`);
+
+  // 时间段：实际发生（actual）或某天的预先安排（plan）。end_min 可 > 1440 表示跨午夜
+  await run(`CREATE TABLE IF NOT EXISTS pos_time_block (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      block_date DATE NOT NULL,
+      start_min INT NOT NULL,
+      end_min INT NOT NULL,
+      category VARCHAR(16) NOT NULL,
+      title VARCHAR(100) NULL,
+      kind VARCHAR(8) NOT NULL DEFAULT 'actual',
+      source VARCHAR(16) NOT NULL DEFAULT 'web',
+      note VARCHAR(200) NULL,
+      ${STAMPS},
+      KEY idx_date (block_date)
+    ) ${TABLE_TAIL}`);
+
+  // 屏幕使用时间（截图识别）：按周（period=week，avg_min 为日均）或按天（period=day，avg_min 为当天合计）
+  await run(`CREATE TABLE IF NOT EXISTS pos_screen_time (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      period VARCHAR(8) NOT NULL,
+      start_date DATE NOT NULL,
+      avg_min INT NOT NULL,
+      pickups INT NULL,
+      categories_json TEXT NULL,
+      apps_json TEXT NULL,
+      device VARCHAR(16) NOT NULL DEFAULT 'iphone',
+      source VARCHAR(16) NOT NULL DEFAULT 'claude',
+      ${STAMPS},
+      UNIQUE KEY uk_screen (period, start_date, device)
+    ) ${TABLE_TAIL}`);
 }

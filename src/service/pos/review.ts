@@ -1,6 +1,7 @@
 import { daysBetween, movingAvg, muscleTrend, STRENGTH_RE } from './logic';
 import { AlertInput, deficitDays, deficitHigh, intakeFloor, maAt, shift } from './alerts';
 import { SetLog, volumeByGroup } from '../health/training/plan';
+import { WeekTime } from './time';
 
 /**
  * 健康周复盘（纯函数，无 IO）。一周＝周一到周日（北京时间）。
@@ -73,6 +74,8 @@ export interface WeeklyReview {
   focus: string[];
   wins: string[];
   goal: { targetKg: number; remainingKg: number; weeksAtPace: number | null } | null;
+  /** 时间账（有作息模板/实报/屏幕时间时才有） */
+  time?: { cur: WeekTime; prev: WeekTime | null; focus: string[]; wins: string[] } | null;
 }
 
 const KCAL_PER_KG = 7700;
@@ -299,5 +302,37 @@ export function renderWeekly(r: WeeklyReview): string {
       `距 ${r.goal.targetKg} kg 还差 ${r.goal.remainingKg} kg${r.goal.weeksAtPace ? `，按本周速度约 ${r.goal.weeksAtPace} 周` : ''}`
     );
   if (tail.length) lines.push('', tail.join('　|　'));
+  if (r.time) lines.push('', ...renderTime(r.time));
   return lines.join('\n');
 }
+
+/** 周复盘「时间」段：有预算的类对账 + 屏幕时间 + 时间去向。 */
+export function renderTime(t: NonNullable<WeeklyReview['time']>): string[] {
+  const c = t.cur;
+  const p = t.prev;
+  const out = ['**时间**'];
+  if (t.focus.length) out.push(...t.focus.map(f => `- ${f}`));
+  if (t.wins.length) out.push(`- 做得好：${t.wins.join('；')}`);
+  const rows = c.rows.filter(r => r.budget != null && !['主业', '睡眠', '杂务'].includes(r.category));
+  if (rows.length || c.screen) {
+    out.push('', '| | 本周 | 上周 |', '|---|---|---|');
+    for (const r of rows) {
+      const pr = p?.rows.find(x => x.category === r.category);
+      out.push(`| ${r.category}（目标 ${r.budget} 小时） | ${r.reportedHours} 小时 | ${pr ? `${pr.reportedHours} 小时` : '—'} |`);
+    }
+    if (c.screen)
+      out.push(
+        `| 屏幕时间日均 | ${fmtMin(c.screen.avgMin)} | ${p?.screen ? fmtMin(p.screen.avgMin) : '—'} |`,
+        `| 社交娱乐日均 | ${fmtMin(c.screen.social)} | ${p?.screen ? fmtMin(p.screen.social) : '—'} |`
+      );
+  }
+  const spent = c.rows
+    .filter(r => r.hours > 0)
+    .sort((a, b) => b.hours - a.hours)
+    .map(r => `${r.category} ${r.hours}`)
+    .join(' · ');
+  if (spent) out.push('', `时间去向（小时，${c.reportedDays}/${c.days} 天有实报，其余按作息模板推定）：${spent}${c.unrecordedHours ? ` · 未记录 ${c.unrecordedHours}` : ''}`);
+  return out;
+}
+
+const fmtMin = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} 小时 ${Math.round(m % 60)} 分` : `${Math.round(m)} 分`);

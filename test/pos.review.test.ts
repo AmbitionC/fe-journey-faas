@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import { ReviewInput, renderWeekly, weekStartOf, weeklyReview } from '../src/service/pos/review';
+import { judgeTime, weekTime } from '../src/service/pos/time';
 
 const shift = (d: string, n: number) =>
   new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
@@ -120,6 +121,25 @@ describe('pos/review 健康周复盘', () => {
     inp.training = { planned: 3, sets: set('2026-10-06', '0577', 40) };
     r = weeklyReview(inp, '2026-10-05');
     assert.ok(r.focus.some(f => f === '力量训练：本周 1/3 次'), r.focus.join('|'));
+  });
+
+  it('周复盘带时间段：副业对预算、屏幕时间、时间去向', () => {
+    const rules = [
+      { key: '1', kind: 'template' as const, category: '主业', title: null, days: [1, 2, 3, 4, 5], startMin: 520, endMin: 1320, assume: true, hoursPerWeek: null },
+      { key: '2', kind: 'budget' as const, category: '副业', title: null, days: [], startMin: null, endMin: null, assume: false, hoursPerWeek: 10 },
+    ];
+    const blocks = [{ date: '2026-10-07', startMin: 1335, endMin: 1395, category: '副业', title: null, kind: 'actual' as const }];
+    const cur = weekTime('2026-10-05', TODAY, rules, blocks, [
+      { period: 'week', start: '2026-10-05', avgMin: 290, pickups: 98, categories: { 社交: 130 }, apps: [] },
+    ]);
+    const r = weeklyReview(base(), '2026-10-05');
+    const j = judgeTime(cur);
+    const text = renderWeekly({ ...r, time: { cur, prev: null, focus: j.focus, wins: j.wins } });
+    assert.ok(text.includes('**时间**'));
+    assert.ok(text.includes('- 副业：1/10 小时'), text);
+    assert.ok(text.includes('| 副业（目标 10 小时） | 1 小时 | — |'));
+    assert.ok(text.includes('| 屏幕时间日均 | 4 小时 50 分 | — |'));
+    assert.ok(text.includes('时间去向（小时，1/7 天有实报，其余按作息模板推定）：主业 66.7 · 副业 1'));
   });
 
   it('进行中的周只算已结束的日子', () => {

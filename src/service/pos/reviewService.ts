@@ -13,6 +13,8 @@ import { HealthTrainingService } from '../health/training/service';
 import { PLAN } from '../health/training/plan';
 import { withTrainingDays } from './logic';
 import { ActivityRecord } from '../health/activity';
+import { PosTimeService } from './timeService';
+import { judgeTime } from './time';
 
 /**
  * 健康周复盘：每周一（北京 09:00，pos-alert-cron 触发）对上一周出一份，
@@ -41,6 +43,25 @@ export class PosReviewService {
 
   @Inject()
   trainingService: HealthTrainingService;
+
+  @Inject()
+  timeService: PosTimeService;
+
+  /** 时间段：没有任何模板/实报/屏幕数据时为 null（不出空段）。 */
+  private async withTime(r: WeeklyReview, today: string): Promise<WeeklyReview> {
+    try {
+      const [cur, prev] = await Promise.all([
+        this.timeService.week(r.weekStart, today),
+        this.timeService.week(shift(r.weekStart, -7), today),
+      ]);
+      const empty = (w: typeof cur) => !w.rows.some(x => x.hours > 0) && !w.screen;
+      if (empty(cur)) return { ...r, time: null };
+      const j = judgeTime(cur);
+      return { ...r, time: { cur, prev: empty(prev) ? null : prev, focus: j.focus.slice(0, 3), wins: j.wins.slice(0, 3) } };
+    } catch {
+      return { ...r, time: null };
+    }
+  }
 
   private async input(today: string): Promise<ReviewInput> {
     const [budget, range, watch, body, profile, plan, sets] = await Promise.all([
@@ -91,7 +112,7 @@ export class PosReviewService {
   /** 某周（默认本周，进行中）的复盘，实时计算、不存档。 */
   async live(weekStart?: string): Promise<WeeklyReview> {
     const today = todayCN();
-    return weeklyReview(await this.input(today), weekStart || weekStartOf(today));
+    return this.withTime(weeklyReview(await this.input(today), weekStart || weekStartOf(today)), today);
   }
 
   /** 本周至今（实时）+ 已存档的历史周（新→旧）。 */
@@ -107,7 +128,7 @@ export class PosReviewService {
   async run(opts: { dryRun?: boolean; weekStart?: string } = {}) {
     const today = todayCN();
     const weekStart = opts.weekStart ? weekStartOf(opts.weekStart) : shift(weekStartOf(today), -7);
-    const review = weeklyReview(await this.input(today), weekStart);
+    const review = await this.withTime(weeklyReview(await this.input(today), weekStart), today);
     const text = renderWeekly(review);
     if (opts.dryRun) return { weekStart, posted: false, reason: 'dry_run', text };
 

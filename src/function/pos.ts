@@ -14,6 +14,7 @@ import { R } from '../common/base.error.utils';
 import { PosDashboardService } from '../service/pos/dashboard';
 import { PosAlertService } from '../service/pos/alertPush';
 import { PosReviewService } from '../service/pos/reviewService';
+import { PosTimeService } from '../service/pos/timeService';
 import { PosFinanceService } from '../service/pos/finance';
 import { PosContextService, MANUAL_METRICS } from '../service/pos/context';
 import { todayCN } from '../service/pos/logic';
@@ -45,6 +46,9 @@ export class PosHTTPService {
 
   @Inject()
   reviewService: PosReviewService;
+
+  @Inject()
+  timeService: PosTimeService;
 
   @Inject()
   contextService: PosContextService;
@@ -113,6 +117,36 @@ export class PosHTTPService {
     this.assertToken();
     const week = query?.week && /^\d{4}-\d{2}-\d{2}$/.test(query.week) ? query.week : undefined;
     return this.ok(await this.reviewService.run({ dryRun: query?.dryRun === '1', weekStart: week }));
+  }
+
+  // ---------------------------------------------------------- 时间
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/time', method: 'get', functionName: 'posTime', name: 'posTime', description: '时间：本周/上周时间账 + 7 天日程 + 屏幕时间' })
+  @NoAuth()
+  async time() {
+    this.assertToken();
+    return this.ok(await this.timeService.overview());
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/time/block', method: 'post', functionName: 'posTimeBlockAdd', name: 'posTimeBlockAdd', description: '补记一段时间（实报/预先安排）' })
+  @NoAuth()
+  async timeBlockAdd(@Body(ALL) body: any) {
+    this.assertToken();
+    return this.ok(await this.timeService.addBlock(body || {}));
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/time/confirm', method: 'post', functionName: 'posTimeConfirm', name: 'posTimeConfirm', description: '计划段确认做了' })
+  @NoAuth()
+  async timeConfirm(@Body(ALL) body: any) {
+    this.assertToken();
+    return this.ok(await this.timeService.confirm(body || {}));
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/time/block/delete', method: 'post', functionName: 'posTimeBlockDelete', name: 'posTimeBlockDelete', description: '删除网站记的一段' })
+  @NoAuth()
+  async timeBlockDelete(@Body(ALL) body: { id?: number }) {
+    this.assertToken();
+    return this.ok(await this.timeService.removeBlock(Number(body?.id)));
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/career', method: 'get', functionName: 'posCareer', name: 'posCareer', description: '主业收入 + 副业经营' })
