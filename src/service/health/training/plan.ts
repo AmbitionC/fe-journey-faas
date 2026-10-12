@@ -10,6 +10,9 @@ import { exerciseById, GROUP_OF, GROUPS, NAME_ZH, weightStep } from './catalog';
  *   9–12 周上杠铃主项。每个槽位的动作都来自 exercises-dataset（ID 即数据集 ID）。
  * - 加重用「双进阶」：在次数区间内练，所有组都做到区间上限才加重；连续两次没到下限就降 10%。
  *   强度靠「留几个」（RIR）控制：第一阶段留 3 个，之后留 2 个——减脂期不练到力竭，保肌肉够用、恢复也跟得上。
+ * - 2026-10-12 补：本人有重度脂肪肝（体检医生诊断），10-12 体重 92.2 kg、体脂 28%、内脏脂肪 14。
+ *   脂肪肝指南的共识是「中等强度有氧每周 150–300 分钟 + 力量训练」，并减重 7–10%；力量训练即使体重没掉也能降肝脏脂肪，
+ *   所以力量 3 次不动，另加每周有氧分钟目标（按 Watch「锻炼」分钟计，力量课也算），随阶段 150 → 200 → 250。
  */
 
 export type SessionKey = 'A' | 'B';
@@ -43,7 +46,11 @@ export const PLAN = {
   ],
   warmup: { exerciseId: '3666', text: '坡度跑步机快走 5 分钟，第一个动作先用空杆/轻重量做 1–2 组热身' },
   /** 非训练日：快走（本人偏好），步数目标随阶段提高 */
-  walking: { text: '不练的日子快走 30–45 分钟（微喘能说话）', steps: [8000, 9000, 10000] },
+  walking: { text: '不练的日子快走 30–45 分钟（微喘能说话）；晚饭后在园区走 20 分钟也算', steps: [8000, 9000, 10000] },
+  /** 有氧（脂肪肝）：每周 Watch「锻炼」分钟目标，力量课、快走都算 */
+  aerobic: { minutesPerWeek: [150, 200, 250], text: '每周锻炼分钟（Watch 绿环）：力量课 + 快走都算，微喘能说话的强度' },
+  /** 力量课收尾：时间够就做，凑有氧分钟 */
+  finisher: '时间够就收尾 10 分钟坡度快走（坡度 8–12、速度 5–5.5，微喘）',
   sessions: {
     A: [
       {
@@ -347,7 +354,10 @@ export interface TodayPlan {
   weekDone: number;
   weekTarget: number;
   steps: number;
+  /** 本阶段每周锻炼分钟目标（脂肪肝） */
+  aerobicTarget: number;
   warmup: string;
+  finisher: string;
   walking: string;
   items: PrescribedItem[];
 }
@@ -407,7 +417,9 @@ export function today(
     weekDone,
     weekTarget: PLAN.perWeek,
     steps: PLAN.walking.steps[phase],
+    aerobicTarget: PLAN.aerobic.minutesPerWeek[phase],
     warmup: PLAN.warmup.text,
+    finisher: PLAN.finisher,
     walking: PLAN.walking.text,
     items,
   };

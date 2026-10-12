@@ -20,7 +20,8 @@ export interface ReviewInput {
   /** 下一阶段体重目标（kg），没有就 null */
   goalKg?: number | null;
   /** 网站记的力量训练：计划每周几次（没开始计划为 null）+ 近几周的全部组 */
-  training?: { planned: number | null; sets: Array<SetLog & { date: string }> };
+  /** planned 每周力量次数；aerobicMin 每周锻炼分钟目标（脂肪肝，按计划阶段） */
+  training?: { planned: number | null; aerobicMin?: number | null; sets: Array<SetLog & { date: string }> };
 }
 
 export interface WeekStats {
@@ -60,6 +61,10 @@ export interface WeekStats {
     /** 网站记录的训练次数 / 计划次数 / 各大肌群组数 / 本周加了重量的动作数 */
     sessions: number;
     planned: number | null;
+    /** Watch 锻炼分钟：本周合计 / 有数据的天数 / 每周目标 */
+    exerciseMinTotal: number | null;
+    exerciseDays: number;
+    aerobicTarget: number | null;
     volume: Record<string, number> | null;
     progressed: number;
   };
@@ -170,6 +175,9 @@ export function weekStats(input: ReviewInput, weekStart: string): WeekStats {
       watchDays: acts.filter(a => a.activeKcal != null || a.steps != null || a.sleepHours != null).length,
       sessions: new Set(tsets.map(x => x.date)).size,
       planned: input.training?.planned ?? null,
+      exerciseMinTotal: exMin.length ? exMin.reduce((a, b) => a + b, 0) : null,
+      exerciseDays: exMin.length,
+      aerobicTarget: input.training?.aerobicMin ?? null,
       volume: tsets.length ? volumeByGroup(tsets) : null,
       progressed,
     },
@@ -218,6 +226,14 @@ export function judge(cur: WeekStats, input: ReviewInput): { focus: string[]; wi
   } else if (tr.watchDays >= 3) {
     if (tr.strengthDays < 2) focus.push(`力量训练：本周 ${tr.strengthDays} 次，至少 2 次`);
     else wins.push(`力量训练 ${tr.strengthDays} 次`);
+  }
+  if (tr.aerobicTarget != null && tr.exerciseMinTotal != null && tr.exerciseDays >= 3) {
+    // 脂肪肝：按有数据的天数折成一整周再比（同步漏一两天不误报）
+    const week = Math.round((tr.exerciseMinTotal / tr.exerciseDays) * 7);
+    if (week < tr.aerobicTarget * 0.8)
+      focus.push(`有氧：本周锻炼 ${tr.exerciseMinTotal} 分钟（折合一周 ${week}），目标每周 ${tr.aerobicTarget}`);
+    // 有氧达标对脂肪肝是关键正反馈：排在力量训练之后、其它之前（做得好只留 3 条）
+    else wins.splice(wins[0]?.startsWith('力量训练') ? 1 : 0, 0, `锻炼 ${tr.exerciseMinTotal} 分钟`);
   }
   if (cur.body.weighIns === 0) focus.push('这周没称重，至少称一次（带体脂）');
   else if (cur.body.weightDelta != null && cur.body.weightDelta < 0 && !m?.loss)
@@ -283,6 +299,11 @@ export function renderWeekly(r: WeeklyReview): string {
     row('体重（7 日均变化）', sgnU(c.body.weightDelta, ' kg'), sgnU(p?.body.weightDelta ?? null, ' kg')),
     row('睡眠（日均）', num(c.sleep.avg, ' h'), num(p?.sleep.avg ?? null, ' h')),
     row('力量训练', trainText(c), p ? trainText(p) : '—'),
+    row(
+      '锻炼分钟（Watch）',
+      c.train.exerciseMinTotal == null ? '—' : `${c.train.exerciseMinTotal}${c.train.aerobicTarget ? ` / ${c.train.aerobicTarget}` : ''}`,
+      num(p?.train.exerciseMinTotal ?? null)
+    ),
     row('日均步数', num(c.train.avgSteps), num(p?.train.avgSteps ?? null))
   );
   const tail: string[] = [];

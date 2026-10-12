@@ -45,6 +45,14 @@ describe('training 动作库与 12 周计划', () => {
     assert.strictEqual(today(START, '2026-10-13', h).restSuggested, true);
   });
 
+  it('脂肪肝：每周锻炼分钟目标随阶段 150 → 200 → 250，今天的处方带收尾快走', () => {
+    assert.deepStrictEqual(PLAN.aerobic.minutesPerWeek, [150, 200, 250]);
+    assert.strictEqual(today('2026-10-12', '2026-10-14', []).aerobicTarget, 150);
+    assert.strictEqual(today('2026-10-12', '2026-11-16', []).aerobicTarget, 200);
+    assert.strictEqual(today('2026-10-12', '2026-12-14', []).aerobicTarget, 250);
+    assert.ok(today('2026-10-12', '2026-10-14', []).finisher.includes('坡度快走'));
+  });
+
   it('双进阶：首次找重量 / 都做满加一档 / 没做满保持 / 连续两次没到下限降 10%', () => {
     const s = slot('squat'); // 第一阶段 45° 倒蹬 3×12–15，下肢 +5
     assert.ok(suggest('0739', s, 0, [], START).note.startsWith('首次'));

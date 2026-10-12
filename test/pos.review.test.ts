@@ -123,6 +123,33 @@ describe('pos/review 健康周复盘', () => {
     assert.ok(r.focus.some(f => f === '力量训练：本周 1/3 次'), r.focus.join('|'));
   });
 
+  it('脂肪肝有氧目标：按 Watch 锻炼分钟折合一周对目标，漏同步的天不误报', () => {
+    // base：每天锻炼 30 分钟 → 一周 210
+    let inp = base();
+    inp.training = { planned: null, aerobicMin: 150, sets: [] };
+    let r = weeklyReview(inp, '2026-10-05');
+    assert.strictEqual(r.cur.train.exerciseMinTotal, 210);
+    assert.ok(r.wins.includes('锻炼 210 分钟'), r.wins.join('|'));
+    assert.ok(renderWeekly(r).includes('| 锻炼分钟（Watch） | 210 / 150 |'), renderWeekly(r));
+
+    inp = base();
+    inp.training = { planned: null, aerobicMin: 300, sets: [] };
+    r = weeklyReview(inp, '2026-10-05');
+    assert.ok(r.focus.some(f => f === '有氧：本周锻炼 210 分钟（折合一周 210），目标每周 300'), r.focus.join('|'));
+
+    // 只同步了 4 天、每天 30 → 折合 210，不因漏 3 天就报 120 < 150
+    inp = base();
+    inp.activity = inp.activity.filter(a => !['2026-10-09', '2026-10-10', '2026-10-11'].includes(a.date));
+    inp.training = { planned: null, aerobicMin: 150, sets: [] };
+    r = weeklyReview(inp, '2026-10-05');
+    assert.strictEqual(r.cur.train.exerciseMinTotal, 120);
+    assert.ok(!r.focus.some(f => f.startsWith('有氧')), r.focus.join('|'));
+
+    // 没有目标（没开计划）就不评
+    r = weeklyReview(base(), '2026-10-05');
+    assert.ok(!r.focus.some(f => f.startsWith('有氧')) && !r.wins.some(w => w.startsWith('锻炼')));
+  });
+
   it('周复盘带时间段：副业对预算、屏幕时间、时间去向', () => {
     const rules = [
       { key: '1', kind: 'template' as const, category: '主业', title: null, days: [1, 2, 3, 4, 5], startMin: 520, endMin: 1320, assume: true, hoursPerWeek: null },

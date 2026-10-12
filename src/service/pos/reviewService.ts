@@ -10,7 +10,7 @@ import { shift } from './alerts';
 import { ReviewInput, WeeklyReview, renderWeekly, weekStartOf, weeklyReview } from './review';
 import { postIssueComment } from './alertPush';
 import { HealthTrainingService } from '../health/training/service';
-import { PLAN } from '../health/training/plan';
+import { PLAN, weekOf } from '../health/training/plan';
 import { withTrainingDays } from './logic';
 import { ActivityRecord } from '../health/activity';
 import { PosTimeService } from './timeService';
@@ -107,7 +107,11 @@ export class PosReviewService {
       activity,
       body,
       goalKg: goal?.value ?? null,
-      training: { planned: plan ? PLAN.perWeek : null, sets },
+      training: {
+        planned: plan ? PLAN.perWeek : null,
+        aerobicMin: plan ? PLAN.aerobic.minutesPerWeek[weekOf(plan.start, today).phase] : null,
+        sets,
+      },
     };
   }
 

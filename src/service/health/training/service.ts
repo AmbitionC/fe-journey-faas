@@ -138,7 +138,9 @@ export class HealthTrainingService {
       minutes: PLAN.minutes,
       phases: PLAN.phases,
       walking: PLAN.walking,
+      aerobic: PLAN.aerobic,
       warmup: PLAN.warmup.text,
+      finisher: PLAN.finisher,
       sessions: (['A', 'B'] as SessionKey[]).map(k => ({
         key: k,
         slots: PLAN.sessions[k].map(s => ({
