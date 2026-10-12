@@ -1,6 +1,7 @@
 import { Provide, Inject } from '@midwayjs/core';
 import { HealthDbService } from './db';
 import { HealthBodyService } from './body';
+import { parseSleepSamples } from './sleep';
 
 export interface ActivityRecord {
   date: string;
@@ -11,6 +12,9 @@ export interface ActivityRecord {
   standHours: number | null;
   workouts: Array<{ type: string; minutes: number; kcal?: number }>;
   sleepHours: number | null;
+  /** 入睡 / 醒来（北京时间 yyyy-MM-dd HH:mm），有睡眠样本时才有 */
+  sleepStart: string | null;
+  sleepEnd: string | null;
   weightKg: number | null;
   source: string;
   /** 最近一次同步时间（ISO），盘中多次推送时用于展示数据新鲜度 */
@@ -34,10 +38,21 @@ function rowToActivity(row: any): ActivityRecord {
     standHours: row.stand_hours == null ? null : Number(row.stand_hours),
     workouts: row.workouts_json ? JSON.parse(row.workouts_json) : [],
     sleepHours: row.sleep_hours == null ? null : Number(row.sleep_hours),
+    sleepStart: row.sleep_start ? dt16(row.sleep_start) : null,
+    sleepEnd: row.sleep_end ? dt16(row.sleep_end) : null,
     weightKg: row.weight_kg == null ? null : Number(row.weight_kg),
     source: row.source,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
+}
+
+/** DATETIME（库里存的是北京时间）→ 'yyyy-MM-dd HH:mm'。mysql2 把它当本地时间解析成 Date，按本地字段取回。 */
+function dt16(v: any): string {
+  if (v instanceof Date) {
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())} ${p(v.getHours())}:${p(v.getMinutes())}`;
+  }
+  return String(v).slice(0, 16).replace('T', ' ');
 }
 
 const num = (v: any): number | null => {
@@ -79,7 +94,10 @@ export class HealthActivityService {
     );
     const exerciseMinutes = num(pick('exercise_minutes', 'exerciseMinutes'));
     const standHours = num(pick('stand_hours', 'standHours'));
-    const sleepHours = num(pick('sleep_hours', 'sleepHours'));
+    let sleepHours = num(pick('sleep_hours', 'sleepHours'));
+    // 睡眠样本优先：并集去重后的真实睡着时长 + 入睡/醒来时刻
+    const night = parseSleepSamples(pick('sleep_samples', 'sleepSamples'), date);
+    if (night) sleepHours = night.hours;
     const weightKg = num(pick('weight_kg', 'weightKg'));
     const workouts = pick('workouts');
     const source = String(pick('source') || 'ios-shortcut').slice(0, 32);
@@ -93,6 +111,8 @@ export class HealthActivityService {
       'stand_hours',
       'workouts_json',
       'sleep_hours',
+      'sleep_start',
+      'sleep_end',
       'weight_kg',
       'raw_json',
       'source',
@@ -108,12 +128,16 @@ export class HealthActivityService {
         ? JSON.stringify(workouts)
         : null,
       sleepHours,
+      night ? `${night.start}:00` : null,
+      night ? `${night.end}:00` : null,
       weightKg,
       JSON.stringify(payload).slice(0, 60000),
       source,
     ];
+    // 只覆盖这次推送里带了的字段：睡眠和步数可以分两个快捷指令推，互不抹掉
+    const keep = new Set(['raw_json', 'source']);
     const updates = cols
-      .filter(c => c !== 'record_date')
+      .filter((c, i) => c !== 'record_date' && (keep.has(c) || vals[i] != null))
       .map(c => `\`${c}\`=VALUES(\`${c}\`)`)
       .join(', ');
     await this.db.exec(

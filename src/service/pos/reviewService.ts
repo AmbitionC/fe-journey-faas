@@ -82,6 +82,8 @@ export class PosReviewService {
       standHours: null,
       workouts: [],
       sleepHours: null,
+      sleepStart: null,
+      sleepEnd: null,
       weightKg: null,
       source: 'training-log',
       updatedAt: null,

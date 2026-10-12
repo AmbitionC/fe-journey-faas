@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { dayLedger, judgeTime, parseHHMM, planChecks, schedule, templateFor, TimeBlock, TimeRule, trainingBlocks, weekTime } from '../src/service/pos/time';
+import { dayLedger, judgeTime, parseHHMM, planChecks, schedule, templateFor, TimeBlock, TimeRule, trainingBlocks, sleepBlocks, weekTime } from '../src/service/pos/time';
 
 const T = (h: string) => parseHHMM(h);
 let n = 0;
@@ -118,6 +118,22 @@ describe('pos/time 时间账', () => {
     const l = dayLedger(MON, rules, tb);
     assert.strictEqual(l.reported['健康'], 45);
     assert.strictEqual(l.assumed['主业'], 800 - 45);
+  });
+
+  it('模板从建立那天起才生效：之前的日子不套计划、不对预算', () => {
+    const rules = RULES.map(r => ({ ...r, since: '2026-10-12' }));
+    assert.deepStrictEqual(templateFor('2026-10-11', rules), []);
+    // 周一凌晨属于周日夜里那一段：周日还没有模板，也不推定
+    assert.deepStrictEqual(templateFor('2026-10-12', rules).map(s => s.startMin)[0], 520);
+    const w = weekTime('2026-10-05', '2026-10-12', rules, [], []);
+    assert.deepStrictEqual(w.rows, []);
+  });
+
+  it('Watch 入睡/醒来 → 实报睡眠段，跨午夜分到两天', () => {
+    const b = sleepBlocks([{ sleepStart: '2026-10-11 23:42', sleepEnd: '2026-10-12 07:15' }, { sleepStart: null, sleepEnd: null }]);
+    assert.strictEqual(b.length, 1);
+    assert.deepStrictEqual([b[0].date, b[0].startMin, b[0].endMin], ['2026-10-11', 1422, 1875]);
+    assert.strictEqual(dayLedger('2026-10-12', RULES, b).reported['睡眠'], 435);
   });
 
   it('时间格式校验', () => {

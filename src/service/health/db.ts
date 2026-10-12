@@ -152,6 +152,17 @@ export class HealthDbService {
       UNIQUE KEY uk_activity_date (record_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
+    // 入睡 / 醒来时刻（快捷指令发睡眠样本时由后端算出）。MySQL 8 不支持 ADD COLUMN IF NOT EXISTS，先查再加
+    const actCols = new Set(
+      (
+        await ds.query(
+          `SELECT COLUMN_NAME AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'activity_daily'`
+        )
+      ).map((r: any) => r.c)
+    );
+    if (!actCols.has('sleep_start')) await ds.query('ALTER TABLE activity_daily ADD COLUMN sleep_start DATETIME NULL');
+    if (!actCols.has('sleep_end')) await ds.query('ALTER TABLE activity_daily ADD COLUMN sleep_end DATETIME NULL');
+
     // 训练计划（单人，id=1）：计划模板 key、开练日、本人换过的动作（槽位 → 数据集 ID）
     await ds.query(`CREATE TABLE IF NOT EXISTS training_plan (
       id INT PRIMARY KEY,

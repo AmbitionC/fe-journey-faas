@@ -2,7 +2,7 @@ import { Provide, Inject } from '@midwayjs/core';
 import { PosDbService } from './db';
 import { HealthActivityService } from '../health/activity';
 import { todayCN } from './logic';
-import { CATEGORIES, ScreenRecord, TimeBlock, TimeRule, parseHHMM, schedule, trainingBlocks, weekTime } from './time';
+import { CATEGORIES, ScreenRecord, TimeBlock, TimeRule, parseHHMM, schedule, sleepBlocks, trainingBlocks, weekTime } from './time';
 import { HealthTrainingService } from '../health/training/service';
 import { weekStartOf } from './review';
 
@@ -55,6 +55,7 @@ export class PosTimeService {
       endMin: r.end_min == null ? null : Number(r.end_min),
       assume: Number(r.assume) === 1,
       hoursPerWeek: r.hours_per_week == null ? null : Number(r.hours_per_week),
+      since: r.created_at ? String(r.created_at).slice(0, 10) : null,
     }));
   }
 
@@ -88,9 +89,18 @@ export class PosTimeService {
     }));
   }
 
+  /** Watch 睡眠：每天睡着的小时数（替换模板推定的睡眠总量）+ 入睡/醒来时段（作为实报睡眠段）。 */
   private async sleepByDate(from: string, to: string): Promise<Record<string, number>> {
+    return (await this.watchSleep(from, to)).byDate;
+  }
+
+  private async watchSleep(from: string, to: string) {
     const acts = await this.activityService.list(Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 14)).catch(() => []);
-    return Object.fromEntries(acts.filter(a => a.date >= from && a.date <= to && a.sleepHours).map(a => [a.date, a.sleepHours as number]));
+    const inRange = acts.filter(a => a.date >= from && a.date <= shift(to, 1));
+    return {
+      byDate: Object.fromEntries(inRange.filter(a => a.sleepHours && a.date <= to).map(a => [a.date, a.sleepHours as number])) as Record<string, number>,
+      blocks: sleepBlocks(inRange),
+    };
   }
 
   /** 某周时间账（默认本周至今）。 */
@@ -103,7 +113,7 @@ export class PosTimeService {
       this.screen(ws, we),
       this.sleepByDate(ws, we),
     ]);
-    const blocks = await this.withTraining(raw, rules, ws, we);
+    const blocks = [...(await this.withTraining(raw, rules, ws, we)), ...(await this.watchSleep(shift(ws, -1), we)).blocks];
     return weekTime(ws, today, rules, blocks, screen, sleep);
   }
 
@@ -116,7 +126,10 @@ export class PosTimeService {
       this.screen(shift(ws, -35), shift(today, 7)),
       this.sleepByDate(shift(ws, -7), today),
     ]);
-    const blocks = await this.withTraining(raw, rules, shift(ws, -7), today);
+    const blocks = [
+      ...(await this.withTraining(raw, rules, shift(ws, -7), today)),
+      ...(await this.watchSleep(shift(ws, -8), today)).blocks,
+    ];
     const lastScreen = [...screen].sort((a, b) => b.start.localeCompare(a.start))[0] || null;
     return {
       today,

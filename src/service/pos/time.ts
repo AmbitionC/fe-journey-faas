@@ -23,6 +23,8 @@ export interface TimeRule {
   endMin: number | null;
   assume: boolean;
   hoursPerWeek: number | null;
+  /** 从哪天起生效（建模板的那天）；之前的日子不套模板、不对预算——那时还没这些计划 */
+  since?: string | null;
 }
 
 export interface TimeBlock {
@@ -75,10 +77,11 @@ export function templateFor(date: string, rules: TimeRule[]): DaySeg[] {
   const prev = dow(shift(date, -1));
   for (const r of rules) {
     if (r.kind !== 'template' || r.startMin == null || r.endMin == null) continue;
+    if (r.since && date < r.since) continue;
     const end = r.endMin > r.startMin ? r.endMin : r.endMin + 1440;
     const origin = r.assume ? 'template-assume' : 'template-plan';
     if (r.days.includes(d)) out.push({ startMin: r.startMin, endMin: Math.min(end, 1440), category: r.category, title: r.title, origin, ruleKey: r.key });
-    if (end > 1440 && r.days.includes(prev))
+    if (end > 1440 && r.days.includes(prev) && !(r.since && shift(date, -1) < r.since))
       out.push({ startMin: 0, endMin: end - 1440, category: r.category, title: r.title, origin, ruleKey: r.key });
   }
   return out.sort((a, b) => a.startMin - b.startMin);
@@ -204,7 +207,9 @@ export function weekTime(
     }
     checks.push(...planChecks(d, rules, blocks));
   }
-  const budgets = new Map(rules.filter(r => r.kind === 'budget').map(r => [r.category, r.hoursPerWeek]));
+  const budgets = new Map(
+    rules.filter(r => r.kind === 'budget' && !(r.since && r.since > shift(weekStart, 6))).map(r => [r.category, r.hoursPerWeek])
+  );
   const cats = CATEGORIES.filter(c => mins[c] || budgets.has(c) || checks.some(p => p.category === c));
   const wk = screen.find(s => s.period === 'week' && s.start === weekStart);
   const days = screen.filter(s => s.period === 'day' && s.start >= weekStart && s.start <= shift(weekStart, 6));
@@ -306,4 +311,18 @@ export function trainingBlocks(dates: string[], rules: TimeRule[]): TimeBlock[] 
       source: 'training',
     };
   });
+}
+
+/** Watch 入睡 / 醒来时刻（'yyyy-MM-dd HH:mm'）→ 实报睡眠段（挂在入睡那天，跨午夜 end > 1440）。 */
+export function sleepBlocks(nights: Array<{ sleepStart: string | null; sleepEnd: string | null }>): TimeBlock[] {
+  const out: TimeBlock[] = [];
+  for (const n of nights) {
+    if (!n.sleepStart || !n.sleepEnd) continue;
+    const d0 = n.sleepStart.slice(0, 10);
+    const s0 = Number(n.sleepStart.slice(11, 13)) * 60 + Number(n.sleepStart.slice(14, 16));
+    const e0 = daysBetween(d0, n.sleepEnd.slice(0, 10)) * 1440 + Number(n.sleepEnd.slice(11, 13)) * 60 + Number(n.sleepEnd.slice(14, 16));
+    if (e0 > s0 && e0 - s0 <= 1440)
+      out.push({ date: d0, startMin: s0, endMin: e0, category: '睡眠', title: '睡觉（Watch）', kind: 'actual', source: 'watch' });
+  }
+  return out;
 }

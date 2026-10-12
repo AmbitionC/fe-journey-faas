@@ -31,6 +31,8 @@ const blankActivity = (date: string): ActivityRecord => ({
   standHours: null,
   workouts: [],
   sleepHours: null,
+  sleepStart: null,
+  sleepEnd: null,
   weightKg: null,
   source: 'training-log',
   updatedAt: null,
@@ -165,7 +167,7 @@ export class PosDashboardService {
             updatedAt: lastActivity.updatedAt,
           }
         : null,
-      sleep: lastSleep ? { date: lastSleep.date, hours: lastSleep.sleepHours } : null,
+      sleep: lastSleep ? { date: lastSleep.date, hours: lastSleep.sleepHours, start: lastSleep.sleepStart, end: lastSleep.sleepEnd } : null,
       muscle: muscleTrend(trend),
       sleep7: sleepSummary(activity, today),
       strengthDays7: strengthDays(activity, today),
