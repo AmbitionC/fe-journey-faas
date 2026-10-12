@@ -385,9 +385,28 @@ export async function ensurePosSchema(
       item VARCHAR(255) NULL,
       pay_method VARCHAR(100) NULL,
       status VARCHAR(32) NULL,
+      counterparty_account VARCHAR(128) NULL,
+      merchant_order VARCHAR(128) NULL,
+      remark VARCHAR(255) NULL,
+      raw_json TEXT NULL,
       ${STAMPS},
       UNIQUE KEY uk_txn (txn_key),
       KEY idx_txn_time (txn_time),
       KEY idx_txn_kind (kind, category)
+    ) ${TABLE_TAIL}`);
+  // 账单导出头（账户、起止、官方笔数金额汇总），对账用；同由 sync_data.py 写入（老库补列也在那边做）
+  await run(`CREATE TABLE IF NOT EXISTS pos_txn_import (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      file VARCHAR(120) NOT NULL,
+      source VARCHAR(8) NOT NULL,
+      period_start DATETIME NULL,
+      period_end DATETIME NULL,
+      exported_at DATETIME NULL,
+      total INT NULL,
+      \`rows\` INT NULL,
+      counts_json TEXT NULL,
+      header_text TEXT NULL,
+      ${STAMPS},
+      UNIQUE KEY uk_txn_import (file)
     ) ${TABLE_TAIL}`);
 }
