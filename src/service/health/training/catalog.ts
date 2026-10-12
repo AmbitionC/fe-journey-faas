@@ -260,6 +260,29 @@ export interface ExerciseView {
   steps: string[];
   /** 原仓库动图页面（© Gym visual，外链查看） */
   mediaUrl: string;
+  media: ExerciseMedia;
+}
+
+/**
+ * 演示动图 / 缩略图（© Gym visual，原数据集按权利人许可以 180×180 分发）：**不复制进任何仓库**，
+ * 页面直接引用原仓库文件（钉在固定提交上），带署名。主地址走 jsDelivr（国内通常比 GitHub 原始地址稳），
+ * 加载失败退回 raw.githubusercontent。
+ */
+export interface ExerciseMedia {
+  gif: string;
+  gifAlt: string;
+  thumb: string;
+  thumbAlt: string;
+  credit: string;
+}
+const MEDIA_REPO = 'hasaneyldrm/exercises-dataset';
+const MEDIA_REF = '7455efae41b330c265e7cd4b78dfa848e7ce5ebd';
+export const MEDIA_CREDIT = '© Gym visual — https://gymvisual.com/';
+export function mediaOf(gif: string): ExerciseMedia {
+  const thumb = `images/${gif.replace(/\.gif$/i, '.jpg')}`;
+  const cdn = (p: string) => `https://cdn.jsdelivr.net/gh/${MEDIA_REPO}@${MEDIA_REF}/${p}`;
+  const raw = (p: string) => `https://raw.githubusercontent.com/${MEDIA_REPO}/${MEDIA_REF}/${p}`;
+  return { gif: cdn(`videos/${gif}`), gifAlt: raw(`videos/${gif}`), thumb: cdn(thumb), thumbAlt: raw(thumb), credit: MEDIA_CREDIT };
 }
 
 export function view(e: ExerciseRow): ExerciseView {
@@ -273,6 +296,7 @@ export function view(e: ExerciseRow): ExerciseView {
     secondary: e.sec.map(m => MUSCLE_ZH[m] || m),
     steps: e.steps,
     mediaUrl: `https://github.com/hasaneyldrm/exercises-dataset/blob/main/videos/${e.gif}`,
+    media: mediaOf(e.gif),
   };
 }
 

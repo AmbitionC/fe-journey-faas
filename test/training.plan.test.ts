@@ -45,6 +45,14 @@ describe('training 动作库与 12 周计划', () => {
     assert.strictEqual(today(START, '2026-10-13', h).restSuggested, true);
   });
 
+  it('演示动图引用原仓库固定提交（jsDelivr 主 + GitHub 原始地址备），带 © Gym visual 署名，不在本仓库', () => {
+    const it0 = today('2026-10-12', '2026-10-14', []).items[0];
+    assert.ok(it0.media);
+    assert.ok(it0.media!.gif.startsWith('https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@') && it0.media!.gif.endsWith('.gif'));
+    assert.ok(it0.media!.thumb.endsWith('.jpg') && it0.media!.thumbAlt.startsWith('https://raw.githubusercontent.com/'));
+    assert.strictEqual(it0.media!.credit, '© Gym visual — https://gymvisual.com/');
+  });
+
   it('脂肪肝：每周锻炼分钟目标随阶段 150 → 200 → 250，今天的处方带收尾快走', () => {
     assert.deepStrictEqual(PLAN.aerobic.minutesPerWeek, [150, 200, 250]);
     assert.strictEqual(today('2026-10-12', '2026-10-14', []).aerobicTarget, 150);

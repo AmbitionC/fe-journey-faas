@@ -1,4 +1,4 @@
-import { exerciseById, GROUP_OF, GROUPS, NAME_ZH, weightStep } from './catalog';
+import { exerciseById, ExerciseMedia, GROUP_OF, GROUPS, mediaOf, NAME_ZH, weightStep } from './catalog';
 
 /**
  * 12 周新手全身计划（2026-10-10 按本人情况定制：健身房 / 每周 3 次 × 45 分钟 / 新手 / 无伤痛 /
@@ -333,6 +333,8 @@ export interface PrescribedItem {
   restSec: number;
   superset: boolean;
   cue: string;
+  /** 演示动图 / 缩略图（© Gym visual，引用原仓库） */
+  media: ExerciseMedia | null;
   suggestion: Suggestion;
   /** 今天已记的组 */
   logged: Array<{ setNo: number; weightKg: number | null; reps: number }>;
@@ -396,6 +398,7 @@ export function today(
       restSec: slot.restSec,
       superset: !!slot.superset,
       cue: slot.cue,
+      media: (g => (g ? mediaOf(g) : null))(exerciseById(exerciseId)?.gif),
       suggestion: suggest(exerciseId, slot, phase, sorted, todayDate),
       logged: (todays?.sets || [])
         .filter(x => x.exerciseId === exerciseId)
