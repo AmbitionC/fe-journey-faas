@@ -288,3 +288,22 @@ export function parseHHMM(s: string): number {
   if (v > 1440 || Number(m[2]) >= 60) throw new Error(`时间不合法：${s}`);
   return v;
 }
+
+/**
+ * 训练记录 → 时间段：网站上记了组的日子，若作息模板当天有「健康」计划段就按那一段算做了，
+ * 否则按 12:00–12:45 记 45 分钟（计划课时）。这样训练只需在训练页记一次，时间页自动打勾。
+ */
+export function trainingBlocks(dates: string[], rules: TimeRule[]): TimeBlock[] {
+  return [...new Set(dates)].map(date => {
+    const plan = templateFor(date, rules).find(s => s.origin === 'template-plan' && s.category === '健康');
+    return {
+      date,
+      startMin: plan ? plan.startMin : 720,
+      endMin: plan ? plan.endMin : 765,
+      category: '健康',
+      title: '力量训练',
+      kind: 'actual' as const,
+      source: 'training',
+    };
+  });
+}

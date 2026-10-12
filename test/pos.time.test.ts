@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { dayLedger, judgeTime, parseHHMM, planChecks, schedule, templateFor, TimeBlock, TimeRule, weekTime } from '../src/service/pos/time';
+import { dayLedger, judgeTime, parseHHMM, planChecks, schedule, templateFor, TimeBlock, TimeRule, trainingBlocks, weekTime } from '../src/service/pos/time';
 
 const T = (h: string) => parseHHMM(h);
 let n = 0;
@@ -102,6 +102,22 @@ describe('pos/time 时间账', () => {
     assert.strictEqual(tue.isToday, true);
     assert.strictEqual(tue.segs.find(s => s.origin === 'template-plan')!.done, true);
     assert.ok(sc[5].segs.some(s => s.origin === 'plan' && s.start === '09:00'));
+  });
+
+  it('训练页记了组 = 当天中午训练段做了；没有计划段的日子按 12:00–12:45 记', () => {
+    const rules = [
+      ...RULES,
+      rule({ category: '健康', title: '力量训练', days: [1, 3, 5], startMin: T('12:00'), endMin: T('12:45'), assume: false }),
+    ];
+    const tb = trainingBlocks([MON, MON, '2026-10-06'], rules);
+    assert.strictEqual(tb.length, 2);
+    assert.deepStrictEqual([tb[0].startMin, tb[0].endMin], [720, 765]);
+    const checks = planChecks(MON, rules, tb).filter(c => c.category === '健康');
+    assert.strictEqual(checks[0].done, true);
+    // 中午训练的 45 分钟从推定的主业里扣出来，算实报的健康
+    const l = dayLedger(MON, rules, tb);
+    assert.strictEqual(l.reported['健康'], 45);
+    assert.strictEqual(l.assumed['主业'], 800 - 45);
   });
 
   it('时间格式校验', () => {

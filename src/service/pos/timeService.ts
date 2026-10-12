@@ -2,7 +2,8 @@ import { Provide, Inject } from '@midwayjs/core';
 import { PosDbService } from './db';
 import { HealthActivityService } from '../health/activity';
 import { todayCN } from './logic';
-import { CATEGORIES, ScreenRecord, TimeBlock, TimeRule, parseHHMM, schedule, weekTime } from './time';
+import { CATEGORIES, ScreenRecord, TimeBlock, TimeRule, parseHHMM, schedule, trainingBlocks, weekTime } from './time';
+import { HealthTrainingService } from '../health/training/service';
 import { weekStartOf } from './review';
 
 const shift = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
@@ -27,6 +28,17 @@ export class PosTimeService {
 
   @Inject()
   activityService: HealthActivityService;
+
+  @Inject()
+  trainingService: HealthTrainingService;
+
+  /** 实报块 + 训练记录换算的块（训练页记了组 = 当天训练段做了）。 */
+  private async withTraining(blocks: TimeBlock[], rules: TimeRule[], from: string, to: string): Promise<TimeBlock[]> {
+    const dates = await this.trainingService.trainedDates(Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1), to).catch(() => []);
+    // 当天已经手动记过健康段的不重复加
+    const manual = new Set(blocks.filter(b => b.kind === 'actual' && b.category === '健康').map(b => b.date));
+    return [...blocks, ...trainingBlocks(dates.filter(d => d >= from && !manual.has(d)), rules)];
+  }
 
   async rules(): Promise<TimeRule[]> {
     const rows = await this.db.q<any>('SELECT * FROM pos_time_rule ORDER BY kind, start_min, id');
@@ -85,24 +97,26 @@ export class PosTimeService {
   async week(weekStart?: string, today = todayCN()) {
     const ws = isDate(weekStart) ? weekStartOf(weekStart) : weekStartOf(today);
     const we = shift(ws, 6);
-    const [rules, blocks, screen, sleep] = await Promise.all([
+    const [rules, raw, screen, sleep] = await Promise.all([
       this.rules(),
       this.blocks(ws, we),
       this.screen(ws, we),
       this.sleepByDate(ws, we),
     ]);
+    const blocks = await this.withTraining(raw, rules, ws, we);
     return weekTime(ws, today, rules, blocks, screen, sleep);
   }
 
   /** 首页 / 时间页：本周账 + 上周账 + 今天起 7 天日程 + 最近一次屏幕时间。 */
   async overview(today = todayCN()) {
     const ws = weekStartOf(today);
-    const [rules, blocks, screen, sleep] = await Promise.all([
+    const [rules, raw, screen, sleep] = await Promise.all([
       this.rules(),
       this.blocks(shift(ws, -7), shift(today, 7)),
       this.screen(shift(ws, -35), shift(today, 7)),
       this.sleepByDate(shift(ws, -7), today),
     ]);
+    const blocks = await this.withTraining(raw, rules, shift(ws, -7), today);
     const lastScreen = [...screen].sort((a, b) => b.start.localeCompare(a.start))[0] || null;
     return {
       today,
