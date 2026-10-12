@@ -4,6 +4,7 @@ import { HealthActivityService } from '../health/activity';
 import { todayCN } from './logic';
 import { CATEGORIES, ScreenRecord, TimeBlock, TimeRule, parseHHMM, schedule, sleepBlocks, trainingBlocks, weekTime } from './time';
 import { HealthTrainingService } from '../health/training/service';
+import { buildIcs } from './calendar';
 import { weekStartOf } from './review';
 
 const shift = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
@@ -175,5 +176,12 @@ export class PosTimeService {
   async removeBlock(id: number) {
     await this.db.exec(`DELETE FROM pos_time_block WHERE id = ? AND source = 'web'`, [id]);
     return this.overview();
+  }
+
+  /** iCalendar 订阅内容：计划段（每周重复）+ 近一周到未来 90 天的提前安排。 */
+  async ics(today = todayCN()) {
+    const [rules, blocks] = await Promise.all([this.rules(), this.blocks(shift(today, -7), shift(today, 90))]);
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+    return buildIcs(rules, blocks, today, stamp);
   }
 }

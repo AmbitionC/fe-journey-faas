@@ -15,6 +15,7 @@ import { PosDashboardService } from '../service/pos/dashboard';
 import { PosAlertService } from '../service/pos/alertPush';
 import { PosReviewService } from '../service/pos/reviewService';
 import { PosTimeService } from '../service/pos/timeService';
+import { calendarKey } from '../service/pos/calendar';
 import { PosFinanceService } from '../service/pos/finance';
 import { PosContextService, MANUAL_METRICS } from '../service/pos/context';
 import { todayCN } from '../service/pos/logic';
@@ -126,6 +127,25 @@ export class PosHTTPService {
   async time() {
     this.assertToken();
     return this.ok(await this.timeService.overview());
+  }
+
+  /** 日历订阅地址里用的只读密钥（要令牌才能拿到）。 */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/time/calendar-key', method: 'get', functionName: 'posTimeCalendarKey', name: 'posTimeCalendarKey', description: '日历订阅密钥' })
+  @NoAuth()
+  async timeCalendarKey() {
+    this.assertToken();
+    return this.ok({ key: calendarKey(this.healthConfig.apiToken), path: '/pos/time/ics' });
+  }
+
+  /** iPhone 日历订阅（webcal://）：系统日历拿不到自定义请求头，改用由令牌派生的只读密钥校验。 */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/time/ics', method: 'get', functionName: 'posTimeIcs', name: 'posTimeIcs', description: '日程 iCalendar 订阅' })
+  @NoAuth()
+  async timeIcs(@Query(ALL) q: { key?: string }) {
+    const token = this.healthConfig?.apiToken;
+    if (!token || !q?.key || q.key !== calendarKey(token)) throw R.unauthorizedError('日历密钥无效');
+    this.ctx.set('Content-Type', 'text/calendar; charset=utf-8');
+    this.ctx.set('Cache-Control', 'no-cache');
+    return await this.timeService.ics();
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/time/block', method: 'post', functionName: 'posTimeBlockAdd', name: 'posTimeBlockAdd', description: '补记一段时间（实报/预先安排）' })
