@@ -2,6 +2,7 @@ import { Provide, Inject } from '@midwayjs/core';
 import { HealthDbService } from './db';
 import { HealthBodyService } from './body';
 import { parseSleepSamples } from './sleep';
+import { parseVitals, VITALS, weightKg as parseWeight } from './vitals';
 
 export interface ActivityRecord {
   date: string;
@@ -16,6 +17,15 @@ export interface ActivityRecord {
   sleepStart: string | null;
   sleepEnd: string | null;
   weightKg: number | null;
+  /** 生理指标（健康 App 样本，见 vitals.ts）：静息心率 / HRV / 最大摄氧量 / 步行心率 / 血氧 / 呼吸频率 / 步行跑步距离 / 体脂 */
+  restingHr?: number | null;
+  hrvMs?: number | null;
+  vo2max?: number | null;
+  walkingHr?: number | null;
+  spo2Pct?: number | null;
+  respRate?: number | null;
+  distanceKm?: number | null;
+  bodyFatPct?: number | null;
   source: string;
   /** 最近一次同步时间（ISO），盘中多次推送时用于展示数据新鲜度 */
   updatedAt: string | null;
@@ -41,6 +51,9 @@ function rowToActivity(row: any): ActivityRecord {
     sleepStart: row.sleep_start ? dt16(row.sleep_start) : null,
     sleepEnd: row.sleep_end ? dt16(row.sleep_end) : null,
     weightKg: row.weight_kg == null ? null : Number(row.weight_kg),
+    ...(Object.fromEntries(
+      Object.entries(VITALS).map(([k, d]) => [k, row[d.col] == null ? null : Number(row[d.col])])
+    ) as Pick<ActivityRecord, 'restingHr' | 'hrvMs' | 'vo2max' | 'walkingHr' | 'spo2Pct' | 'respRate' | 'distanceKm' | 'bodyFatPct'>),
     source: row.source,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
@@ -54,6 +67,8 @@ function dt16(v: any): string {
   }
   return String(v).slice(0, 16).replace('T', ' ');
 }
+
+const WATCH_BODY_NOTE = '来自健康 App 同步';
 
 const num = (v: any): number | null => {
   if (v === undefined || v === null || v === '') return null;
@@ -98,7 +113,9 @@ export class HealthActivityService {
     // 睡眠样本优先：并集去重后的真实睡着时长 + 入睡/醒来时刻
     const night = parseSleepSamples(pick('sleep_samples', 'sleepSamples'), date);
     if (night) sleepHours = night.hours;
-    const weightKg = num(pick('weight_kg', 'weightKg'));
+    // 体重：健康 App 样本文本（「92.2 公斤」/「184.4 斤」）或纯数字
+    const weightKg = parseWeight(pick('weight_kg', 'weightKg', 'weight'));
+    const vitals = parseVitals(payload);
     const workouts = pick('workouts');
     const source = String(pick('source') || 'ios-shortcut').slice(0, 32);
 
@@ -114,6 +131,7 @@ export class HealthActivityService {
       'sleep_start',
       'sleep_end',
       'weight_kg',
+      ...Object.values(VITALS).map(d => d.col),
       'raw_json',
       'source',
     ];
@@ -131,6 +149,7 @@ export class HealthActivityService {
       night ? `${night.start}:00` : null,
       night ? `${night.end}:00` : null,
       weightKg,
+      ...Object.keys(VITALS).map(k => vitals[k] ?? null),
       JSON.stringify(payload).slice(0, 60000),
       source,
     ];
@@ -148,14 +167,13 @@ export class HealthActivityService {
       vals
     );
 
-    // 带体重时顺手记一条体重（覆盖同日，只有体重字段）
-    if (weightKg != null && weightKg > 20 && weightKg < 300) {
+    // 带体重时顺手记一条体成分（体重 + 体脂）。当天已有对话 / 网页录的完整体脂秤报告就不碰，免得被只有体重的样本覆盖
+    if (weightKg != null) {
       try {
-        await this.bodyService.upsert({
-          date,
-          weightKg,
-          notes: '来自 Apple Watch 同步',
-        });
+        const cur = await this.db.one('SELECT notes FROM body_composition WHERE record_date = ?', [date]);
+        if (!cur || String(cur.notes || '').startsWith(WATCH_BODY_NOTE)) {
+          await this.bodyService.upsert({ date, weightKg, bodyFatPct: vitals.bodyFatPct ?? null, notes: WATCH_BODY_NOTE });
+        }
       } catch {
         /* 体重写入失败不影响活动同步 */
       }

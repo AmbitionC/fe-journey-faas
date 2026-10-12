@@ -162,6 +162,19 @@ export class HealthDbService {
     );
     if (!actCols.has('sleep_start')) await ds.query('ALTER TABLE activity_daily ADD COLUMN sleep_start DATETIME NULL');
     if (!actCols.has('sleep_end')) await ds.query('ALTER TABLE activity_daily ADD COLUMN sleep_end DATETIME NULL');
+    // 生理指标（vitals.ts VITALS 的列）：静息心率 / HRV / 最大摄氧量 / 步行心率 / 血氧 / 呼吸频率 / 距离 / 体脂
+    const vitalCols: Array<[string, string]> = [
+      ['resting_hr', 'DECIMAL(5,1)'],
+      ['hrv_ms', 'DECIMAL(6,1)'],
+      ['vo2max', 'DECIMAL(5,1)'],
+      ['walking_hr', 'DECIMAL(5,1)'],
+      ['spo2_pct', 'DECIMAL(5,1)'],
+      ['resp_rate', 'DECIMAL(5,1)'],
+      ['distance_km', 'DECIMAL(7,2)'],
+      ['body_fat_pct', 'DECIMAL(5,1)'],
+    ];
+    for (const [c, t] of vitalCols)
+      if (!actCols.has(c)) await ds.query(`ALTER TABLE activity_daily ADD COLUMN ${c} ${t} NULL`);
 
     // 训练计划（单人，id=1）：计划模板 key、开练日、本人换过的动作（槽位 → 数据集 ID）
     await ds.query(`CREATE TABLE IF NOT EXISTS training_plan (

@@ -14,7 +14,7 @@ export interface ReviewInput {
   budget: AlertInput['budget'];
   meals: AlertInput['meals'];
   activity: Array<
-    AlertInput['activity'][number] & { steps?: number | null; exerciseMinutes?: number | null }
+    AlertInput['activity'][number] & { steps?: number | null; exerciseMinutes?: number | null; restingHr?: number | null; hrvMs?: number | null }
   >;
   body: Array<{ date: string; weightKg: number; bodyFatPct?: number | null; muscleMassKg: number | null }>;
   /** 下一阶段体重目标（kg），没有就 null */
@@ -51,6 +51,8 @@ export interface WeekStats {
     /** 记账推出的理论减重（kg）：记全天平均缺口 × 天数 / 7700 */
     expectedLossKg: number | null;
   };
+  /** Watch 生理指标周均（只展示，不做判断） */
+  vitals: { restingHr: number | null; hrvMs: number | null };
   sleep: { avg: number | null; nights: number; shortNights: number };
   train: {
     strengthDays: number;
@@ -161,6 +163,10 @@ export function weekStats(input: ReviewInput, weekStart: string): WeekStats {
       muscle: mus ? (mus.muscleMassKg as number) : null,
       muscleDelta: mus && mus0 ? r1((mus.muscleMassKg as number) - (mus0.muscleMassKg as number)) : null,
       expectedLossKg: avgDef != null && done.length >= 4 ? r1((avgDef * n) / KCAL_PER_KG) : null,
+    },
+    vitals: {
+      restingHr: (xs => (xs.length ? rnd(avg(xs)) : null))(acts.filter(a => a.restingHr != null).map(a => a.restingHr as number)),
+      hrvMs: (xs => (xs.length ? r1(avg(xs) as number) : null))(acts.filter(a => a.hrvMs != null).map(a => a.hrvMs as number)),
     },
     sleep: {
       avg: sleeps.length ? r1(avg(sleeps) as number) : null,
@@ -304,7 +310,14 @@ export function renderWeekly(r: WeeklyReview): string {
       c.train.exerciseMinTotal == null ? '—' : `${c.train.exerciseMinTotal}${c.train.aerobicTarget ? ` / ${c.train.aerobicTarget}` : ''}`,
       num(p?.train.exerciseMinTotal ?? null)
     ),
-    row('日均步数', num(c.train.avgSteps), num(p?.train.avgSteps ?? null))
+    row('日均步数', num(c.train.avgSteps), num(p?.train.avgSteps ?? null)),
+    // 生理指标没同步时整行不出，免得表里一串「—」
+    ...(c.vitals.restingHr != null || p?.vitals.restingHr != null
+      ? [row('静息心率（周均）', num(c.vitals.restingHr, ' 次/分'), num(p?.vitals.restingHr ?? null, ' 次/分'))]
+      : []),
+    ...(c.vitals.hrvMs != null || p?.vitals.hrvMs != null
+      ? [row('HRV（周均）', num(c.vitals.hrvMs, ' ms'), num(p?.vitals.hrvMs ?? null, ' ms'))]
+      : [])
   );
   const tail: string[] = [];
   if (c.body.expectedLossKg != null)

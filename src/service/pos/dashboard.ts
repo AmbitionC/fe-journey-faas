@@ -10,6 +10,7 @@ import { GrowthService } from '../growth';
 import { computeGaps, daysBetween, freshness, movingAvg, muscleTrend, sleepSummary, strengthDays, todayCN, withTrainingDays } from './logic';
 import { HealthTrainingService } from '../health/training/service';
 import { ActivityRecord } from '../health/activity';
+import { vitalSummary } from '../health/vitals';
 import { AlertInput, deficitSummary, healthAlerts } from './alerts';
 
 /** 单块失败不拖垮整页：返回 { error } 由前端显示「该块暂不可用」。 */
@@ -170,6 +171,7 @@ export class PosDashboardService {
       sleep: lastSleep ? { date: lastSleep.date, hours: lastSleep.sleepHours, start: lastSleep.sleepStart, end: lastSleep.sleepEnd } : null,
       muscle: muscleTrend(trend),
       sleep7: sleepSummary(activity, today),
+      vitals: vitalSummary(activity as any, today),
       strengthDays7: strengthDays(activity, today),
       alerts: healthAlerts(alertInput),
       deficit: {
