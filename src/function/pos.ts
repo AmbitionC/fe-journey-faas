@@ -18,6 +18,7 @@ import { PosTimeService } from '../service/pos/timeService';
 import { calendarKey } from '../service/pos/calendar';
 import { PosFinanceService } from '../service/pos/finance';
 import { PosContextService, MANUAL_METRICS } from '../service/pos/context';
+import { PosSnapshotService } from '../service/pos/snapshot';
 import { todayCN } from '../service/pos/logic';
 
 type Ep = { baseUrl: string; apiKey: string; model: string };
@@ -54,6 +55,9 @@ export class PosHTTPService {
   @Inject()
   contextService: PosContextService;
 
+  @Inject()
+  snapshotService: PosSnapshotService;
+
   private assertToken() {
     const expected = this.healthConfig?.apiToken;
     if (!expected) throw R.forbiddenError('未配置访问令牌（HEALTH_API_TOKEN）');
@@ -80,6 +84,14 @@ export class PosHTTPService {
       visionAvailable: !!(v?.apiKey && v?.model),
       chatAvailable: !!(c?.apiKey && c?.model),
     });
+  }
+
+  /** 给任何 Agent 的全量个人快照：画像 / 健康 / 财富 / 收入 / 消费 / 时间 / 复盘 + 数据说明与写回方式。 */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/snapshot', method: 'get', functionName: 'posSnapshot', name: 'posSnapshot', description: '全量个人快照（给 Agent）' })
+  @NoAuth()
+  async snapshot() {
+    this.assertToken();
+    return this.ok(await this.snapshotService.build());
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/dashboard', method: 'get', functionName: 'posDashboard', name: 'posDashboard', description: '首页指标看板聚合' })
