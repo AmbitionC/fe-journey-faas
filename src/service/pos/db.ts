@@ -367,4 +367,27 @@ export async function ensurePosSchema(
       ${STAMPS},
       UNIQUE KEY uk_screen (period, start_date, device)
     ) ${TABLE_TAIL}`);
+  // 支付宝/微信账单流水：整表归 invest-model personal/data/txn/*.csv 管（sync_data.py 写入，网页不录）；
+  // kind/category 由 invest-model scripts/personal/bills.py classify() 算，只有 kind='consume' 计入花费
+  await run(`CREATE TABLE IF NOT EXISTS pos_txn (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      txn_key VARCHAR(120) NOT NULL,
+      source VARCHAR(8) NOT NULL,
+      txn_time DATETIME NOT NULL,
+      io VARCHAR(8) NOT NULL,
+      amount DECIMAL(12,2) NOT NULL,
+      refunded DECIMAL(12,2) NOT NULL DEFAULT 0,
+      net DECIMAL(12,2) NOT NULL,
+      kind VARCHAR(12) NOT NULL,
+      category VARCHAR(16) NOT NULL,
+      raw_category VARCHAR(32) NULL,
+      counterparty VARCHAR(100) NULL,
+      item VARCHAR(255) NULL,
+      pay_method VARCHAR(100) NULL,
+      status VARCHAR(32) NULL,
+      ${STAMPS},
+      UNIQUE KEY uk_txn (txn_key),
+      KEY idx_txn_time (txn_time),
+      KEY idx_txn_kind (kind, category)
+    ) ${TABLE_TAIL}`);
 }
