@@ -109,7 +109,7 @@ resources:
     props:
       region: cn-hangzhou
       functionName: pos-alert-cron
-      description: 'Personal OS 健康：每天 08:30/20:30 预警、周一 09:00 周复盘'
+      description: 'Personal OS 健康：周一 09:00 周复盘（08:30/20:30 预警推送已关）'
       runtime: python3.10
       handler: index.handler
       cpu: 0.05
@@ -126,14 +126,14 @@ resources:
           qualifier: LATEST
           triggerConfig:
             cronExpression: '0 30 0 * * *'    # 北京 08:30：昨天热量差已结算 + 体成分/睡眠/数据断档
-            enable: true
+            enable: false                     # 2026-10-13 用户：健康预警不推送（首页预警卡照常；每晚 23:40 日报覆盖）
             payload: 'morning'
         - triggerName: evening
           triggerType: timer
           qualifier: LATEST
           triggerConfig:
             cronExpression: '0 30 12 * * *'   # 北京 20:30：今天超预算 / 蛋白缺口 / 还没记餐
-            enable: true
+            enable: false                     # 同上
             payload: 'evening'
         - triggerName: weekly
           triggerType: timer
