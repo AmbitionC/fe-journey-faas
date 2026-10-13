@@ -6,7 +6,7 @@
 
 当前受支持后端部署路径是 `.github/workflows/deploy.yml` 的 `deploy` job：master push 或 workflow_dispatch，既有 GitHub Secrets 注入凭据，构建后执行 `s fcJourneyMain deploy -y --access aliyun`，并进行基础运行时冒烟。旧 `deploy.sh` 会重新安装依赖、生成入口并移动文件，不作为此次发布方案。部署配置仍保持 `synchronize=false/dropSchema=false/migrationsRun=false`，部署本身不会执行本次 SQL。
 
-最新 master `70a1bb8` 的运维 workflow 还有独立投资定时函数 job。`[journey-only]` 约定只跳过投资定时函数；新增的 `posAlertCron` 部署与健康 dryRun 冒烟仍在 `deploy` job 内无条件运行。因此不能把此标记当作仅发布运营/Web 的完整隔离措施。父线程发布前须协调这项现有 Personal OS 联动，或由已有授权部署操作者仅执行既有 `s fcJourneyMain deploy -y --access aliyun` 命令；仓库当前没有独立 Web-only workflow。本 PR 不修改 Personal OS workflow，不触发部署或改变 Secrets、权限。
+复核至 2026-10-13 master `65f5504` 的运维 workflow 还有独立投资定时函数 job。`[journey-only]` 约定只跳过投资定时函数；新增的 `posAlertCron` 部署与健康 dryRun 冒烟仍在 `deploy` job 内无条件运行。因此不能把此标记当作仅发布运营/Web 的完整隔离措施。父线程发布前须协调这项现有 Personal OS 联动，或由已有授权部署操作者仅执行既有 `s fcJourneyMain deploy -y --access aliyun` 命令；仓库当前没有独立 Web-only workflow。本 PR 不修改 Personal OS workflow，不触发部署或改变 Secrets、权限。
 
 仓库尚无自动运行这份 SQL 的迁移工作流。合法执行路径是现有 DB 管理员/已授权数据库客户端，选择 `fe-journey` 后运行 `scripts/migrations/20261010-operations-content.sql`。若应用现有账号没有 CREATE 权限，由已有有权操作者执行；不为本功能创建账号或扩权。当前不能确认该账号的实际 grants，不能把已有生产部署凭据等同于建表授权。生产执行仍需父线程协调既有授权操作者。
 
