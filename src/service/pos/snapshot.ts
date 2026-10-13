@@ -70,7 +70,7 @@ const GUIDE = {
     'factType：measured 实测 / imported 导入 / reported 自述 / estimated 估算 / derived 派生。',
     '净资产不含自住房（本人定：只自住不卖，不计入资产），房贷等照计负债。',
     'spending 只统计 kind=consume；family（转给家人）/ gift / p2p / invest / internal / debt（补房贷）/ cash（取现）单列在 nonConsume；dup 是银行流水里已在支付宝微信记过的同一笔。',
-    '饮食热量是拍照估算（±20%）；Watch 数据经 iOS 快捷指令每天 9:00/14:00/19:00/23:50 推送，23:00 后那次算当天收盘值，白天的是盘中值（health.summary.today.watch 为盘中推算）。',
+    '饮食热量是拍照估算（±20%）；Watch 数据经 iOS 快捷指令每天 9:00/14:00/19:00/23:30 推送，23:00 后那次算当天收盘值，白天的是盘中值（health.summary.today.watch 为盘中推算）。',
   ],
   readMore: {
     api: 'fe-journey-faas：GET /pos/dashboard、/pos/wealth、/pos/time、/pos/review/weekly、/pos/profile、/health/*（请求头 X-Health-Token）',
