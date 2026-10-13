@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { AlertInput, alertsToPush, deficitDays, deficitSummary, healthAlerts } from '../src/service/pos/alerts';
+import { AlertInput, alertsToPush, burnProjection, closing, deficitDays, deficitSummary, healthAlerts } from '../src/service/pos/alerts';
 import { renderComment } from '../src/service/pos/alertPush';
 
 const TODAY = '2026-10-10';
@@ -55,6 +55,37 @@ describe('pos/alerts 健康与热量差预警', () => {
     const d = deficitDays(inp).find(x => x.date === y.date)!;
     assert.strictEqual(d.burnSource, 'avg');
     assert.strictEqual(d.burn, 2400);
+  });
+
+  it('当天 23:50 推送也算收盘：静息按已过分钟折满 24 小时', () => {
+    const iso = new Date(Date.parse('2026-10-09T23:50:00+08:00')).toISOString();
+    assert.deepStrictEqual(closing(iso, '2026-10-09'), { restingScale: 1440 / 1430 });
+    assert.strictEqual(closing(new Date(Date.parse('2026-10-09T17:00:00+08:00')).toISOString(), '2026-10-09'), null);
+    assert.deepStrictEqual(closing(cnIso('2026-10-10', 1), '2026-10-09'), { restingScale: 1 });
+    assert.strictEqual(closing(cnIso('2026-10-08', 23), '2026-10-09'), null);
+
+    const inp = base();
+    const y = inp.activity.find(a => a.date === shift(TODAY, -1))!;
+    y.restingKcal = 1787; // 23:50 时的累计
+    y.updatedAt = new Date(Date.parse(`${y.date}T23:50:00+08:00`)).toISOString();
+    const d = deficitDays(inp).find(x => x.date === y.date)!;
+    assert.strictEqual(d.burnSource, 'day');
+    assert.strictEqual(d.burn, Math.round(600 + 1787 * (1440 / 1430)));
+  });
+
+  it('盘中推算：14 点多动了就多给一点，9 点前不推算、封顶 400', () => {
+    const at = (h: number, m = 0) => new Date(Date.parse(`2026-10-10T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00+08:00`)).toISOString();
+    // 14:00 已过 840 分钟：静息 1050 → 折满 1800；活动 900 → 推算 2700，比 TDEE 2400 多 300 → 吃回 150
+    const p = burnProjection({ activeKcal: 900, restingKcal: 1050, updatedAt: at(14) }, TODAY, 2400)!;
+    assert.deepStrictEqual(p, { asOf: '14:00', projected: 2700, baseline: 2400, bonus: 150 });
+    // 动得少不扣（预算本来就按平均消耗定）
+    assert.strictEqual(burnProjection({ activeKcal: 200, restingKcal: 1050, updatedAt: at(14) }, TODAY, 2400)!.bonus, 0);
+    // 封顶
+    assert.strictEqual(burnProjection({ activeKcal: 2500, restingKcal: 1050, updatedAt: at(17) }, TODAY, 2400)!.bonus, 400);
+    // 9 点前样本太少；昨天的记录不是今天的推算
+    assert.strictEqual(burnProjection({ activeKcal: 100, restingKcal: 500, updatedAt: at(8, 59) }, TODAY, 2400), null);
+    assert.strictEqual(burnProjection({ activeKcal: 900, restingKcal: 1050, updatedAt: at(14) }, '2026-10-11', 2400), null);
+    assert.strictEqual(burnProjection(null, TODAY, 2400), null);
   });
 
   it('昨天：盈余 / 吃太少 / 没记全', () => {

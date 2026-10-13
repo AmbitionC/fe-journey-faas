@@ -4,8 +4,8 @@ import { daysBetween, movingAvg, muscleTrend, sleepSummary, strengthDays } from 
  * 健康 / 热量差预警（纯函数，无 IO）。
  *
  * 热量缺口 = 当日消耗 − 摄入（正数＝吃得比消耗少）。
- * - 当日消耗：Watch 当天静息+活动能量且已是「收盘值」（最后一次同步发生在第二天及以后）才用当天实测，
- *   否则用预算引擎的 TDEE（近 14 天实测均值或估算）——快捷指令白天推的盘中值会把消耗算少。
+ * - 当日消耗：Watch 当天静息+活动能量且已是「收盘值」才用当天实测，否则用预算引擎的 TDEE——白天推的盘中值会把消耗算少。
+ *   收盘值＝最后一次同步在第二天及以后，或当天 23:00 之后（本人定时 23:50 推，静息能量按已过时长折满 24 小时）。
  * - 记全：当天 ≥2 餐且 ≥800 kcal 才算，没记全的日子不进均值（不然缺口虚高）。
  */
 
@@ -55,6 +55,43 @@ const KCAL_PER_KG = 7700;
 export const shift = (d: string, n: number) =>
   new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 const cnDate = (iso: string) => new Date(Date.parse(iso) + 8 * 3600 * 1000).toISOString().slice(0, 10);
+/** 北京时间当天已过的分钟数 */
+const cnMinutes = (iso: string) => {
+  const t = new Date(Date.parse(iso) + 8 * 3600 * 1000);
+  return t.getUTCHours() * 60 + t.getUTCMinutes();
+};
+
+/**
+ * 这一天的 Watch 数据是否已「收盘」：第二天及以后同步过 → 整天；当天 23:00 以后同步 → 也算，
+ * 静息能量按已过分钟折满 24 小时（23:50 推送约差 10 分钟）。返回 null＝还是盘中值。
+ */
+export function closing(updatedAt: string, date: string): { restingScale: number } | null {
+  const d = cnDate(updatedAt);
+  if (d > date) return { restingScale: 1 };
+  if (d < date) return null;
+  const m = cnMinutes(updatedAt);
+  return m >= 23 * 60 ? { restingScale: 1440 / Math.max(m, 1) } : null;
+}
+
+/**
+ * 盘中推算（14:00 / 17:00 等定时同步后）：静息能量按已过时长折满全天 + 截至目前的活动能量（之后的活动不预估，保守）。
+ * 比预算引擎的 TDEE 多出来的部分只「吃回一半」——手表的活动能量本身偏高估。9 点前样本太少不推算。
+ */
+export function burnProjection(
+  a: { activeKcal: number | null; restingKcal: number | null; updatedAt: string | null } | null | undefined,
+  date: string,
+  tdee: number
+): { asOf: string; projected: number; baseline: number; bonus: number } | null {
+  if (!a?.updatedAt || a.activeKcal == null || a.restingKcal == null || a.restingKcal <= 0) return null;
+  if (cnDate(a.updatedAt) !== date) return null;
+  const m = cnMinutes(a.updatedAt);
+  if (m < 9 * 60) return null;
+  const projected = Math.round(a.activeKcal + (a.restingKcal * 1440) / m);
+  const bonus = Math.max(0, Math.min(400, Math.round(((projected - tdee) * 0.5) / 10) * 10));
+  const hh = String(Math.floor(m / 60)).padStart(2, '0');
+  const mm = String(m % 60).padStart(2, '0');
+  return { asOf: `${hh}:${mm}`, projected, baseline: tdee, bonus };
+}
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const sgn = (x: number, unit = '') => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x)}${unit}`;
 
@@ -76,10 +113,10 @@ export function deficitDays(
     const date = shift(end, i - days + 1);
     const m = mealMap.get(date);
     const a = actMap.get(date);
-    const final = !!a?.updatedAt && cnDate(a.updatedAt) > date;
+    const fin = a?.updatedAt ? closing(a.updatedAt, date) : null;
     const dayBurn =
-      final && a!.activeKcal != null && a!.restingKcal != null && a!.restingKcal > 0
-        ? Math.round(a!.activeKcal + a!.restingKcal)
+      fin && a!.activeKcal != null && a!.restingKcal != null && a!.restingKcal > 0
+        ? Math.round(a!.activeKcal + a!.restingKcal * fin.restingScale)
         : null;
     const burn = dayBurn ?? input.budget.tdee;
     const complete = !!m && m.meals >= 2 && m.kcal >= 800;

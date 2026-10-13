@@ -4,7 +4,7 @@ import { HealthBudgetService } from '../src/service/health/budget';
 /** 用桩替代 DB/档案/体成分依赖，验证预算引擎的核心公式。 */
 function makeService(opts: {
   body?: any;
-  activityRows?: Array<{ total: number }>;
+  activityRows?: Array<{ total: number } & Record<string, any>>;
   profile?: any;
 }): HealthBudgetService {
   const svc = new HealthBudgetService();
@@ -64,6 +64,22 @@ describe('health/budget.ts 预算引擎', () => {
     assert.strictEqual(b.basis.tdeeSource, 'measured');
     assert.strictEqual(b.basis.tdee, 2400);
     assert.strictEqual(b.intakeKcal, 2000);
+  });
+
+  it('只统计收盘的日子（updated_at 是库里的北京时间墙上时间）：最后一次同步停在下午的那天不进 TDEE，当天 23:50 的算', async () => {
+    const svc = makeService({
+      body: { weightKg: 88, bodyFatPct: 26 },
+      activityRows: [
+        { record_date: '2026-10-05', active_kcal: 600, resting_kcal: 1800, updated_at: '2026-10-06 01:00:00', total: 2400 },
+        { record_date: '2026-10-06', active_kcal: 600, resting_kcal: 1787, updated_at: '2026-10-06 23:50:00', total: 2387 },
+        { record_date: '2026-10-07', active_kcal: 700, resting_kcal: 1800, updated_at: '2026-10-08 00:10:00', total: 2500 },
+        { record_date: '2026-10-08', active_kcal: 200, resting_kcal: 1000, updated_at: '2026-10-08 14:00:00', total: 1200 },
+      ] as any,
+    });
+    const b = await svc.current();
+    assert.strictEqual(b.basis.tdeeSource, 'measured');
+    // (2400 + round(600 + 1787×1440/1430) + 2500) / 3，下午停更的 1200 不计
+    assert.strictEqual(b.basis.tdee, Math.round((2400 + Math.round(600 + (1787 * 1440) / 1430) + 2500) / 3));
   });
 
   it('实测天数不足 3 天仍走估算', async () => {

@@ -2,6 +2,8 @@ import { Provide, Inject } from '@midwayjs/core';
 import { HealthDbService } from './db';
 import { HealthProfileService } from './profile';
 import { HealthBodyService } from './body';
+import { closing } from '../pos/alerts';
+import { cnWallToIso, toDateStr } from './activity';
 
 export interface DailyBudget {
   /** 当日热量预算（kcal），已扣除缺口 */
@@ -65,18 +67,34 @@ export class HealthBudgetService {
     }
     const bmr = bmrKatch ? Math.round((bmrMifflin + bmrKatch) / 2) : bmrMifflin;
 
-    // TDEE：优先近 14 天实测（静息+活动能量都有的天数 ≥ 3）。
-    // 排除「今天」：快捷指令白天会多次推送当天的不完整数据（盘中值），
-    // 混进均值会把 TDEE 拉低、预算失真——只统计已经完整结束的日子。
+    // TDEE：优先近 14 天实测（已「收盘」的天数 ≥ 3）。
+    // 快捷指令白天会多次推送当天的不完整数据（盘中值），只统计收盘的日子：第二天及以后同步过，
+    // 或当天 23:00 后同步过（静息按已过分钟折满 24h）——见 pos/alerts.ts closing()。
     const todayCN = new Date(Date.now() + 8 * 3600 * 1000)
       .toISOString()
       .slice(0, 10);
-    const rows = await this.db.q<{ total: number }>(
-      `SELECT (resting_kcal + active_kcal) AS total FROM activity_daily
+    const raw = await this.db.q<{
+      total: number;
+      record_date?: any;
+      active_kcal?: number;
+      resting_kcal?: number;
+      updated_at?: any;
+    }>(
+      `SELECT record_date, active_kcal, resting_kcal, updated_at, (resting_kcal + active_kcal) AS total FROM activity_daily
        WHERE record_date >= DATE_SUB(?, INTERVAL 14 DAY) AND record_date < ?
          AND resting_kcal IS NOT NULL AND active_kcal IS NOT NULL AND resting_kcal > 0`,
       [todayCN, todayCN]
     );
+    const rows = raw
+      .map(r => {
+        if (r.updated_at == null || r.record_date == null) return { total: Number(r.total) };
+        const iso = cnWallToIso(r.updated_at);
+        const fin = iso ? closing(iso, toDateStr(r.record_date)) : null;
+        return fin
+          ? { total: Math.round(Number(r.active_kcal) + Number(r.resting_kcal) * fin.restingScale) }
+          : null;
+      })
+      .filter((r): r is { total: number } => r != null);
     let tdee: number;
     let tdeeSource: 'measured' | 'estimated';
     if (rows.length >= 3) {

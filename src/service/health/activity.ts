@@ -31,10 +31,25 @@ export interface ActivityRecord {
   updatedAt: string | null;
 }
 
-function toDateStr(v: any): string {
+export function toDateStr(v: any): string {
   return v instanceof Date
     ? v.toISOString().slice(0, 10)
     : String(v).slice(0, 10);
+}
+
+/**
+ * DATETIME 列（如 updated_at＝CURRENT_TIMESTAMP）存的是 RDS 的北京时间「墙上时间」，驱动按 FC 实例本地时区（UTC）
+ * 解析会整体晚 8 小时。这里取回墙上时间再按 +08:00 解释，得到真实时刻的 ISO。
+ */
+export function cnWallToIso(v: any): string | null {
+  if (v == null || v === '') return null;
+  const p = (n: number) => String(n).padStart(2, '0');
+  const wall =
+    v instanceof Date
+      ? `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}T${p(v.getHours())}:${p(v.getMinutes())}:${p(v.getSeconds())}`
+      : String(v).trim().replace(' ', 'T').slice(0, 19);
+  const t = Date.parse(`${wall}+08:00`);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
 function rowToActivity(row: any): ActivityRecord {
@@ -55,7 +70,7 @@ function rowToActivity(row: any): ActivityRecord {
       Object.entries(VITALS).map(([k, d]) => [k, row[d.col] == null ? null : Number(row[d.col])])
     ) as Pick<ActivityRecord, 'restingHr' | 'hrvMs' | 'vo2max' | 'walkingHr' | 'spo2Pct' | 'respRate' | 'distanceKm' | 'bodyFatPct'>),
     source: row.source,
-    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    updatedAt: cnWallToIso(row.updated_at),
   };
 }
 

@@ -163,9 +163,9 @@ ${hint ? `用户补充说明：${hint}` : ''}
           todayAct.activeKcal ?? '-'
         } kcal、锻炼 ${todayAct.exerciseMinutes ?? '-'} 分钟${
           todayAct.updatedAt
-            ? `（更新于 ${new Date(todayAct.updatedAt)
+            ? `（更新于 ${new Date(Date.parse(todayAct.updatedAt) + 8 * 3600 * 1000)
                 .toISOString()
-                .slice(11, 16)} UTC）`
+                .slice(11, 16)}）`
             : ''
         }`
       : '今日暂无活动同步数据';

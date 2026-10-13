@@ -11,7 +11,7 @@ import { computeGaps, daysBetween, freshness, movingAvg, muscleTrend, sleepSumma
 import { HealthTrainingService } from '../health/training/service';
 import { ActivityRecord } from '../health/activity';
 import { vitalSummary } from '../health/vitals';
-import { AlertInput, deficitSummary, healthAlerts } from './alerts';
+import { AlertInput, burnProjection, deficitSummary, healthAlerts } from './alerts';
 
 /** 单块失败不拖垮整页：返回 { error } 由前端显示「该块暂不可用」。 */
 async function safe<T>(fn: () => Promise<T>): Promise<T | { error: string }> {
@@ -124,6 +124,8 @@ export class PosDashboardService {
       body: trend,
     };
     const def = deficitSummary(alertInput);
+    // 盘中同步（9/14/17 点）后：按手表推算今天总消耗，比平时多动的部分吃回一半
+    const proj = burnProjection(watch.find(a => a.date === today), today, budget.basis.tdee);
     return {
       weight: latest
         ? {
@@ -149,7 +151,8 @@ export class PosDashboardService {
       today: {
         kcal: day.summary.totalKcal,
         budget: budget.intakeKcal,
-        remaining: budget.intakeKcal - day.summary.totalKcal,
+        remaining: budget.intakeKcal + (proj?.bonus ?? 0) - day.summary.totalKcal,
+        watch: proj,
         proteinG: day.summary.proteinG,
         proteinTarget: budget.proteinG,
         meals: day.summary.mealsLogged,

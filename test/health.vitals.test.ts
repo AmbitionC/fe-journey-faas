@@ -1,6 +1,17 @@
 import * as assert from 'assert';
 import { parseVitals, readings, vitalSummary, weightKg } from '../src/service/health/vitals';
 
+import { cnWallToIso } from '../src/service/health/activity';
+
+describe('health/activity 库内时间', () => {
+  it('updated_at 是北京时间墙上时间：字符串与驱动按本地时区解析出的 Date 都还原成真实时刻', () => {
+    assert.strictEqual(cnWallToIso('2026-10-13 12:54:18'), '2026-10-13T04:54:18.000Z');
+    // 驱动按实例本地时区把墙上时间解析成 Date；无论实例在哪个时区，本地字段都等于墙上时间
+    assert.strictEqual(cnWallToIso(new Date(2026, 9, 12, 23, 50, 13)), '2026-10-12T15:50:13.000Z');
+    assert.strictEqual(cnWallToIso(null), null);
+  });
+});
+
 describe('health/vitals 健康 App 样本解析', () => {
   it('样本文本带单位、多行、千分位都能读出数', () => {
     assert.deepStrictEqual(readings('58 次/分\n61 次/分').map(r => r.value), [58, 61]);

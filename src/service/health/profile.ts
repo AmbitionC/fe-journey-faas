@@ -1,4 +1,5 @@
 import { Provide, Inject } from '@midwayjs/core';
+import { cnWallToIso } from './activity';
 import { HealthDbService } from './db';
 
 export interface HealthProfile {
@@ -39,7 +40,7 @@ export class HealthProfileService {
         row.goal_weight_kg == null ? null : Number(row.goal_weight_kg),
       goals: row.goals_json ? JSON.parse(row.goals_json) : [],
       preferences: row.preferences || null,
-      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+      updatedAt: cnWallToIso(row.updated_at),
     };
   }
 
