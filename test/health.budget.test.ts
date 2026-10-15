@@ -74,11 +74,13 @@ describe('health/budget.ts 预算引擎', () => {
         { record_date: '2026-10-06', active_kcal: 600, resting_kcal: 1787, updated_at: '2026-10-06 23:50:00', total: 2387 },
         { record_date: '2026-10-07', active_kcal: 700, resting_kcal: 1800, updated_at: '2026-10-08 00:10:00', total: 2500 },
         { record_date: '2026-10-08', active_kcal: 200, resting_kcal: 1000, updated_at: '2026-10-08 14:00:00', total: 1200 },
+        // 手表没电：23:30 收盘只有 343，不算戴满一天
+        { record_date: '2026-10-09', active_kcal: 198, resting_kcal: 142, updated_at: '2026-10-09 23:30:00', total: 340 },
       ] as any,
     });
     const b = await svc.current();
     assert.strictEqual(b.basis.tdeeSource, 'measured');
-    // (2400 + round(600 + 1787×1440/1430) + 2500) / 3，下午停更的 1200 不计
+    // (2400 + round(600 + 1787×1440/1430) + 2500) / 3，下午停更的 1200、没戴满的 340 不计
     assert.strictEqual(b.basis.tdee, Math.round((2400 + Math.round(600 + (1787 * 1440) / 1430) + 2500) / 3));
   });
 

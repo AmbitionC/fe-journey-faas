@@ -64,13 +64,22 @@ const cnMinutes = (iso: string) => {
 /**
  * 这一天的 Watch 数据是否已「收盘」：第二天及以后同步过 → 整天；当天 23:00 以后同步 → 也算，
  * 静息能量按已过分钟折满 24 小时（23:50 推送约差 10 分钟）。返回 null＝还是盘中值。
+ * 传了 restingKcal 时再验「戴满了」：折满后的静息不足 MIN_DAY_RESTING＝手表没电/没戴，只记了一小段，
+ * 当天不算收盘（2026-10-14 手表没电，收盘值只有 343 kcal，把实测 TDEE 从 ~2650 拉到 1882）。
  */
-export function closing(updatedAt: string, date: string): { restingScale: number } | null {
+export const MIN_DAY_RESTING = 1000;
+export function closing(updatedAt: string, date: string, restingKcal?: number | null): { restingScale: number } | null {
   const d = cnDate(updatedAt);
-  if (d > date) return { restingScale: 1 };
-  if (d < date) return null;
-  const m = cnMinutes(updatedAt);
-  return m >= 23 * 60 ? { restingScale: 1440 / Math.max(m, 1) } : null;
+  let scale: number;
+  if (d > date) scale = 1;
+  else if (d < date) return null;
+  else {
+    const m = cnMinutes(updatedAt);
+    if (m < 23 * 60) return null;
+    scale = 1440 / Math.max(m, 1);
+  }
+  if (restingKcal != null && restingKcal * scale < MIN_DAY_RESTING) return null;
+  return { restingScale: scale };
 }
 
 /**
@@ -85,7 +94,7 @@ export function burnProjection(
   if (!a?.updatedAt || a.activeKcal == null || a.restingKcal == null || a.restingKcal <= 0) return null;
   if (cnDate(a.updatedAt) !== date) return null;
   const m = cnMinutes(a.updatedAt);
-  if (m < 9 * 60) return null;
+  if (m < 9 * 60 || (a.restingKcal * 1440) / m < MIN_DAY_RESTING) return null; // 静息折不满一天＝手表没戴/没电
   const projected = Math.round(a.activeKcal + (a.restingKcal * 1440) / m);
   const bonus = Math.max(0, Math.min(400, Math.round(((projected - tdee) * 0.5) / 10) * 10));
   const hh = String(Math.floor(m / 60)).padStart(2, '0');
@@ -113,7 +122,7 @@ export function deficitDays(
     const date = shift(end, i - days + 1);
     const m = mealMap.get(date);
     const a = actMap.get(date);
-    const fin = a?.updatedAt ? closing(a.updatedAt, date) : null;
+    const fin = a?.updatedAt ? closing(a.updatedAt, date, a.restingKcal) : null;
     const dayBurn =
       fin && a!.activeKcal != null && a!.restingKcal != null && a!.restingKcal > 0
         ? Math.round(a!.activeKcal + a!.restingKcal * fin.restingScale)

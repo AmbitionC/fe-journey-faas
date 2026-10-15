@@ -57,6 +57,24 @@ describe('pos/alerts 健康与热量差预警', () => {
     assert.strictEqual(d.burn, 2400);
   });
 
+  it('手表没电/没戴满一天：收盘时静息不够一天的不算收盘，回退平均消耗', () => {
+    // 2026-10-14 实例：手表没电，23:30 收盘只有 活动 198 + 静息 142
+    const iso = new Date(Date.parse('2026-10-14T23:30:00+08:00')).toISOString();
+    assert.strictEqual(closing(iso, '2026-10-14', 142), null);
+    assert.strictEqual(closing(cnIso('2026-10-15', 9), '2026-10-14', 142), null);
+    assert.deepStrictEqual(closing(cnIso('2026-10-15', 9), '2026-10-14', 1850), { restingScale: 1 });
+    assert.ok(closing(iso, '2026-10-14', 980)); // 980 折满 24h ≈ 1000.7，刚好够
+
+    const inp = base();
+    const y = inp.activity.find(a => a.date === shift(TODAY, -1))!;
+    y.activeKcal = 198;
+    y.restingKcal = 142;
+    y.updatedAt = cnIso(TODAY, 1);
+    const d = deficitDays(inp).find(x => x.date === y.date)!;
+    assert.strictEqual(d.burnSource, 'avg');
+    assert.strictEqual(d.burn, inp.budget.tdee);
+  });
+
   it('当天 23:50 推送也算收盘：静息按已过分钟折满 24 小时', () => {
     const iso = new Date(Date.parse('2026-10-09T23:50:00+08:00')).toISOString();
     assert.deepStrictEqual(closing(iso, '2026-10-09'), { restingScale: 1440 / 1430 });
@@ -84,6 +102,7 @@ describe('pos/alerts 健康与热量差预警', () => {
     assert.strictEqual(burnProjection({ activeKcal: 2500, restingKcal: 1050, updatedAt: at(17) }, TODAY, 2400)!.bonus, 400);
     // 9 点前样本太少；昨天的记录不是今天的推算
     assert.strictEqual(burnProjection({ activeKcal: 100, restingKcal: 500, updatedAt: at(8, 59) }, TODAY, 2400), null);
+    assert.strictEqual(burnProjection({ activeKcal: 198, restingKcal: 142, updatedAt: at(22) }, TODAY, 2400), null);
     assert.strictEqual(burnProjection({ activeKcal: 900, restingKcal: 1050, updatedAt: at(14) }, '2026-10-11', 2400), null);
     assert.strictEqual(burnProjection(null, TODAY, 2400), null);
   });

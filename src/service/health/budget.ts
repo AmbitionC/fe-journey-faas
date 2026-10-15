@@ -69,7 +69,7 @@ export class HealthBudgetService {
 
     // TDEE：优先近 14 天实测（已「收盘」的天数 ≥ 3）。
     // 快捷指令白天会多次推送当天的不完整数据（盘中值），只统计收盘的日子：第二天及以后同步过，
-    // 或当天 23:00 后同步过（静息按已过分钟折满 24h）——见 pos/alerts.ts closing()。
+    // 或当天 23:00 后同步过（静息按已过分钟折满 24h），且手表戴满了（静息够一天）——见 pos/alerts.ts closing()。
     const todayCN = new Date(Date.now() + 8 * 3600 * 1000)
       .toISOString()
       .slice(0, 10);
@@ -89,7 +89,7 @@ export class HealthBudgetService {
       .map(r => {
         if (r.updated_at == null || r.record_date == null) return { total: Number(r.total) };
         const iso = cnWallToIso(r.updated_at);
-        const fin = iso ? closing(iso, toDateStr(r.record_date)) : null;
+        const fin = iso ? closing(iso, toDateStr(r.record_date), Number(r.resting_kcal)) : null;
         return fin
           ? { total: Math.round(Number(r.active_kcal) + Number(r.resting_kcal) * fin.restingScale) }
           : null;
