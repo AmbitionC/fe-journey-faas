@@ -289,19 +289,22 @@ export class InvestInsightService {
       'SELECT trade_date, score, level, components, raw FROM fear_daily ORDER BY trade_date DESC LIMIT 1');
     if (!row) return null;
     const daily = { ...row, components: parseJson(row.components), raw: parseJson(row.raw) };
-    // 盘中(近似)：若 fear_intraday 有「同一交易日或更新」的快照，则透出为当前值，
-    // 并带 intraday=true + snapshot_ts 供前端标注；表缺失/无数据静默回退日频。
+    // 盘中(近似)：仅当 fear_intraday 有**严格更新**交易日的快照（＝当日收盘值尚未算出）时透出为当前值，
+    // 带 intraday=true + snapshot_ts + daily_date（收盘值所属交易日＝前一交易日）供前端标「昨收」；
+    // 同日收盘官方值已出（~18:30）即以收盘值为准。表缺失/无数据静默回退日频。
+    // 2026-10-15：旧条件 >= 让同日盘中近似值压过官方收盘值，且前端把前一日收盘标成「收盘」（误读为今日）。
     try {
       const intra = await this.db.one(
         'SELECT trade_date, snapshot_ts, score, level, components, raw FROM fear_intraday ' +
         'ORDER BY trade_date DESC, snapshot_ts DESC LIMIT 1');
-      if (intra && String(intra.trade_date) >= String(daily.trade_date)) {
+      if (intra && String(intra.trade_date) > String(daily.trade_date)) {
         return {
           ...intra,
           components: parseJson(intra.components),
           raw: parseJson(intra.raw),
           intraday: true,
-          daily_score: daily.score,       // 保留当日已定格的收盘官方值供对照（可能为空）
+          daily_score: daily.score,       // 最近一个已定格的收盘官方值（盘中时＝前一交易日）
+          daily_date: daily.trade_date,   // 该收盘值所属交易日，前端据此标「昨收」
         };
       }
     } catch {
