@@ -24,8 +24,8 @@ describe('landingSourceLabel 脱敏边界', () => {
 
   it('不像主机名的一律归「(其他)」，不原样输出', () => {
     for (const raw of [
-      '17394940726',
-      '17394940726.com',
+      '13800138000',
+      '13800138000.com',
       'https://www.google.com/search?q=x',
       'baidu.com/s?wd=面试',
       '张三.com',
