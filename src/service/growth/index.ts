@@ -61,6 +61,26 @@ export function classifyAiSubjects(
   return { bySubject: [human, system], systemIds };
 }
 
+/** 爬虫 UA 的 SQL 判据（访问质量与进站来源共用，改一处即两处一致）。只做模式匹配、不落 UA 原文。 */
+const BOT_UA_SQL =
+  "LOWER(COALESCE(e.ua, '')) REGEXP 'bot|spider|crawl|slurp|headless|python-requests|curl/|wget|scrapy|http-client'";
+
+/**
+ * 进站来源的展示名。**这也是一道脱敏边界**：`ref` 来自免登录的 /event/track，
+ * 任何人都能塞任意字符串进来，而复盘导出又是免登录的。所以只放行「主机名长相」
+ * （小写字母数字连字符、至少一个点、≤64 字符、不含 7 位以上连续数字），
+ * 其余一律归「(其他)」；空值是「(无来源)」——直接打开、书签、微信内打开多半如此。
+ */
+export function landingSourceLabel(raw?: string | null): string {
+  const host = String(raw ?? '').trim().toLowerCase().replace(/^www\./, '');
+  if (!host) return '(无来源)';
+  const isHost =
+    host.length <= 64 &&
+    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) &&
+    !/\d{7,}/.test(host);
+  return isHost ? host : '(其他)';
+}
+
 /**
  * 增长复盘系统（数据口径见 front-end-journey 仓库 docs/growth-review-playbook.md）。
  * 漏斗四层：访问(uv) → 注册 → 破冰付费(pdf/书) → 高价付费(会员/咨询)。
@@ -264,7 +284,7 @@ export class GrowthService {
         .select('e.ip', 'ip')
         .addSelect('COUNT(*)', 'hits')
         .addSelect(
-          "MAX(CASE WHEN LOWER(COALESCE(e.ua, '')) REGEXP 'bot|spider|crawl|slurp|headless|python-requests|curl/|wget|scrapy|http-client' THEN 1 ELSE 0 END)",
+          `MAX(CASE WHEN ${BOT_UA_SQL} THEN 1 ELSE 0 END)`,
           'bot'
         )
         .where("e.event = 'page_view'")
@@ -609,6 +629,49 @@ export class GrowthService {
           views: Number(r.views || 0),
         })),
       };
+    } catch {
+      return { days, list: [], error: 'query_failed' };
+    }
+  }
+
+  /**
+   * 进站来源（2026-10-18 起有数）：渠道表只认 `?ch=`，没带标记的访客（至今是全部）从哪来
+   * 一直看不见。前端每次整页加载的第一条 page_view 带 `props.ref`＝document.referrer 的
+   * 主机名（同站或无来源为空串），之后的路由切换不带——所以「带 ref 的 page_view」就是一次进站。
+   * 访客按 IP 去重，爬虫 UA 单列 botVisitors；只出主机名与计数（展示名见 landingSourceLabel）。
+   */
+  async landingSources(days = 30, exclude?: string[], limit = 15) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
+    try {
+      const refExpr = "JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.ref'))";
+      const qb = this.eventLogModel
+        .createQueryBuilder('e')
+        .select(refExpr, 'host')
+        .addSelect(`COUNT(DISTINCT CASE WHEN ${BOT_UA_SQL} THEN NULL ELSE e.ip END)`, 'visitors')
+        .addSelect(`COUNT(DISTINCT CASE WHEN ${BOT_UA_SQL} THEN e.ip ELSE NULL END)`, 'botVisitors')
+        .addSelect('COUNT(*)', 'landings')
+        .where("e.event = 'page_view'")
+        .andWhere("JSON_EXTRACT(e.props, '$.ref') IS NOT NULL")
+        .andWhere('e.createTime >= :since', { since })
+        .andWhere("e.ip IS NOT NULL AND e.ip <> ''")
+        .groupBy(refExpr);
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const rows = await qb.getRawMany();
+      // 同一展示名（如 www. 与裸域）合并；访客数相加是上限（同一 IP 可能两边都有）
+      const merged = new Map<string, { source: string; visitors: number; botVisitors: number; landings: number }>();
+      for (const r of rows) {
+        const source = landingSourceLabel(r.host);
+        const m = merged.get(source) || { source, visitors: 0, botVisitors: 0, landings: 0 };
+        m.visitors += Number(r.visitors || 0);
+        m.botVisitors += Number(r.botVisitors || 0);
+        m.landings += Number(r.landings || 0);
+        merged.set(source, m);
+      }
+      const list = [...merged.values()]
+        .sort((a, b) => b.visitors - a.visitors || b.landings - a.landings)
+        .slice(0, limit);
+      return { days, list };
     } catch {
       return { days, list: [], error: 'query_failed' };
     }

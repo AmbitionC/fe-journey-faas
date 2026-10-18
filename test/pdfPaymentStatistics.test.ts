@@ -168,7 +168,7 @@ describe('资料核实统计 SQL 回归（本地内存数据）', function () {
     c.syncSecret = 'fixture-export-only';
     c.ctx = { headers: { 'x-sync-secret': 'fixture-export-only' } } as any;
     const stub: any = {};
-    for (const name of ['overview', 'funnel', 'pathFunnel', 'channels', 'daily', 'signupAudit', 'aiUsage', 'selfReportedOrders', 'manuallyVerifiedPdfOrders', 'unverifiedSelfReportedPdfOrders', 'legacyPaidPdfOrders', 'topPaths']) {
+    for (const name of ['overview', 'funnel', 'pathFunnel', 'channels', 'daily', 'signupAudit', 'aiUsage', 'selfReportedOrders', 'manuallyVerifiedPdfOrders', 'unverifiedSelfReportedPdfOrders', 'legacyPaidPdfOrders', 'topPaths', 'landingSources']) {
       stub[name] = async () => ({ name });
     }
     c.growthService = stub;
@@ -179,5 +179,6 @@ describe('资料核实统计 SQL 回归（本地内存数据）', function () {
     assert.strictEqual(data.unverifiedSelfReportedPdf.name, 'unverifiedSelfReportedPdfOrders');
     assert.strictEqual(data.legacyPaidPdf.name, 'legacyPaidPdfOrders');
     assert.strictEqual(data.topPaths.name, 'topPaths');
+    assert.strictEqual(data.landingSources.name, 'landingSources');
   });
 });

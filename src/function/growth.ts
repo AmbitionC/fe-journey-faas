@@ -84,6 +84,7 @@ export class GrowthHTTPService {
       unverifiedSelfReportedPdf,
       legacyPaidPdf,
       topPaths,
+      landingSources,
     ] = await Promise.all([
         this.metricsService.overview(excludeUsers).catch(() => null),
         this.growthService.overview(excludeUsers).catch(() => null),
@@ -103,6 +104,7 @@ export class GrowthHTTPService {
         this.growthService.unverifiedSelfReportedPdfOrders(days, excludeUsers).catch(() => null),
         this.growthService.legacyPaidPdfOrders(days, excludeUsers).catch(() => null),
         this.growthService.topPaths(days, excludeUsers).catch(() => null),
+        this.growthService.landingSources(days, excludeUsers).catch(() => null),
       ]);
     return {
       success: true,
@@ -124,6 +126,7 @@ export class GrowthHTTPService {
         unverifiedSelfReportedPdf,
         legacyPaidPdf,
         topPaths,
+        landingSources,
       },
     };
   }
