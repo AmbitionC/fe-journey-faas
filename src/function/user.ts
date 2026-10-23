@@ -13,7 +13,9 @@ import { UserDTO } from '../dto/user';
 import { CaptchaService } from '../service/auth/captcha';
 import { UserService } from '../service/user';
 import { EntitlementService } from '../service/entitlement';
+import { InvestDbService } from '../service/invest/db';
 import { R } from '../common/base.error.utils';
+import { siteFromOrigin } from '../common/signupSite';
 
 @Provide()
 export class UserHTTPService {
@@ -31,6 +33,9 @@ export class UserHTTPService {
 
   @Inject()
   redisService: RedisService;
+
+  @Inject()
+  investDb: InvestDbService;
 
   /**
    * 解析当前登录用户 userId（手机号）。优先级：
@@ -69,7 +74,30 @@ export class UserHTTPService {
     const result = await this.captchaService.checkCaptcha(captchaId, captcha);
     if (!result) throw R.error('验证码错误');
     await this.guardSignupRate();
-    return await this.userService.createUser(data);
+    const res = await this.userService.createUser(data);
+    await this.recordSignupSite(data.phoneNumber);
+    return res;
+  }
+
+  /**
+   * 记下注册来源站点（invest / agent …，按 Origin 判，见 common/signupSite）。
+   * 只用于统计；写在 invest 库（表结构归 invest-model 所有）。尽力而为：invest 库不可达或
+   * 超过 3 秒都直接放弃，绝不拖慢或打断注册。
+   */
+  private async recordSignupSite(phoneNumber?: string): Promise<void> {
+    if (!phoneNumber) return;
+    const origin = String(this.ctx.get('origin') || '').slice(0, 128);
+    try {
+      await Promise.race([
+        this.investDb.exec(
+          'INSERT IGNORE INTO user_signup_source (user_id, site, origin) VALUES (?, ?, ?)',
+          [phoneNumber, siteFromOrigin(origin), origin],
+        ),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    } catch {
+      // 统计失败不影响注册
+    }
   }
 
   /**
