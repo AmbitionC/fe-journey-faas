@@ -1,5 +1,6 @@
 import { Provide, Inject } from '@midwayjs/core';
 import { InvestDbService } from './db';
+import { beijingDay } from '../../common/signupSite';
 
 const parseJson = (s: any) => {
   if (s == null || typeof s === 'object') return s ?? null;
@@ -453,6 +454,20 @@ export class InvestInsightService {
       [userId, email, wx, topics, digest]
     );
     return { ok: true };
+  }
+
+  /** 投资站按日访问记录（user_id 取登录态）。只用于统计「有多少人在用」，失败静默。 */
+  async recordVisit(userId: string) {
+    try {
+      await this.db.exec(
+        'INSERT INTO user_site_activity (user_id, day, visits, first_at, last_at) VALUES (?, ?, 1, NOW(), NOW()) ' +
+          'ON DUPLICATE KEY UPDATE visits = visits + 1, last_at = NOW()',
+        [userId, beijingDay()]
+      );
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
   }
 
   /** 二期A：个人宽基记账（流水制）。user_id 一律取登录态。

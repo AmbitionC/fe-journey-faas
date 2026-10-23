@@ -139,7 +139,9 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
       const isOwnPref =
         (path === '/invest/alertpref' && (method === 'GET' || method === 'POST')) ||
         // 个人记账：handler 只认登录态 userId，行级只读写自己的
-        (path.startsWith('/invest/myledger') && (method === 'GET' || method === 'POST'));
+        (path.startsWith('/invest/myledger') && (method === 'GET' || method === 'POST')) ||
+        // 访问记录：只记登录态 userId 自己的一行（统计用，2026-10-23）
+        (path === '/invest/visit' && method === 'POST');
       // 403 而非 401：前端对 401 一律跳登录，越权用 403 走普通错误提示（防登出循环）
       if (!isMarketRead && !isOwnPref) throw R.forbiddenError('需要管理员权限');
       return next();

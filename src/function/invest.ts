@@ -294,6 +294,19 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '投资站访问记录（登录，记自己的；每用户每天一行累加打开次数，只用于统计）',
+    functionName: 'investVisit',
+    name: 'investVisit',
+    path: '/invest/visit',
+    method: 'post',
+  })
+  async visit() {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    if (!uid) return { success: false, message: '未登录' };
+    return { success: true, data: await this.insightService.recordVisit(uid) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '个人宽基记账·列表（登录，只读自己的）',
     functionName: 'investMyLedgerList',
     name: 'investMyLedgerList',
