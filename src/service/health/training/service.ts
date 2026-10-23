@@ -105,10 +105,12 @@ export class HealthTrainingService {
 
   /** 近 days 天练过的日期（并入 Watch 的力量训练天数）。 */
   async trainedDates(daysBack = 21, end = todayCN()): Promise<string[]> {
-    const rows = await this.db.q<any>('SELECT DISTINCT session_date AS d FROM workout_set WHERE session_date BETWEEN ? AND ?', [
-      shift(end, -daysBack),
-      end,
-    ]);
+    // openGym 同步来的课里可能全是本地动作库没有的动作（只进 opengym_workout），也算练过
+    const rows = await this.db.q<any>(
+      `SELECT session_date AS d FROM workout_set WHERE session_date BETWEEN ? AND ?
+       UNION SELECT session_date AS d FROM opengym_workout WHERE session_date BETWEEN ? AND ?`,
+      [shift(end, -daysBack), end, shift(end, -daysBack), end]
+    );
     return rows.map(r => toDateStr(r.d));
   }
 

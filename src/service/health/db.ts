@@ -201,6 +201,31 @@ export class HealthDbService {
       UNIQUE KEY uk_set (session_date, exercise_id, set_no),
       KEY idx_date (session_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    // 2026-10-23 接 openGym：组的来源（web 网页记 / opengym App 同步）与 RIR
+    const setCols = new Set(
+      (
+        await ds.query(
+          `SELECT COLUMN_NAME AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'workout_set'`
+        )
+      ).map((r: any) => r.c)
+    );
+    if (!setCols.has('source')) await ds.query(`ALTER TABLE workout_set ADD COLUMN source VARCHAR(12) NOT NULL DEFAULT 'web'`);
+    if (!setCols.has('rir')) await ds.query('ALTER TABLE workout_set ADD COLUMN rir DECIMAL(3,1) NULL');
+
+    // openGym 同步来的每节课（起止时间、课名、容量），整份备份对账；不在本地动作库的动作只计这里
+    await ds.query(`CREATE TABLE IF NOT EXISTS opengym_workout (
+      og_id VARCHAR(40) PRIMARY KEY,
+      session_date DATE NOT NULL,
+      start_at DATETIME NULL,
+      end_at DATETIME NULL,
+      name VARCHAR(100) NULL,
+      session_key CHAR(1) NOT NULL,
+      set_count INT NOT NULL DEFAULT 0,
+      skipped_sets INT NOT NULL DEFAULT 0,
+      volume_kg INT NOT NULL DEFAULT 0,
+      synced_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_date (session_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
     await ds.query(`CREATE TABLE IF NOT EXISTS health_profile (
       id INT PRIMARY KEY,
