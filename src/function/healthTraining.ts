@@ -107,12 +107,13 @@ export class HealthTrainingHTTPService {
     return { success: true, data: await this.openGym.status() };
   }
 
-  /** 12 周计划 → openGym 计划文件（phase=1–3，缺省当前阶段）；返回的就是文件内容本身。 */
+  /** 12 周计划 → openGym 计划文件（phase=1–3，缺省当前阶段）。?raw=1 直接回文件本身（快捷指令存文件用），否则包一层给网页。 */
   @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/health/opengym/plan', method: 'get', functionName: 'healthOpenGymPlan', name: 'healthOpenGymPlan', description: '导出 openGym 计划文件' })
   @NoAuth()
-  async openGymPlan(@Query(ALL) q: { phase?: string }) {
+  async openGymPlan(@Query(ALL) q: { phase?: string; raw?: string }) {
     this.assertToken();
     const f = await this.openGym.plan(q?.phase ? Number(q.phase) : undefined);
+    if (q?.raw !== '1') return { success: true, data: f };
     this.ctx.set('Content-Disposition', `attachment; filename="opengym-plan-${f.routines[0].id.slice(-2)}.json"`);
     return f;
   }
