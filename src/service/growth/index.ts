@@ -1,4 +1,4 @@
-import { Provide, Config, httpError } from '@midwayjs/core';
+import { Provide, Config, Inject, httpError } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../../entity/user';
@@ -9,6 +9,7 @@ import { AiUsageLogEntity } from '../../entity/aiUsageLog';
 import { GrowthStatEntity } from '../../entity/growthStat';
 import { GrowthReviewEntity } from '../../entity/growthReview';
 import { buildPdfSalesReport, pdfSalesWindow } from './pdfSales';
+import { InvestDbService } from '../invest/db';
 
 /** 高价 SKU 的订单类型（order.type）；破冰 SKU = pdf + 书籍订单 */
 const HIGH_VALUE_ORDER_TYPES = ['member', 'consult'];
@@ -82,12 +83,36 @@ export function landingSourceLabel(raw?: string | null): string {
 }
 
 /**
+ * 注册按站点计数（2026-10-25）。invest-journey 与本站共用 user 表，注册来源由 /user/create
+ * 按 Origin 记进 invest 库 user_signup_source（见 common/signupSite，2026-10-23 起）。
+ * 没有来源记录的（10/23 之前注册，或那次写入失败）归 unrecorded；未知站点值归 other。只出计数。
+ */
+export function countSignupSites(
+  ids: string[],
+  rows: { id?: string | null; site?: string | null }[]
+): Record<'agent' | 'invest' | 'preview' | 'local' | 'other' | 'unrecorded', number> {
+  const out = { agent: 0, invest: 0, preview: 0, local: 0, other: 0, unrecorded: 0 };
+  const siteOf = new Map<string, string>();
+  for (const r of rows || []) if (r?.id) siteOf.set(String(r.id), String(r.site || ''));
+  for (const id of new Set(ids)) {
+    if (!siteOf.has(id)) { out.unrecorded += 1; continue; }
+    const site = siteOf.get(id) as string;
+    if (site === 'agent' || site === 'invest' || site === 'preview' || site === 'local') out[site] += 1;
+    else out.other += 1;
+  }
+  return out;
+}
+
+/**
  * 增长复盘系统（数据口径见 front-end-journey 仓库 docs/growth-review-playbook.md）。
  * 漏斗四层：访问(uv) → 注册 → 破冰付费(pdf/书) → 高价付费(会员/咨询)。
  * 站内数据实时聚合（量级小无需预算表）；站外数据走 growth_stat 手动录入。
  */
 @Provide()
 export class GrowthService {
+  @Inject()
+  investDb: InvestDbService;
+
   @InjectEntityModel(UserEntity)
   userModel: Repository<UserEntity>;
 
@@ -428,6 +453,8 @@ export class GrowthService {
     ]);
     const alive = new Set<string>([...eventUsers, ...aiUsers]);
 
+    const bySite = await this.signupSites(ids);
+
     let signupSuccessEvents = 0;
     try {
       const qb = this.eventLogModel
@@ -457,7 +484,26 @@ export class GrowthService {
       signupSuccessEvents,
       notFromThisFrontend: Math.max(0, signups - signupSuccessEvents),
       autoNickname,
+      // 按注册站点拆分（见 countSignupSites）；查不到 invest 库时为 null，不伪造为零
+      bySite,
     };
+  }
+
+  /** 查 invest 库的注册来源（3 秒放弃，失败返回 null，不拖慢也不打断导出）。 */
+  private async signupSites(ids: string[]) {
+    if (!ids.length) return countSignupSites([], []);
+    try {
+      const rows = await Promise.race([
+        this.investDb.q(
+          `SELECT user_id AS id, site FROM user_signup_source WHERE user_id IN (${ids.map(() => '?').join(',')})`,
+          ids
+        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
+      return countSignupSites(ids, rows as any[]);
+    } catch {
+      return null;
+    }
   }
 
 
@@ -629,6 +675,39 @@ export class GrowthService {
           views: Number(r.views || 0),
         })),
       };
+    } catch {
+      return { days, list: [], error: 'query_failed' };
+    }
+  }
+
+  /**
+   * 服务弹框打开，按弹框名（2026-10-18 起有事件）：「/services 访客 → 打开资料弹框 → 声明支付」
+   * 的中间一步。events 只给总数，看不出开的是哪个；这里按 props.name 拆，只放行已知弹框名。
+   */
+  async serviceModalOpens(days = 30, exclude?: string[]) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
+    try {
+      const nameExpr = "JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.name'))";
+      const qb = this.eventLogModel
+        .createQueryBuilder('e')
+        .select(nameExpr, 'name')
+        .addSelect('COUNT(*)', 'opens')
+        .addSelect('COUNT(DISTINCT e.userId)', 'users')
+        .where("e.event = 'services_modal_open'")
+        .andWhere('e.createTime >= :since', { since })
+        .groupBy(nameExpr);
+      if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      const known = new Set(['member', 'join', 'materials', 'consult']);
+      const merged = new Map<string, { name: string; opens: number; users: number }>();
+      for (const r of await qb.getRawMany()) {
+        const name = known.has(String(r.name)) ? String(r.name) : '(其他)';
+        const m = merged.get(name) || { name, opens: 0, users: 0 };
+        m.opens += Number(r.opens || 0);
+        m.users += Number(r.users || 0);
+        merged.set(name, m);
+      }
+      return { days, list: [...merged.values()].sort((a, b) => b.users - a.users || b.opens - a.opens) };
     } catch {
       return { days, list: [], error: 'query_failed' };
     }
