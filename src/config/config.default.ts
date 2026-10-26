@@ -5,6 +5,7 @@ import { InterviewEntity } from '../entity/interview';
 import { VisitLogEntity } from '../entity/visitLog';
 import { OrderEntity } from '../entity/order';
 import { NavConfigEntity } from '../entity/navConfig';
+import { OperationsContentEntity } from '../entity/operationsContent';
 import { ArticleEntity } from '../entity/article';
 import { UserArticleActionEntity } from '../entity/userArticleAction';
 import { ArticleViewLogEntity } from '../entity/articleViewLog';
@@ -184,7 +185,7 @@ export default {
         migrationsRun: false,
         logging: true,
         entities: [
-          UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity,
+          UserEntity, InterviewEntity, VisitLogEntity, OrderEntity, NavConfigEntity, OperationsContentEntity,
           ArticleEntity, UserArticleActionEntity, ArticleViewLogEntity,
           AlgorithmProblemEntity, AlgorithmTestCaseEntity, AlgorithmTagEntity,
           AlgorithmProblemTagEntity, AlgorithmSubmissionEntity, AlgorithmCodeDraftEntity,
