@@ -35,6 +35,16 @@ env:
   SMS_ACCESS_KEY_ID: ${{ secrets.SMS_ACCESS_KEY_ID }}
   SMS_ACCESS_KEY_SECRET: ${{ secrets.SMS_ACCESS_KEY_SECRET }}
   SMS_SIGN_NAME: ${{ vars.SMS_SIGN_NAME || '恒创联众科技' }}
+  # 对外预警推送通道（invest 定时函数发信用）。缺 secret＝未开通，不阻断部署。
+  # 阿里云邮件推送：DM_SMTP_USER＝发信地址、DM_SMTP_PASS＝SMTP 密码；换 QQ/163 等把仓库变量 DM_SMTP_HOST 设成对应 SMTP 服务器。
+  DM_SMTP_HOST: ${{ vars.DM_SMTP_HOST }}
+  DM_SMTP_USER: ${{ secrets.DM_SMTP_USER }}
+  DM_SMTP_PASS: ${{ secrets.DM_SMTP_PASS }}
+  WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
+  ALERT_SELFTEST_TO: ${{ secrets.ALERT_SELFTEST_TO }}
+  # Web 函数只拿「是否已开通」布尔（订阅页显示「开通中」用），不拿密钥
+  ALERT_MAIL_READY: ${{ (secrets.DM_SMTP_USER != '' && secrets.DM_SMTP_PASS != '') && '1' || '' }}
+  ALERT_WX_READY: ${{ secrets.WXPUSHER_APP_TOKEN != '' && '1' || '' }}
   # invest-model 定时函数（invest-live-watch / invest-scheduler）
   INVEST_DB_URL: ${{ secrets.INVEST_DB_URL }}
   INVEST_DB_NAME: ${{ vars.INVEST_DB_NAME || 'invest' }}
