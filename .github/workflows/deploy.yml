@@ -29,6 +29,11 @@ env:
   DB_PASS: ${{ secrets.DB_PASS }}
   REDIS_HOST: ${{ secrets.REDIS_HOST }}
   REDIS_PASS: ${{ secrets.REDIS_PASS }}
+  # 短信验证码（阿里云号码认证·短信认证）。缺 secret 解析为空串：功能视为未开通，不阻断部署。
+  # 签名名称不是机密（阿里云赠送的通用签名），走仓库变量。
+  SMS_ACCESS_KEY_ID: ${{ secrets.SMS_ACCESS_KEY_ID }}
+  SMS_ACCESS_KEY_SECRET: ${{ secrets.SMS_ACCESS_KEY_SECRET }}
+  SMS_SIGN_NAME: ${{ vars.SMS_SIGN_NAME }}
   # invest-model 定时函数（invest-live-watch / invest-scheduler）
   INVEST_DB_URL: ${{ secrets.INVEST_DB_URL }}
   INVEST_DB_NAME: ${{ vars.INVEST_DB_NAME || 'invest' }}
