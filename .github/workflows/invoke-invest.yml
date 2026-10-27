@@ -18,6 +18,7 @@ on:
           - ingest_etf
           - daily_update_plan
           - weekly_rebuild_review
+          - alert_selftest
   # 无 Actions 写权限的集成（如 Claude 会话）用 push 触发：
   # 把 job 名写进 ops/invoke.trigger 第一行后 push master 即可
   push:
@@ -84,7 +85,7 @@ jobs:
             JOB="$(head -1 ops/invoke.trigger | tr -d ' \r\n')"
           fi
           case "$JOB" in
-            live_watch|snapshot_remind|ingest_etf|daily_update_plan|weekly_rebuild_review) ;;
+            live_watch|snapshot_remind|ingest_etf|daily_update_plan|weekly_rebuild_review|alert_selftest) ;;
             *) echo "未知 job: $JOB"; exit 1 ;;
           esac
           # live_watch 跑在盯盘专用函数上，其余在 invest-scheduler
@@ -94,4 +95,9 @@ jobs:
           # 两类报错都要变红：① 控制面报错(500/超时)→ s invoke 非零退出，pipefail 上抛；
           # ② 函数级报错 → s invoke 仍返回 0，但日志含 InvocationError，显式 grep 兜住。
           s "$FN" invoke -e "{\"payload\":\"$JOB\"}" --access aliyun | tee /tmp/invoke.out
+          # 推送自检的结果写成注解（日志不一定取得到，注解可经 API 读；结果里不含密钥与收件地址）
+          if [ "$JOB" = "alert_selftest" ]; then
+            grep -oE "推送自检：.*" /tmp/invoke.out | head -1 | sed 's/^/::notice::/' || true
+          fi
+          # ↓ 必须是最后一行：本步骤退出码取它（`!` 取反的命令不受 set -e 约束）
           ! grep -qE "Error Type: InvocationError|InternalServerError|failed to \[invoke\]" /tmp/invoke.out

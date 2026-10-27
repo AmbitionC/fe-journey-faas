@@ -1,6 +1,7 @@
 import { Provide, Inject } from '@midwayjs/core';
 import { InvestDbService } from './db';
 import { beijingDay } from '../../common/signupSite';
+import { alertChannels, normalizeSecCode } from '../../common/secCode';
 
 const parseJson = (s: any) => {
   if (s == null || typeof s === 'object') return s ?? null;
@@ -434,9 +435,12 @@ export class InvestInsightService {
         'SELECT user_id, email, wxpusher_uid, topics, digest FROM user_alert_pref WHERE user_id = ?',
         [userId]
       );
-      return rows[0] || { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
+      const row = rows[0] || { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
+      // channels：推送通道是否已开通——没开时订阅页如实提示「开通中」，不让用户以为已经能收到
+      return { ...row, channels: alertChannels() };
     } catch {
-      return { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
+      const empty = { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
+      return { ...empty, channels: alertChannels() };
     }
   }
 
@@ -484,9 +488,10 @@ export class InvestInsightService {
       const codes = [...new Set((rows || []).map((r: any) => String(r.etf)))].slice(0, 20);
       for (const code of codes) {
         try {
+          // 旧流水可能存了不带后缀的代码（510300）：按补全后的代码取价，仍以原代码为键返回
           const q = await this.db.q(
             'SELECT trade_date, close FROM stock_daily WHERE code = ? ORDER BY trade_date DESC LIMIT 1',
-            [code]
+            [normalizeSecCode(code)]
           );
           if (q?.length && q[0].close != null) {
             quotes[code] = { close: Number(q[0].close), date: String(q[0].trade_date) };
@@ -503,7 +508,7 @@ export class InvestInsightService {
 
   async myLedgerAdd(userId: string, p: any) {
     const tradeDate = String(p?.trade_date || '').replace(/-/g, '').slice(0, 8);
-    const etf = String(p?.etf || '').slice(0, 16);
+    const etf = normalizeSecCode(p?.etf).slice(0, 16);
     const action = String(p?.action || '').toLowerCase();
     const shares = Number(p?.shares);
     const price = Number(p?.price);

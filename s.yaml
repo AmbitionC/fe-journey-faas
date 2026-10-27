@@ -60,6 +60,9 @@ resources:
         INVEST_DB_NAME: invest
         # 驾驶舱管理员手机号：只走环境变量注入，源码不留兜底（PII/提权靶子）
         INVEST_ADMIN_PHONE: ${env('INVEST_ADMIN_PHONE', '')}
+        # 预警推送通道是否已开通（只下发布尔，密钥只在 invest 定时函数里）：订阅页据此显示「开通中」
+        ALERT_MAIL_READY: ${env('ALERT_MAIL_READY', '')}
+        ALERT_WX_READY: ${env('ALERT_WX_READY', '')}
         # 短信验证码（阿里云号码认证·短信认证，src/service/auth/sms.ts）。RAM 子账号只授
         # dypns:SendSmsVerifyCode/CheckSmsVerifyCode；三项缺任一＝功能未开通、前端不展示入口。
         SMS_ACCESS_KEY_ID: ${env('SMS_ACCESS_KEY_ID', '')}
@@ -200,6 +203,12 @@ resources:
         ONCE_STEP: '3'
         # 套利模块开关（默认观察态 0；启用态由部署 env 注入 1）
         ARB_ENABLED: ${env('ARB_ENABLED', '0')}
+        # 对外预警推送通道（invest-model faas/jobs.py _dispatch_alerts）。缺省＝未开通：
+        # 预警只在站内可见，日更班次告警到 FaaS 告警 issue。DM_SMTP_HOST 空＝阿里云邮件推送。
+        DM_SMTP_HOST: ${env('DM_SMTP_HOST', '')}
+        DM_SMTP_USER: ${env('DM_SMTP_USER', '')}
+        DM_SMTP_PASS: ${env('DM_SMTP_PASS', '')}
+        WXPUSHER_APP_TOKEN: ${env('WXPUSHER_APP_TOKEN', '')}
       triggers:
         - triggerName: market-hours
           triggerType: timer
@@ -252,6 +261,14 @@ resources:
         PLAN_ARGS: ${env('PLAN_ARGS', '')}
         # 套利模块开关（默认观察态 0；启用态由部署 env 注入 1）
         ARB_ENABLED: ${env('ARB_ENABLED', '0')}
+        # 对外预警推送通道（invest-model faas/jobs.py _dispatch_alerts）。缺省＝未开通：
+        # 预警只在站内可见，日更班次告警到 FaaS 告警 issue。DM_SMTP_HOST 空＝阿里云邮件推送。
+        DM_SMTP_HOST: ${env('DM_SMTP_HOST', '')}
+        DM_SMTP_USER: ${env('DM_SMTP_USER', '')}
+        DM_SMTP_PASS: ${env('DM_SMTP_PASS', '')}
+        WXPUSHER_APP_TOKEN: ${env('WXPUSHER_APP_TOKEN', '')}
+        # 推送自检（alert_selftest）收件地址；空＝发给发信地址自己
+        ALERT_SELFTEST_TO: ${env('ALERT_SELFTEST_TO', '')}
       triggers:
         - triggerName: source-probe
           triggerType: timer
