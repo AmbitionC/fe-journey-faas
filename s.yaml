@@ -60,6 +60,11 @@ resources:
         INVEST_DB_NAME: invest
         # 驾驶舱管理员手机号：只走环境变量注入，源码不留兜底（PII/提权靶子）
         INVEST_ADMIN_PHONE: ${env('INVEST_ADMIN_PHONE', '')}
+        # 短信验证码（阿里云号码认证·短信认证，src/service/auth/sms.ts）。RAM 子账号只授
+        # dypns:SendSmsVerifyCode/CheckSmsVerifyCode；三项缺任一＝功能未开通、前端不展示入口。
+        SMS_ACCESS_KEY_ID: ${env('SMS_ACCESS_KEY_ID', '')}
+        SMS_ACCESS_KEY_SECRET: ${env('SMS_ACCESS_KEY_SECRET', '')}
+        SMS_SIGN_NAME: ${env('SMS_SIGN_NAME', '')}
         # 个人健康管理模块（/health/*）：独立 health 库 + 独立访问令牌。
         # HEALTH_API_TOKEN 未配置时模块拒绝所有请求，不影响其他功能。
         HEALTH_DB_NAME: ${env('HEALTH_DB_NAME', 'health')}

@@ -1,0 +1,31 @@
+name: sms-probe
+
+# 短信认证密钥自检（不发短信、不花钱），见 scripts/sms-probe.ts。
+# 触发：push ops/sms-probe.trigger（任意分支，部署工作流忽略 ops/** 不会因此发版），或手动触发。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ops/sms-probe.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SMS_ACCESS_KEY_ID: ${{ secrets.SMS_ACCESS_KEY_ID }}
+      SMS_ACCESS_KEY_SECRET: ${{ secrets.SMS_ACCESS_KEY_SECRET }}
+      SMS_SIGN_NAME: ${{ vars.SMS_SIGN_NAME || '恒创联众科技' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: 自检
+        run: node --no-experimental-strip-types -r ts-node/register/transpile-only scripts/sms-probe.ts

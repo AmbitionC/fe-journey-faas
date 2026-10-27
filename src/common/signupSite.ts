@@ -22,6 +22,32 @@ export function siteFromOrigin(origin?: string | null): SignupSite {
   return 'other';
 }
 
+/**
+ * 记下注册来源站点（写 invest 库 user_signup_source，表结构归 invest-model 所有）。
+ * 只用于统计、尽力而为：库不可达或超过 3 秒都直接放弃，绝不拖慢或打断注册。
+ * 密码注册（/user/create）与短信登录自动建号共用。
+ */
+export async function recordSignupSource(
+  exec: (sql: string, params: any[]) => Promise<unknown>,
+  phoneNumber: string | undefined,
+  rawOrigin: string | undefined,
+): Promise<void> {
+  if (!phoneNumber) return;
+  const origin = String(rawOrigin || '').slice(0, 128);
+  try {
+    await Promise.race([
+      exec('INSERT IGNORE INTO user_signup_source (user_id, site, origin) VALUES (?, ?, ?)', [
+        phoneNumber,
+        siteFromOrigin(origin),
+        origin,
+      ]),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  } catch {
+    // 统计失败不影响注册
+  }
+}
+
 /** 北京日期 YYYYMMDD（投资站按日访问记录的分区键）。 */
 export function beijingDay(now: number = Date.now()): string {
   return new Date(now + 8 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
