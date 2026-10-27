@@ -319,6 +319,8 @@ describe('短信验证码（号码认证·短信认证）', () => {
         sendErrorMessage('SignatureDoesNotMatch'),
         '短信发送失败，请稍后再试'
       );
+      assert.match(sendErrorMessage('isv.BUSINESS_LIMIT_CONTROL'), /明天再试/);
+      assert.match(sendErrorMessage('isv.FREQUENCY_FAIL'), /太频繁/);
     });
   });
 
@@ -391,6 +393,41 @@ describe('短信验证码（号码认证·短信认证）', () => {
       assert.strictEqual(
         await svc.verify('13800000013', '123456', 'login'),
         false
+      );
+    });
+
+    it('码错时阿里云回业务码 isv.ValidateFail（2026-10-27 线上自检实测）：判「不通过」而不是系统故障', async () => {
+      const aliyun = fakeAliyun({
+        CheckSmsVerifyCode: { Code: 'isv.ValidateFail', Message: '验证失败' },
+      });
+      const svc = makeSms(fakeRedis(), aliyun);
+      await svc.send('13800000015', 'login', '1.1.1.1');
+      assert.strictEqual(
+        await svc.verify('13800000015', '000000', 'login'),
+        false
+      );
+      // 一次输错不作废：同一条短信里的码还能再试（直到 5 次上限）
+      assert.strictEqual(
+        await svc.verify('13800000015', '000001', 'login'),
+        false
+      );
+      assert.strictEqual(
+        aliyun.calls.filter(c => c.Action === 'CheckSmsVerifyCode').length,
+        2
+      );
+    });
+
+    it('核验遇到鉴权类错误（密钥/权限）仍按系统故障报，不冒充「码错」', async () => {
+      const svc = makeSms(
+        fakeRedis(),
+        fakeAliyun({
+          CheckSmsVerifyCode: { Code: 'Forbidden.NoPermission', Message: 'x' },
+        })
+      );
+      await svc.send('13800000016', 'login', '1.1.1.1');
+      assert.match(
+        (await rejection(svc.verify('13800000016', '000000', 'login'))) || '',
+        /稍后再试/
       );
     });
 

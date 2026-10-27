@@ -50,7 +50,9 @@ interface SmsConfig {
 }
 
 /** 阿里云发送失败码 → 给用户看的话（其余一律「稍后再试」，原码进日志）。 */
-export function sendErrorMessage(code?: string): string {
+export function sendErrorMessage(raw?: string): string {
+  // 文档写 BUSINESS_LIMIT_CONTROL，实测业务码带 isv. 前缀（如 isv.ValidateFail），两种都认
+  const code = String(raw || '').replace(/^isv\./i, '');
   if (code === 'BUSINESS_LIMIT_CONTROL')
     return '该手机号今天获取验证码的次数已达上限，请明天再试';
   if (code === 'FREQUENCY_FAIL') return '获取验证码太频繁，请稍后再试';
@@ -241,6 +243,11 @@ export class SmsAuthService {
     } catch (e: any) {
       this.logger.warn('[sms] CheckSmsVerifyCode 请求失败：%s', e?.message);
       throw R.error('验证码校验失败，请稍后再试');
+    }
+    // 码错时阿里云不回 Code=OK+VerifyResult=UNKNOWN，而是直接回业务码 isv.ValidateFail
+    // （2026-10-27 线上自检实测）。isv.* 一律按「不通过」；其余（鉴权/系统/网关）才是故障。
+    if (res?.Code !== 'OK' && /^isv\./i.test(String(res?.Code))) {
+      return false;
     }
     if (res?.Code !== 'OK') {
       this.logger.warn(
