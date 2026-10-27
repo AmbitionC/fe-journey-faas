@@ -2,6 +2,9 @@ import { Provide, Inject } from '@midwayjs/core';
 import { InvestDbService } from './db';
 import { beijingDay } from '../../common/signupSite';
 import { alertChannels, normalizeSecCode } from '../../common/secCode';
+import { buildDatasetBody, DatasetBody } from '../../common/datasetBody';
+
+const DATASET_CACHE = new Map<string, { at: number; body: DatasetBody }>();
 
 const parseJson = (s: any) => {
   if (s == null || typeof s === 'object') return s ?? null;
@@ -425,6 +428,25 @@ export class InvestInsightService {
       return { rows };
     } catch {
       return { rows: [] };
+    }
+  }
+
+  /**
+   * 前端数据集（invest.web_dataset，invest-model broad-export 周更写入；2026-10-27）。
+   * 进程内缓存 10 分钟（数据周更，320KB 不必每次读库）；表不存在/无行返回 null，前端回退静态文件。
+   */
+  async webDatasetBody(name: string): Promise<DatasetBody | null> {
+    const hit = DATASET_CACHE.get(name);
+    if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.body;
+    try {
+      const rows = await this.db.q('SELECT payload FROM web_dataset WHERE name = ?', [name]);
+      const payload = rows?.[0]?.payload;
+      if (!payload) return null;
+      const body = buildDatasetBody(String(payload));
+      DATASET_CACHE.set(name, { at: Date.now(), body });
+      return body;
+    } catch {
+      return hit ? hit.body : null;
     }
   }
 
