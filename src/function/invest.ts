@@ -11,6 +11,7 @@ import { Context } from '@midwayjs/faas';
 import { InvestOverviewService } from '../service/invest/overview';
 import { InvestPlanService } from '../service/invest/plan';
 import { InvestInsightService } from '../service/invest/insight';
+import { acceptsGzip } from '../common/datasetBody';
 
 /**
  * 投资驾驶舱只读 API：总览 / 每日计划 / 复盘 / 盯盘预警 / 模型健康 / 恐慌指数。
@@ -208,6 +209,27 @@ export class InvestHTTPService {
   })
   async allweather() {
     return { success: true, data: await this.insightService.allweather() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '宽基历史回测数据集（库内副本，周更；无则 data=null，前端回退静态文件）',
+    functionName: 'investBroadHistory',
+    name: 'investBroadHistory',
+    path: '/invest/broad/history',
+    method: 'get',
+  })
+  async broadHistory() {
+    const body = await this.insightService.webDatasetBody('broadIndex');
+    if (!body) return { success: true, data: null };
+    // 320KB 明文 → 预压缩约 98KB（FC 不自动压缩）；登录态数据，只许浏览器私有缓存
+    this.ctx.set('Content-Type', 'application/json; charset=utf-8');
+    this.ctx.set('Cache-Control', 'private, max-age=600');
+    this.ctx.set('Vary', 'Accept-Encoding');
+    if (acceptsGzip(this.ctx.get('accept-encoding'))) {
+      this.ctx.set('Content-Encoding', 'gzip');
+      return body.gz;
+    }
+    return body.raw;
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

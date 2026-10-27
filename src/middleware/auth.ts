@@ -128,6 +128,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
       const isMarketRead =
         method === 'GET' &&
         (path === '/invest/broad' ||
+          path === '/invest/broad/history' ||   // 宽基历史回测数据集（市场级，2026-10-27 改走库）
           path === '/invest/bias' ||
           path === '/invest/allweather' ||
           path === '/invest/leverage' ||
