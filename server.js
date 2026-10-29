@@ -5,6 +5,7 @@
  * - 唯独 POST /api/ai/chat/stream 绕过框架：直接拿 AiProxyService.forwardStream，
  *   往真实 socket res.write 推 SSE，实现「真流式」（Midway 3.x 的 HTTPResponse 是缓冲的，
  *   框架内做不了流式，故此路单独直写）。
+ * - /mcp/* 同样绕过框架：对外 MCP 数据服务（API Key 鉴权，见 src/mcp/http.ts）。
  */
 const http = require('http');
 const { join } = require('path');
@@ -22,6 +23,32 @@ let aiHistoryService;
 let redisService;
 let articleService;
 let retrieveService;
+let mcpRuntimePromise = null;
+
+// MCP（/mcp/agent、/mcp/invest、/mcp/admin/*）：API Key 鉴权的对外数据服务，
+// 不走 Midway（状态码语义与鉴权体系都不同），实现见 src/mcp/http.ts。
+async function handleMcp(req, res, url) {
+  const { handleMcpHttp, createMcpRuntime } = require('./dist/mcp/http');
+  if (!mcpRuntimePromise) {
+    mcpRuntimePromise = createMcpRuntime(appCtx).catch((e) => {
+      mcpRuntimePromise = null;
+      throw e;
+    });
+  }
+  try {
+    const rt = await mcpRuntimePromise;
+    const body = ['POST', 'PUT', 'PATCH'].includes((req.method || '').toUpperCase())
+      ? await readBody(req)
+      : Buffer.alloc(0);
+    await handleMcpHttp(req, res, url, rt, body);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    }
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP 服务内部错误' } }));
+  }
+}
 
 // FC Web 入口统一补 CORS。普通路由也必须在这里处理：浏览器携带 token 等
 // 自定义请求头时会先发 OPTIONS，而自定义 server.js 不会自动经过 Midway 的
@@ -341,6 +368,7 @@ async function bootstrap() {
       });
       return handler(req, res);
     }
+    if (url.pathname.startsWith('/mcp/')) return handleMcp(req, res, url);
     if (url.pathname === '/api/ai/chat/stream') {
       const m = (req.method || '').toUpperCase();
       if (m === 'OPTIONS') {
