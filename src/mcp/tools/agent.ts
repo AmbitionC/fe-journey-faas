@@ -85,6 +85,107 @@ export function cleanQuery(q: string): string {
   return cleaned.length >= 2 ? cleaned : q;
 }
 
+/** 片段去掉网页标签与实体：正文截断位置可能落在标签中间，前后残缺的半个标签也要去掉。 */
+export function cleanSnippet(s?: string): string | undefined {
+  if (!s) return s;
+  let t = s;
+  const firstGt = t.indexOf('>');
+  const firstLt = t.indexOf('<');
+  if (firstGt >= 0 && (firstLt < 0 || firstGt < firstLt))
+    t = t.slice(firstGt + 1);
+  t = t
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/<[^>]*$/, ' ')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/^[…\s]*$/.test(t)) return undefined;
+  return s.startsWith('…') && !t.startsWith('…') ? `…${t}` : t;
+}
+
+/** 「字节全栈最喜欢问什么」里只有公司和岗位有用。 */
+const TOPIC_NOISE =
+  /最喜欢|喜欢|经常|常常|常见|高频|考点|面试题|面试|面经|岗位|职位|方向|问题|哪些|什么|会问|爱问|常问|问/g;
+export function topicTerms(keyword: string): string[] {
+  return cleanQuery(keyword)
+    .replace(TOPIC_NOISE, ' ')
+    .split(/\s+/)
+    .map(x => x.trim())
+    .filter(Boolean);
+}
+
+/** 公司简称：标题与目录里两种写法都有。 */
+const COMPANY_ALIAS: Record<string, string> = {
+  字节跳动: '字节',
+  bytedance: '字节',
+  阿里巴巴: '阿里',
+  腾讯: '腾讯',
+};
+
+const KNOWN_COMPANIES =
+  '字节 阿里 腾讯 美团 百度 京东 快手 拼多多 小红书 蚂蚁 oppo vivo 华为 米哈游 网易'.split(
+    ' '
+  );
+
+/**
+ * 按导航树标题 + 公司部门路径筛面经：每个词都要出现。
+ * 「字节全栈」这类连写的词拆不开时，按已知公司名前缀切一刀再匹配。
+ */
+export function matchInterviews(
+  nav: Map<string, { title: string; path: string }>,
+  terms: string[]
+): string[] {
+  const norm = (x: string) => {
+    const l = x.toLowerCase();
+    return COMPANY_ALIAS[l] || l;
+  };
+  const split: string[] = [];
+  for (const raw of terms) {
+    const t = norm(raw);
+    const hit = [...nav.values()].some(v =>
+      `${v.title} ${v.path}`.toLowerCase().includes(t)
+    );
+    const prefix = hit
+      ? null
+      : KNOWN_COMPANIES.find(c => t.startsWith(c) && t.length > c.length);
+    if (prefix) split.push(prefix, t.slice(prefix.length));
+    else split.push(t);
+  }
+  return [...nav.entries()]
+    .filter(([, v]) => {
+      const hay = `${v.title} ${v.path}`.toLowerCase();
+      return split.every(t => hay.includes(t));
+    })
+    .map(([k]) => k);
+}
+
+/** 从一篇面经里抽「知识点 key → 原题」：每道题是 <details data-knowledge-key> + <summary>。 */
+export function extractQuestions(
+  content: string
+): { key: string; question: string }[] {
+  const out: { key: string; question: string }[] = [];
+  const re =
+    /<details[^>]*data-knowledge-key="([^"]+)"[^>]*>\s*<summary>([\s\S]*?)<\/summary>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content))) {
+    let q = cleanSnippet(m[2]) || '';
+    // 「背景学习入口」作者注明不计专题频次
+    if (/^（\d+）\s*背景学习入口/.test(q)) continue;
+    q = q
+      .replace(/^（\d+）\s*/, '')
+      .replace(/^同一原问的复习入口（[^）]*）：/, '')
+      .replace(/^[一二三四五]面：/, '')
+      .trim();
+    if (q) out.push({ key: m[1], question: q });
+  }
+  return out;
+}
+
 /**
  * 标题/目录召回与正文全文召回做倒数排名融合（RRF）。
  * 标题命中更精确，权重 2；正文命中补长尾，权重 1；两路都命中的排最前。
@@ -167,7 +268,7 @@ async function hybridSearch(
           articleKey: h.articleKey,
           title: nav?.title || h.articleKey,
           path: nav?.path || undefined,
-          snippet: h.snippet,
+          snippet: cleanSnippet(h.snippet),
         };
       })
   );
@@ -370,6 +471,131 @@ export const agentTools: ToolDef<AgentDeps>[] = [
     },
   },
   {
+    name: 'interview_topics',
+    title: '面经高频考点',
+    description:
+      '按公司 / 部门 / 岗位统计站内面经里最常被问的考点，一次返回考点排行（出现在几篇面经里）和原题示例。' +
+      '用户问「某公司某岗位最喜欢问什么」「高频考点」「重点准备什么」时直接调它，不必逐篇 interview_get。' +
+      'keyword 写公司和岗位，用空格分开，如「字节 全栈」「美团 前端」「字节 飞书」。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keyword: {
+          type: 'string',
+          description: '公司、部门、岗位，空格分开，如「字节 全栈」',
+        },
+        topN: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 30,
+          description: '返回多少个考点，默认 15',
+        },
+        maxArticles: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 40,
+          description: '最多统计多少篇面经，默认 30',
+        },
+      },
+      required: ['keyword'],
+    },
+    handler: async (a, d) => {
+      const keyword = String(a.keyword || '')
+        .slice(0, 60)
+        .trim();
+      if (!keyword) throw new ToolError('需要 keyword（公司 / 岗位）');
+      const topN = Math.max(1, Math.min(30, a.topN || 15));
+      const maxArticles = Math.max(1, Math.min(40, a.maxArticles || 30));
+      const maps = await navMaps(d, ['interview', 'knowledge']);
+      const nav = maps.interview;
+      let keys = matchInterviews(nav, topicTerms(keyword));
+      let matchedBy = 'title';
+      if (!keys.length) {
+        // 标题对不上（如只写了技术词）：退回全文检索
+        keys = (await hybridSearch(d, keyword, ['interview'], maxArticles)).map(
+          h => h.articleKey
+        );
+        matchedBy = 'search';
+      }
+      keys = keys.slice(0, maxArticles);
+      if (!keys.length)
+        return {
+          keyword,
+          articlesAnalyzed: 0,
+          topics: [],
+          note: '站内没有匹配的面经。请如实告诉用户本站暂无该公司或岗位的面经，可用 knowledge_tree(interview) 看已覆盖的公司。',
+        };
+      const rows = await Promise.all(
+        keys.map(k => d.getContent('interview', k).catch(() => null))
+      );
+      type Topic = {
+        articles: Set<string>;
+        examples: { question: string; articleKey: string }[];
+      };
+      const acc = new Map<string, Topic>();
+      const used: { articleKey: string; title: string; company?: string }[] =
+        [];
+      rows.forEach((row, i) => {
+        const key = keys[i];
+        const qs = extractQuestions(row?.content || '');
+        if (!qs.length) return;
+        used.push({
+          articleKey: key,
+          title: nav.get(key)?.title || key,
+          company: nav.get(key)?.path,
+        });
+        for (const q of qs) {
+          const t = acc.get(q.key) || { articles: new Set(), examples: [] };
+          t.articles.add(key);
+          if (
+            t.examples.length < 3 &&
+            !t.examples.some(
+              e => e.question === q.question || e.articleKey === key
+            )
+          )
+            t.examples.push({ question: q.question, articleKey: key });
+          acc.set(q.key, t);
+        }
+      });
+      const total = used.length;
+      const topics = [...acc.entries()]
+        .sort(
+          (x, y) =>
+            y[1].articles.size - x[1].articles.size ||
+            y[1].examples.length - x[1].examples.length
+        )
+        .slice(0, topN)
+        .map(([k, t]) => {
+          const kn = maps.knowledge.get(k);
+          return {
+            topic: kn?.title || k,
+            knowledgeKey: k,
+            articles: t.articles.size,
+            share: `${t.articles.size}/${total}`,
+            examples: t.examples,
+            ...(kn
+              ? {
+                  learnUrl: `https://www.agent-journey.cn/knowledge?activeKey=${encodeURIComponent(
+                    k
+                  )}`,
+                }
+              : {}),
+          };
+        });
+      return {
+        keyword,
+        matchedBy,
+        articlesAnalyzed: total,
+        topics,
+        articles: used,
+        source: SOURCE,
+        note:
+          `统计口径：${total} 篇站内整理的面经里，每个考点出现在几篇中（同一篇只算一次）。` +
+          '面经是候选人自述，样本有限，排行反映站内收录情况而非官方题库；回答时请说明样本数，深入某题用 interview_get 或 knowledge_get(knowledgeKey)。',
+      };
+    },
+  },
+  {
     name: 'mission_list',
     title: '实战题卡列表',
     description:
@@ -471,6 +697,6 @@ export const agentServer: ServerSpec<AgentDeps> = {
   instructions:
     'Agent Journey 数据服务：前端/AI 工程知识体系、真实面经、实战题卡与自测题。' +
     '回答技术问题先 knowledge_search 再 knowledge_get，引用时附上文章标题与链接；' +
-    '面试准备用 interview_search 再 interview_get(articleKey)；做项目练习用 mission_list / mission_get 并按验收标准自查。',
+    '面试准备：问某公司 / 岗位高频考点用 interview_topics，查具体面经用 interview_search 再 interview_get(articleKey)；做项目练习用 mission_list / mission_get 并按验收标准自查。',
   tools: agentTools,
 };

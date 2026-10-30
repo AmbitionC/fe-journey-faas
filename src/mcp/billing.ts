@@ -136,6 +136,7 @@ export const TOOL_COST: Record<string, number> = {
   knowledge_get: 2,
   interview_search: 1,
   interview_get: 2,
+  interview_topics: 3,
   mission_list: 1,
   mission_get: 1,
   quiz_get: 1,
