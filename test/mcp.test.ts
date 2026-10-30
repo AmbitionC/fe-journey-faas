@@ -246,6 +246,10 @@ describe('Agent 工具', () => {
     assert.strictEqual(sc.topics[0].examples.length, 2);
     assert.ok(sc.topics[0].learnUrl.includes('promise'));
     assert.strictEqual(sc.topics[1].share, '1/2');
+    const fb = await handleMessage(call('interview_topics', { keyword: '字节 前端' }), agentServer, deps);
+    assert.strictEqual(fb.result.structuredContent.matchedBy, 'company');
+    assert.strictEqual(fb.result.structuredContent.articlesAnalyzed, 3);
+    assert.ok(/按「字节」的全部面经统计/.test(fb.result.structuredContent.note));
     const none = await handleMessage(
       call('interview_topics', { keyword: '不存在的公司' }),
       agentServer,

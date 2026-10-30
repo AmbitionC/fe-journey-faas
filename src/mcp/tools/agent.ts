@@ -124,7 +124,6 @@ const COMPANY_ALIAS: Record<string, string> = {
   字节跳动: '字节',
   bytedance: '字节',
   阿里巴巴: '阿里',
-  腾讯: '腾讯',
 };
 
 const KNOWN_COMPANIES =
@@ -134,25 +133,20 @@ const KNOWN_COMPANIES =
 
 /**
  * 按导航树标题 + 公司部门路径筛面经：每个词都要出现。
- * 「字节全栈」这类连写的词拆不开时，按已知公司名前缀切一刀再匹配。
+ * 「字节全栈」这类连写的词按已知公司名前缀切一刀再匹配（标题里有「字节 AI 全栈」这种写法）。
  */
 export function matchInterviews(
   nav: Map<string, { title: string; path: string }>,
   terms: string[]
 ): string[] {
-  const norm = (x: string) => {
-    const l = x.toLowerCase();
-    return COMPANY_ALIAS[l] || l;
-  };
   const split: string[] = [];
   for (const raw of terms) {
-    const t = norm(raw);
-    const hit = [...nav.values()].some(v =>
-      `${v.title} ${v.path}`.toLowerCase().includes(t)
+    let t = raw.toLowerCase();
+    for (const [full, short] of Object.entries(COMPANY_ALIAS))
+      t = t.split(full).join(short);
+    const prefix = KNOWN_COMPANIES.find(
+      c => t.startsWith(c) && t.length > c.length
     );
-    const prefix = hit
-      ? null
-      : KNOWN_COMPANIES.find(c => t.startsWith(c) && t.length > c.length);
     if (prefix) split.push(prefix, t.slice(prefix.length));
     else split.push(t);
   }
@@ -508,8 +502,17 @@ export const agentTools: ToolDef<AgentDeps>[] = [
       const maxArticles = Math.max(1, Math.min(40, a.maxArticles || 30));
       const maps = await navMaps(d, ['interview', 'knowledge']);
       const nav = maps.interview;
-      let keys = matchInterviews(nav, topicTerms(keyword));
+      const terms = topicTerms(keyword);
+      let keys = matchInterviews(nav, terms);
       let matchedBy = 'title';
+      if (!keys.length) {
+        // 公司有面经但没有这个岗位：退到只按公司统计，并在 note 里说明
+        const company = matchInterviews(nav, terms.slice(0, 1));
+        if (terms.length > 1 && company.length) {
+          keys = company;
+          matchedBy = 'company';
+        }
+      }
       if (!keys.length) {
         // 标题对不上（如只写了技术词）：退回全文检索
         keys = (await hybridSearch(d, keyword, ['interview'], maxArticles)).map(
@@ -590,6 +593,13 @@ export const agentTools: ToolDef<AgentDeps>[] = [
         articles: used,
         source: SOURCE,
         note:
+          (matchedBy === 'company'
+            ? `站内没有标题里同时含「${terms.join(' ')}」的面经，以下按「${
+                terms[0]
+              }」的全部面经统计，请如实告诉用户。`
+            : matchedBy === 'search'
+            ? '标题没有直接对上，以下按全文检索结果统计，相关性可能偏弱。'
+            : '') +
           `统计口径：${total} 篇站内整理的面经里，每个考点出现在几篇中（同一篇只算一次）。` +
           '面经是候选人自述，样本有限，排行反映站内收录情况而非官方题库；回答时请说明样本数，深入某题用 interview_get 或 knowledge_get(knowledgeKey)。',
       };
