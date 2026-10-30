@@ -134,6 +134,11 @@ describe('MCP 计费（真 MySQL）', function () {
     const s = await b.stats(30);
     assert.ok(s.revenue.windowCents >= pack.priceCents + findSku('starter_month')!.priceCents);
     assert.ok(s.users.total >= 1);
+    // 失败退点要从热门工具的点数里扣掉（u2 扣 60 后退回 60）
+    const x = s.topTools.find((t: any) => t.tool === 'x');
+    assert.ok(Number(x.failed) >= 1);
+    const charged = await q("SELECT SUM(-delta) n FROM mcp_points_ledger WHERE reason = 'call' AND ref = 'x'");
+    assert.strictEqual(Number(x.points), Number(charged[0].n) - 60);
   });
 
   it('旧版 mcp_api_key 表自动补 user_id 列；用户只能吊销自己的 Key', async () => {

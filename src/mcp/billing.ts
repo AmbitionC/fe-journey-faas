@@ -563,7 +563,8 @@ export class BillingStore {
       [d]
     );
     const topTools = await this.q(
-      "SELECT ref tool, COUNT(*) calls, SUM(-delta) points FROM mcp_points_ledger WHERE reason = 'call' AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY ref ORDER BY calls DESC LIMIT 20",
+      // 失败调用会以 refund 退回同一工具的点数：calls 是扣点次数，failed 是退点次数，points 是净消耗
+      "SELECT ref tool, SUM(reason = 'call') calls, SUM(reason = 'refund') failed, SUM(-delta) points FROM mcp_points_ledger WHERE reason IN ('call', 'refund') AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY ref ORDER BY calls DESC LIMIT 20",
       [d]
     );
     const num = (v: any) => Number(v || 0);
