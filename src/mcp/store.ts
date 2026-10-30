@@ -4,7 +4,8 @@ import { createHash, randomBytes } from 'crypto';
  * MCP 的 API Key 与调用日志（主库 fe-journey，两张表由本模块唯一拥有）。
  *
  * - Key 只存 sha256 哈希，明文只在签发那一刻返回一次。
- * - 第一版不扣点：只记日志 + 每 Key 每日调用上限（Redis 计数，Redis 不可用时放行）。
+ * - 管理员手发的 Key（user_id 为空）不扣点，只记日志 + 每日上限；用户自助开的 Key
+ *   （带 user_id）按次扣「Journey 点」，扣点逻辑在 ./billing.ts。
  * - 建表幂等（CREATE TABLE IF NOT EXISTS）：主库 synchronize=false，新表不经实体同步。
  */
 
@@ -21,6 +22,8 @@ export interface ApiKeyRow {
   daily_limit: number;
   created_at: string;
   last_used_at: string | null;
+  /** 自助开通的 Key 归属的平台用户；管理员手发的为 null（不扣点）。 */
+  user_id?: string | null;
 }
 
 /** 执行 SQL 的最小接口（生产用 TypeORM DataSource.query，单测用假实现）。 */
@@ -94,6 +97,21 @@ export class McpStore {
           KEY idx_mcp_log_key_time (key_id, created_at),
           KEY idx_mcp_log_time (created_at)
         ) DEFAULT CHARSET=utf8mb4`);
+        // 第二版加的列：线上表第一版已建，CREATE IF NOT EXISTS 不会补列，
+        // MySQL 8 也没有 ADD COLUMN IF NOT EXISTS，先查 information_schema 再补。
+        const cols = await this.q(
+          "SELECT COLUMN_NAME c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mcp_api_key'"
+        );
+        const names = new Set(
+          (cols || []).map((r: any) =>
+            String(r.c ?? r.COLUMN_NAME).toLowerCase()
+          )
+        );
+        if (!names.has('user_id')) {
+          await this.q(
+            'ALTER TABLE mcp_api_key ADD COLUMN user_id VARCHAR(64) NULL, ADD KEY idx_mcp_key_user (user_id)'
+          );
+        }
       })().catch(e => {
         this.schemaReady = null; // 允许下次重试
         throw e;
@@ -106,7 +124,7 @@ export class McpStore {
   async findActive(key: string): Promise<ApiKeyRow | null> {
     await this.ensureSchema();
     const rows = await this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, user_id ' +
         "FROM mcp_api_key WHERE key_hash = ? AND status = 'active' LIMIT 1",
       [hashKey(key)]
     );
@@ -118,6 +136,7 @@ export class McpStore {
     owner: string;
     note?: string;
     dailyLimit?: number;
+    userId?: string;
   }) {
     await this.ensureSchema();
     const key = generateKey();
@@ -126,7 +145,7 @@ export class McpStore {
       Math.min(100000, Number(p.dailyLimit) || DEFAULT_DAILY_LIMIT)
     );
     await this.q(
-      'INSERT INTO mcp_api_key (key_hash, key_prefix, scope, owner, note, daily_limit) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO mcp_api_key (key_hash, key_prefix, scope, owner, note, daily_limit, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [
         hashKey(key),
         key.slice(0, 10),
@@ -134,6 +153,7 @@ export class McpStore {
         p.owner.slice(0, 128),
         (p.note || '').slice(0, 255) || null,
         limit,
+        p.userId || null,
       ]
     );
     return {
@@ -148,9 +168,38 @@ export class McpStore {
   async list(): Promise<ApiKeyRow[]> {
     await this.ensureSchema();
     return this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, user_id ' +
         'FROM mcp_api_key ORDER BY id DESC LIMIT 500'
     );
+  }
+
+  /** 某用户自己的 Key（自助后台用）。 */
+  async listByUser(userId: string): Promise<ApiKeyRow[]> {
+    await this.ensureSchema();
+    return this.q(
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, user_id ' +
+        'FROM mcp_api_key WHERE user_id = ? ORDER BY id DESC LIMIT 50',
+      [userId]
+    );
+  }
+
+  async countActiveByUser(userId: string): Promise<number> {
+    await this.ensureSchema();
+    const rows = await this.q(
+      "SELECT COUNT(*) n FROM mcp_api_key WHERE user_id = ? AND status = 'active'",
+      [userId]
+    );
+    return Number(rows?.[0]?.n ?? 0);
+  }
+
+  /** 用户只能吊销自己的 Key。 */
+  async revokeOwn(id: number, userId: string): Promise<boolean> {
+    await this.ensureSchema();
+    const r = await this.q(
+      "UPDATE mcp_api_key SET status = 'revoked' WHERE id = ? AND user_id = ?",
+      [id, userId]
+    );
+    return Number(r?.affectedRows ?? 0) > 0;
   }
 
   async revoke(id: number): Promise<boolean> {
@@ -166,8 +215,9 @@ export class McpStore {
    * 计一次调用并判断是否超出当日上限。返回 { used, limit, over }。
    * Redis 不可用时放行（宁可多给，不因计数故障拒掉付费用户）。
    */
-  async countCall(row: ApiKeyRow, now = new Date()) {
-    const limit = Number(row.daily_limit) || DEFAULT_DAILY_LIMIT;
+  async countCall(row: ApiKeyRow, now = new Date(), limitOverride?: number) {
+    const limit =
+      limitOverride || Number(row.daily_limit) || DEFAULT_DAILY_LIMIT;
     if (!this.counter) return { used: 0, limit, over: false };
     try {
       const k = `mcp:q:${row.id}:${beijingYmd(now)}`;

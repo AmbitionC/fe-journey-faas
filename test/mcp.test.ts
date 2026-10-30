@@ -205,6 +205,29 @@ describe('API Key 与存储', () => {
   });
 });
 
+function fakeBilling(points = 10, tier: any = 'free') {
+  const state = { points, charges: [] as any[], refunds: [] as any[], orders: [] as any[] };
+  const b: any = {
+    state,
+    getAccount: async () => ({ user_id: 'u1', points: state.points, tier, active: tier !== 'free', tier_expire_at: null, next_grant_at: null, monthly_points: 0 }),
+    charge: async (_u: string, cost: number, tool: string) => {
+      if (state.points < cost) return null;
+      state.points -= cost;
+      state.charges.push(tool);
+      return state.points;
+    },
+    refund: async (_u: string, cost: number, tool: string) => {
+      state.points += cost;
+      state.refunds.push(tool);
+    },
+    activate: async () => ({ created: true }),
+    ledgerOf: async () => [],
+    ordersOf: async () => [],
+    createOrder: async (_u: string, sku: any) => ({ order_no: 'MJ20261030ABCDEF12', sku: sku.sku, amount_cents: sku.priceCents, status: 'pending' }),
+  };
+  return b;
+}
+
 describe('MCP HTTP 适配', () => {
   const ROW: ApiKeyRow = {
     id: 7, key_prefix: 'jk_abc', scope: 'agent', owner: 'u', note: null, status: 'active',
@@ -224,6 +247,8 @@ describe('MCP HTTP 适配', () => {
       agentDeps: () => agentDeps(),
       investDeps: () => investDeps(),
       isAdmin: async () => false,
+      billing: fakeBilling(),
+      userIdOf: async () => null,
       ...over,
     };
     return { rt, logs };
@@ -301,4 +326,88 @@ describe('MCP HTTP 适配', () => {
     assert.strictEqual(ok.status, 200);
     assert.strictEqual(created[0].scope, 'invest');
   });
+
+  describe('自助 Key 扣点', () => {
+    const USER_ROW = { ...ROW, scope: 'all' as any, user_id: 'u1', daily_limit: 100 };
+    function userRt(points: number) {
+      const billing = fakeBilling(points);
+      const store: any = {
+        findActive: async (k: string) => (k === KEY ? USER_ROW : null),
+        countCall: async (_r: any, _n: any, limit?: number) => ({ used: 1, limit, over: false }),
+        log: async () => {},
+      };
+      const rt: McpRuntime = {
+        store, billing, agentDeps: () => agentDeps(), investDeps: () => investDeps(),
+        isAdmin: async () => false, userIdOf: async () => null,
+      };
+      return { rt, billing };
+    }
+
+    it('按工具单价扣点', async () => {
+      const { rt, billing } = userRt(10);
+      const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      assert.ok(!r.json.result.isError);
+      assert.strictEqual(billing.state.points, 8);
+    });
+
+    it('余额不足拒绝调用并给购买指引，不执行工具', async () => {
+      const { rt, billing } = userRt(1);
+      const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      assert.strictEqual(r.json.result.isError, true);
+      assert.ok(/点不足/.test(r.json.result.content[0].text));
+      assert.strictEqual(billing.state.points, 1);
+    });
+
+    it('工具失败退点；免费工具不扣点；未知工具不扣点', async () => {
+      const { rt, billing } = userRt(10);
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('fear_series', { start: 'bad' }) });
+      assert.strictEqual(billing.state.points, 10);
+      assert.deepStrictEqual(billing.state.refunds, ['fear_series']);
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('methodology_get', { topic: 'fear_index' }) });
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('nope') });
+      assert.strictEqual(billing.state.points, 10);
+    });
+
+    it('管理员手发的 Key 不扣点', async () => {
+      const { rt, logs } = fakeRuntime();
+      (rt as any).billing.charge = async () => { throw new Error('不应扣点'); };
+      const r = await run(rt, { headers: auth, body: call('knowledge_tree', { module: 'knowledge' }) });
+      assert.ok(!r.json.result.isError);
+      assert.strictEqual(logs.length, 1);
+    });
+  });
+
+  describe('自助后台', () => {
+    it('价目表公开可读', async () => {
+      const { rt } = fakeRuntime();
+      const r = await run(rt, { path: '/mcp/pricing', method: 'GET' });
+      assert.strictEqual(r.status, 200);
+      assert.ok(r.json.data.skus.length >= 5);
+      assert.ok(r.json.data.skus.every((s: any) => s.price <= s.listPrice));
+    });
+
+    it('未登录 401', async () => {
+      const { rt } = fakeRuntime();
+      assert.strictEqual((await run(rt, { path: '/mcp/me', method: 'GET' })).status, 401);
+    });
+
+    it('下单返回收款码与备注码；未知商品 400', async () => {
+      const { rt } = fakeRuntime({ userIdOf: async () => 'u1' });
+      const bad = await run(rt, { path: '/mcp/me/orders', body: { sku: 'nope' } });
+      assert.strictEqual(bad.status, 400);
+      const ok = await run(rt, { path: '/mcp/me/orders', body: { sku: 'pro_month' } });
+      assert.strictEqual(ok.status, 200);
+      assert.strictEqual(ok.json.data.payCode, 'DEF12'.padStart(6, 'C'));
+      assert.ok(ok.json.data.qr.endsWith('payment.png'));
+    });
+
+    it('Key 数量受档位限制', async () => {
+      const { rt } = fakeRuntime({ userIdOf: async () => 'u1' });
+      (rt.store as any).countActiveByUser = async () => 1;
+      const r = await run(rt, { path: '/mcp/me/keys', body: { name: 'x' } });
+      assert.strictEqual(r.status, 400);
+      assert.ok(/最多 1 个/.test(r.json.message));
+    });
+  });
 });
+

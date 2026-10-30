@@ -10,6 +10,8 @@ import {
 } from './store';
 import { agentServer, AgentDeps, AGENT_MODULES } from './tools/agent';
 import { investServer, InvestDeps } from './tools/invest';
+import { BillingStore, TIERS, effectiveTier, toolCost } from './billing';
+import { handleSelfServe, handleBillingAdmin } from './selfServe';
 
 /**
  * MCP 的 HTTP 适配层（server.js 在 Midway 之外直接分流 /mcp/* 到这里）。
@@ -17,7 +19,9 @@ import { investServer, InvestDeps } from './tools/invest';
  * 端点：
  * - POST /mcp/agent   Agent Journey 工具（Streamable HTTP 无状态模式，只回 application/json）
  * - POST /mcp/invest  Invest Journey 工具
- * - /mcp/admin/*      管理端发 Key / 吊销 / 看用量（平台 admin 登录态）
+ * - /mcp/pricing      公开价目表
+ * - /mcp/me/*         自助后台：开通、Key、下单、余额与流水（平台用户登录态）
+ * - /mcp/admin/*      管理端：发 Key / 吊销 / 用量 / 订单确认 / 加点 / 经营看板（平台 admin 登录态）
  *
  * 为什么绕开 Midway：MCP 客户端要求精确的状态码语义（202 / 405 / 401），
  * 且 /invest/* 的鉴权中间件要求平台 admin，与 API Key 鉴权是两套体系，单独一路最干净。
@@ -28,6 +32,13 @@ export interface McpRuntime {
   agentDeps(row: ApiKeyRow): AgentDeps;
   investDeps(row: ApiKeyRow): InvestDeps;
   isAdmin(headers: Record<string, any>): Promise<boolean>;
+  billing: BillingStore;
+  /** 平台登录态 → userId；未登录返回 null */
+  userIdOf(headers: Record<string, any>): Promise<string | null>;
+  /** 管理员标识（确认订单留痕用） */
+  adminIdOf?(headers: Record<string, any>): Promise<string>;
+  /** 用户点「我已支付」后是否直接发货（默认否：等管理员确认到账） */
+  autoFulfill?: boolean;
 }
 
 const SPECS: Record<Product, ServerSpec<any>> = {
@@ -84,6 +95,8 @@ export async function handleMcpHttp(
 
   if (url.pathname.startsWith('/mcp/admin/'))
     return handleAdmin(req, res, url, rt, body, method);
+  if (url.pathname === '/mcp/pricing' || url.pathname.startsWith('/mcp/me'))
+    return handleSelfServe(req, res, url, rt, body, method);
 
   const product = productOf(url.pathname);
   if (!product)
@@ -139,31 +152,60 @@ export async function handleMcpHttp(
   const spec = SPECS[product];
   const deps = product === 'agent' ? rt.agentDeps(row) : rt.investDeps(row);
   const keyRow = row;
+  const userId = keyRow.user_id || null;
+  const toolError = (id: any, text: string) => ({
+    jsonrpc: '2.0',
+    id,
+    result: { content: [{ type: 'text', text }], isError: true },
+  });
   const one = async (msg: any) => {
+    let charged = 0;
+    let chargedTool = '';
     if (
       msg &&
       msg.method === 'tools/call' &&
       msg.id !== undefined &&
       msg.id !== null
     ) {
-      const q = await rt.store.countCall(keyRow);
+      // 自助 Key：按档位定每日上限 + 按次扣点；管理员手发的 Key 不扣点
+      let limit: number | undefined;
+      if (userId) {
+        try {
+          const acct = await rt.billing.getAccount(userId);
+          limit = TIERS[effectiveTier(acct)].dailyLimit;
+        } catch {
+          return toolError(msg.id, '计费服务暂不可用，请稍后重试');
+        }
+      }
+      const q = await rt.store.countCall(keyRow, new Date(), limit);
       if (q.over) {
-        return {
-          jsonrpc: '2.0',
-          id: msg.id,
-          result: {
-            content: [
-              {
-                type: 'text',
-                text: `今日调用已达上限（${q.limit} 次），北京时间零点重置。`,
-              },
-            ],
-            isError: true,
-          },
-        };
+        return toolError(
+          msg.id,
+          `今日调用已达上限（${q.limit} 次），北京时间零点重置。升级 Pro 可提高上限。`
+        );
+      }
+      const name = msg.params?.name;
+      if (userId && spec.tools.some(t => t.name === name)) {
+        const cost = toolCost(name);
+        if (cost > 0) {
+          let left: number | null;
+          try {
+            left = await rt.billing.charge(userId, cost, name);
+          } catch {
+            return toolError(msg.id, '计费服务暂不可用，请稍后重试');
+          }
+          if (left === null) {
+            return toolError(
+              msg.id,
+              `Journey 点不足（本次需要 ${cost} 点）。请到 https://www.agent-journey.cn/developer 购买会员或加油包。`
+            );
+          }
+          charged = cost;
+          chargedTool = name;
+        }
       }
     }
-    return handleMessage(msg, spec, deps, rec =>
+    const out = await handleMessage(msg, spec, deps, rec =>
       rt.store.log({
         keyId: Number(keyRow.id),
         product,
@@ -173,6 +215,11 @@ export async function handleMcpHttp(
         error: rec.error,
       })
     );
+    // 工具失败（参数错、上游报错）不收费
+    if (charged && userId && (!out || out.error || out.result?.isError)) {
+      await rt.billing.refund(userId, charged, chargedTool).catch(() => {});
+    }
+    return out;
   };
 
   if (Array.isArray(payload)) {
@@ -258,6 +305,15 @@ async function handleAdmin(
         message: ok ? '已吊销' : 'Key 不存在',
       });
     }
+    const billingOut = await handleBillingAdmin(
+      path,
+      method,
+      url,
+      data,
+      rt,
+      req
+    );
+    if (billingOut) return sendJson(res, billingOut.status, billingOut.body);
     if (path === '/mcp/admin/usage' && method === 'GET') {
       const days = Number(url.searchParams.get('days') || 7);
       return sendJson(res, 200, {
@@ -312,20 +368,61 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
   const quiz = await appCtx.getAsync(QuizService);
   const insight = await appCtx.getAsync(InvestInsightService);
 
-  const usageOf = (row: ApiKeyRow) => async () => ({
-    keyPrefix: row.key_prefix,
-    scope: row.scope,
-    dailyLimit: Number(row.daily_limit),
-    usedToday: await store.usedToday(row),
-    note: '第一版不扣点，只计每日调用次数',
-  });
+  const billing = new BillingStore((sql, params) => ds.query(sql, params));
+
+  const usageOf = (row: ApiKeyRow) => async () => {
+    const base = {
+      keyPrefix: row.key_prefix,
+      scope: row.scope,
+      usedToday: await store.usedToday(row),
+    };
+    if (!row.user_id) {
+      return {
+        ...base,
+        dailyLimit: Number(row.daily_limit),
+        billing: '内部 Key，不扣点',
+      };
+    }
+    const acct = await billing.getAccount(row.user_id);
+    const tier = effectiveTier(acct);
+    return {
+      ...base,
+      plan: TIERS[tier].name,
+      planExpireAt: acct?.active ? acct.tier_expire_at : null,
+      points: acct?.points ?? 0,
+      dailyLimit: TIERS[tier].dailyLimit,
+      manage: 'https://www.agent-journey.cn/developer',
+    };
+  };
+
+  const userInfoOf = async (headers: Record<string, any>) => {
+    const h = { ...headers };
+    // 自助后台用平台登录 token；Authorization 留给 API Key，避免互相误认
+    if (
+      !h.token &&
+      h.authorization &&
+      !/^Bearer\s+jk_/i.test(h.authorization)
+    ) {
+      h.token = String(h.authorization).replace(/^Bearer\s+/i, '');
+    }
+    return resolveUserInfo({ headers: { token: h.token } }, redis);
+  };
 
   return {
     store,
+    billing,
+    autoFulfill: process.env.MCP_ORDER_AUTO_FULFILL === '1',
     isAdmin: async headers => {
-      const info = await resolveUserInfo({ headers }, redis);
+      const info = await userInfoOf(headers);
       return !!info && info.role === 'admin';
     },
+    userIdOf: async headers => {
+      const info = await userInfoOf(headers);
+      const id = info?.userId ? String(info.userId) : null;
+      return id && !id.startsWith('guest:') ? id : null;
+    },
+    adminIdOf: async headers =>
+      String((await userInfoOf(headers))?.userId || 'admin'),
     agentDeps: row => ({
       getNavList: m => article.getNavList(m),
       searchContent: (q, o) => content.search(q, o),
