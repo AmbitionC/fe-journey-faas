@@ -238,6 +238,7 @@ describe('Invest 工具（安全字段投影）', () => {
       macro: async () => ({ latest: [
         { series: 'cn_m.m2_yoy', period: '202609', value: 7.2, freq: 'M' },
         { series: 'cn_pmi.pmi010000', period: '202609', value: 50.1, freq: 'M' },
+        { series: 'us_tycr.m2', period: '20261023', value: 4.16, freq: 'D' },
       ] }),
     });
     const r = await handleMessage(call('macro_series', { keyword: 'M2' }), investServer, deps);
