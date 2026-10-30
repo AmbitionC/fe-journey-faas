@@ -59,6 +59,120 @@ export function slimTree(nodes: any[], depth = 0, maxDepth = 6): any[] {
   });
 }
 
+/** 导航树索引：articleKey → 正式标题与目录路径（正文库里的 title 多为空或取错，一律以导航树为准）。 */
+export function navIndex(
+  navData: any[]
+): Map<string, { title: string; path: string }> {
+  const out = new Map<string, { title: string; path: string }>();
+  const walk = (nodes: any[], path: string[]) => {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes) {
+      const label = n.label || n.key || '';
+      if (n.isLeaf === true)
+        out.set(n.key, { title: label, path: path.join(' / ') });
+      else if (Array.isArray(n.children)) walk(n.children, [...path, label]);
+    }
+  };
+  walk(navData || [], []);
+  return out;
+}
+
+/** 问句里的虚词不参与检索：「区别」「怎么实现」会把标题含「区别」的无关文章顶上来。 */
+const QUERY_NOISE =
+  /是什么|有哪些|有什么|怎么样|怎么|如何|为什么|区别|对比|原理|实现|方法|介绍|一下|请问|讲讲|说说|吗|呢|的|和|与|及|或/g;
+export function cleanQuery(q: string): string {
+  const cleaned = q.replace(QUERY_NOISE, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned.length >= 2 ? cleaned : q;
+}
+
+/**
+ * 标题/目录召回与正文全文召回做倒数排名融合（RRF）。
+ * 标题命中更精确，权重 2；正文命中补长尾，权重 1；两路都命中的排最前。
+ * 标题路只保留有实质命中的（lexicalSearch 分数 ≥2，即至少命中一个词或二字词，单字不算）。
+ */
+export function fuseHits(
+  titleHits: any[],
+  contentHits: any[],
+  limit: number
+): { module: string; articleKey: string; snippet?: string }[] {
+  const K = 10;
+  type Fused = {
+    module: string;
+    articleKey: string;
+    snippet?: string;
+    score: number;
+  };
+  const acc = new Map<string, Fused>();
+  const add = (h: any, rank: number, w: number) => {
+    const id = `${h.module}:${h.articleKey}`;
+    const cur: Fused = acc.get(id) || {
+      module: h.module,
+      articleKey: h.articleKey,
+      score: 0,
+    };
+    cur.score += w / (K + rank);
+    if (h.snippet && !cur.snippet) cur.snippet = h.snippet;
+    acc.set(id, cur);
+  };
+  titleHits
+    .filter(h => (h.score ?? 2) >= 2)
+    .forEach((h, i) => add(h, i + 1, 2));
+  contentHits.forEach((h, i) => add(h, i + 1, 1));
+  return [...acc.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ score: _s, ...rest }) => rest);
+}
+
+async function navMaps(d: AgentDeps, modules: string[]) {
+  const maps: Record<string, Map<string, { title: string; path: string }>> = {};
+  await Promise.all(
+    modules.map(async m => {
+      try {
+        maps[m] = navIndex((await d.getNavList(m)).navData || []);
+      } catch {
+        maps[m] = new Map();
+      }
+    })
+  );
+  return maps;
+}
+
+/** 混合检索：标题/目录 + 正文，结果统一用导航树标题与目录路径。 */
+async function hybridSearch(
+  d: AgentDeps,
+  query: string,
+  modules: string[],
+  limit: number
+) {
+  const q = cleanQuery(query);
+  const module = modules.length === 1 ? modules[0] : undefined;
+  const [titleHits, contentHits, maps] = await Promise.all([
+    d.retrieve(q, { module, topK: limit * 2 }).catch(() => []),
+    d.searchContent(q, { module, limit: limit * 2 }).catch(() => []),
+    navMaps(d, modules),
+  ]);
+  const inScope = (h: any) => modules.includes(h.module);
+  return (
+    fuseHits(titleHits.filter(inScope), contentHits.filter(inScope), limit)
+      // 导航树里已下线的文章不返回（正文库可能残留）
+      .filter(h => {
+        const m = maps[h.module];
+        return !m || !m.size || m.has(h.articleKey);
+      })
+      .map(h => {
+        const nav = maps[h.module]?.get(h.articleKey);
+        return {
+          module: h.module,
+          articleKey: h.articleKey,
+          title: nav?.title || h.articleKey,
+          path: nav?.path || undefined,
+          snippet: h.snippet,
+        };
+      })
+  );
+}
+
 const moduleProp = {
   type: 'string',
   enum: AGENT_MODULES,
@@ -104,33 +218,18 @@ export const agentTools: ToolDef<AgentDeps>[] = [
       required: ['query'],
     },
     handler: async (a, d) => {
-      const module = a.module ? checkModule(a.module) : undefined;
+      const modules = a.module ? [checkModule(a.module)] : AGENT_MODULES;
       const limit = Math.max(1, Math.min(20, a.limit || 8));
       const query = String(a.query).slice(0, 200);
-      const hits = (await d.searchContent(query, { module, limit })).filter(h =>
-        AGENT_MODULES.includes(h.module)
-      );
-      if (hits.length) {
-        return {
-          query,
-          items: hits.map(h => ({
-            module: h.module,
-            articleKey: h.articleKey,
-            title: h.title,
-            snippet: h.snippet,
-          })),
-        };
-      }
-      // 正文索引没命中时退回标题/目录召回
-      const titles = await d.retrieve(query, { module, topK: limit });
+      const items = await hybridSearch(d, query, modules, limit);
       return {
         query,
-        items: titles.map(h => ({
-          module: h.module,
-          articleKey: h.articleKey,
-          title: h.title,
-        })),
-        note: '正文无命中，以下为按标题与目录的召回',
+        items,
+        ...(items.length
+          ? {}
+          : {
+              note: '站内没有相关文章。请如实告诉用户本站未覆盖这个主题，不要编造出处。',
+            }),
       };
     },
   },
@@ -152,10 +251,15 @@ export const agentTools: ToolDef<AgentDeps>[] = [
           '文章不存在或尚未入库，请先用 knowledge_search 确认 articleKey'
         );
       const content: string = row.content || '';
+      const nav = (await navMaps(d, [module]))[module].get(row.articleKey);
       return {
         module,
         articleKey: row.articleKey,
-        title: row.title,
+        title: nav?.title || row.title || row.articleKey,
+        path: nav?.path,
+        url: `https://www.agent-journey.cn/${module}?activeKey=${encodeURIComponent(
+          row.articleKey
+        )}`,
         source: SOURCE,
         truncated: content.length > MAX_ARTICLE_CHARS,
         content: content.slice(0, MAX_ARTICLE_CHARS),
@@ -166,16 +270,15 @@ export const agentTools: ToolDef<AgentDeps>[] = [
     name: 'interview_search',
     title: '面经检索',
     description:
-      '检索真实面经（来自牛客等平台、已整理），可按公司/岗位/技术关键词过滤，按时间倒序。' +
-      '返回摘要；要看全文用 interview_get。',
+      '检索站内整理过的真实面经（按公司 / 部门归档，含逐题解析），关键词可以是公司、部门、岗位或技术点，' +
+      '如「字节 飞书」「美团」「React 性能」「RAG」。返回标题、公司部门路径与片段；看全文用 interview_get(articleKey)。',
     inputSchema: {
       type: 'object',
       properties: {
         keyword: {
           type: 'string',
-          description: '公司、岗位或技术关键词，如「字节 前端」「React 性能」',
+          description: '公司、部门、岗位或技术关键词',
         },
-        page: { type: 'integer', minimum: 1 },
         pageSize: {
           type: 'integer',
           minimum: 1,
@@ -185,37 +288,74 @@ export const agentTools: ToolDef<AgentDeps>[] = [
       },
     },
     handler: async (a, d) => {
-      const page = Math.max(1, a.page || 1);
       const pageSize = Math.max(1, Math.min(30, a.pageSize || 10));
-      const { list, total } = await d.searchInterviews({
-        keyword: a.keyword ? String(a.keyword).slice(0, 60) : undefined,
-        page,
-        pageSize,
-      });
+      const keyword = String(a.keyword || '')
+        .slice(0, 60)
+        .trim();
+      if (!keyword) {
+        // 不给关键词：按目录列出（公司 / 部门 → 面经）
+        const { navData } = await d.getNavList('interview');
+        const items = [...navIndex(navData || []).entries()]
+          .slice(0, pageSize)
+          .map(([articleKey, v]) => ({
+            articleKey,
+            title: v.title,
+            company: v.path,
+          }));
+        return { keyword: '', items };
+      }
+      const hits = await hybridSearch(d, keyword, ['interview'], pageSize);
       return {
-        total,
-        page,
-        pageSize,
-        items: list.map(r => ({
-          id: Number(r.id),
-          title: r.aiTitle || r.title,
-          source: r.source,
-          publishTime: r.publishTime || null,
-          summary: String(r.aiContent || r.content || '').slice(0, 300),
+        keyword,
+        items: hits.map(h => ({
+          articleKey: h.articleKey,
+          title: h.title,
+          company: h.path,
+          snippet: h.snippet,
         })),
+        ...(hits.length
+          ? {}
+          : {
+              note: '没有匹配的面经。可以换成公司名或更通用的技术词再搜，或用 knowledge_tree(interview) 看全部公司目录。',
+            }),
       };
     },
   },
   {
     name: 'interview_get',
     title: '面经全文',
-    description: '按 id 读取一篇面经：原文 + 整理后的题目与要点。',
+    description:
+      '按 articleKey（来自 interview_search）读取一篇面经：面试过程、逐题解析与关联知识点。',
     inputSchema: {
       type: 'object',
-      properties: { id: { type: 'integer' } },
-      required: ['id'],
+      properties: {
+        articleKey: { type: 'string' },
+        id: { type: 'integer', description: '旧版原始面经 id（兼容）' },
+      },
     },
     handler: async (a, d) => {
+      if (a.articleKey) {
+        const key = String(a.articleKey);
+        const row = await d.getContent('interview', key);
+        if (!row)
+          throw new ToolError(
+            '面经不存在，请先用 interview_search 确认 articleKey'
+          );
+        const nav = (await navMaps(d, ['interview'])).interview.get(key);
+        const content: string = row.content || '';
+        return {
+          articleKey: key,
+          title: nav?.title || row.title || key,
+          company: nav?.path,
+          url: `https://www.agent-journey.cn/interview?activeKey=${encodeURIComponent(
+            key
+          )}`,
+          source: SOURCE,
+          truncated: content.length > MAX_ARTICLE_CHARS,
+          content: content.slice(0, MAX_ARTICLE_CHARS),
+        };
+      }
+      if (a.id === undefined) throw new ToolError('需要 articleKey');
       const r = await d.getInterview(Number(a.id));
       if (!r || r.status === 'deleted') throw new ToolError('面经不存在');
       return {
@@ -246,6 +386,11 @@ export const agentTools: ToolDef<AgentDeps>[] = [
     handler: async (a, d) => {
       const list = await d.listMissions(a.tier ? String(a.tier) : undefined);
       return {
+        ...(list.length
+          ? {}
+          : {
+              note: '目前还没有已发布的实战题卡。可以改用 knowledge_search 找相关文章，按文章里的要点设计练习。',
+            }),
         items: list.map(m => ({
           slug: m.slug,
           title: m.title,
@@ -299,7 +444,16 @@ export const agentTools: ToolDef<AgentDeps>[] = [
     handler: async (a, d) => {
       const module = checkModule(a.module);
       const items = await d.listQuiz(module, String(a.articleKey));
-      return { module, articleKey: a.articleKey, items };
+      return {
+        module,
+        articleKey: a.articleKey,
+        items,
+        ...(items.length
+          ? {}
+          : {
+              note: '这篇文章还没有配套自测题。可以先 knowledge_get 读全文，再基于文章内容自己出题，并注明是你出的题。',
+            }),
+      };
     },
   },
   {
@@ -317,6 +471,6 @@ export const agentServer: ServerSpec<AgentDeps> = {
   instructions:
     'Agent Journey 数据服务：前端/AI 工程知识体系、真实面经、实战题卡与自测题。' +
     '回答技术问题先 knowledge_search 再 knowledge_get，引用时附上文章标题与链接；' +
-    '面试准备用 interview_search；做项目练习用 mission_list / mission_get 并按验收标准自查。',
+    '面试准备用 interview_search 再 interview_get(articleKey)；做项目练习用 mission_list / mission_get 并按验收标准自查。',
   tools: agentTools,
 };
