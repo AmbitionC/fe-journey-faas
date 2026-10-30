@@ -293,9 +293,11 @@ export const investTools: ToolDef<InvestDeps>[] = [
       if (a.keyword) {
         const want = new Set(findMacroSeries(String(a.keyword).slice(0, 40)));
         const kw = String(a.keyword).toLowerCase();
-        latest = latest.filter(
-          x => want.has(x.series) || x.series.toLowerCase().includes(kw)
-        );
+        // 中文名命中优先；只有中文名一个都没命中时才按序列名子串兜底
+        // （否则「M2」会把美债 2 个月期 us_tycr.m2 也带出来）
+        latest = want.size
+          ? latest.filter(x => want.has(x.series))
+          : latest.filter(x => x.series.toLowerCase().includes(kw));
         if (!latest.length)
           return {
             latest,
