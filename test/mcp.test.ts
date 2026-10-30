@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { handleMessage, validateArgs, MAX_TEXT_CHARS } from '../src/mcp/protocol';
-import { agentServer, AgentDeps, slimTree } from '../src/mcp/tools/agent';
-import { investServer, InvestDeps } from '../src/mcp/tools/invest';
+import { cleanQuery, fuseHits, agentServer, AgentDeps, slimTree } from '../src/mcp/tools/agent';
+import { investServer, InvestDeps, findMacroSeries } from '../src/mcp/tools/invest';
 import { METHODOLOGY } from '../src/mcp/methodology';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
 import { McpStore, extractKey, hashKey, generateKey, beijingYmd, ApiKeyRow } from '../src/mcp/store';
@@ -123,7 +123,81 @@ describe('Agent 工具', () => {
       ],
     });
     const r = await handleMessage(call('knowledge_search', { query: '闭包' }), agentServer, deps);
-    assert.deepStrictEqual(r.result.structuredContent.items.map((x: any) => x.articleKey), ['b']);
+    assert.deepStrictEqual(r.result.structuredContent.items.map((x: any) => x.articleKey), []);
+    // 导航树里有 b 时才返回（正文库残留的下线文章不返回）
+    const deps2 = agentDeps({
+      ...deps,
+      getNavList: async () => ({ navData: [{ key: 'b', label: 'B 正式标题', isLeaf: true }] }),
+    });
+    const r2 = await handleMessage(call('knowledge_search', { query: '闭包' }), agentServer, deps2);
+    assert.deepStrictEqual(r2.result.structuredContent.items.map((x: any) => x.articleKey), ['b']);
+    assert.strictEqual(r2.result.structuredContent.items[0].title, 'B 正式标题');
+  });
+
+  it('检索：标题命中与正文命中融合，两路都中的排最前；虚词不参与', async () => {
+    const nav = [
+      { label: 'TypeScript', children: [{ key: 'ts-generics', label: 'TypeScript 泛型', isLeaf: true }] },
+      { label: '其他', children: [
+        { key: 'ws-sse', label: 'WebSocket 与 SSE 的区别', isLeaf: true },
+        { key: 'db', label: '数据库', isLeaf: true },
+      ] },
+    ];
+    const seen: string[] = [];
+    const deps = agentDeps({
+      getNavList: async () => ({ navData: nav }),
+      retrieve: async q => { seen.push(q); return [{ module: 'knowledge', articleKey: 'ts-generics', title: 'x', score: 6 }]; },
+      searchContent: async () => [
+        { module: 'knowledge', articleKey: 'db', title: '', snippet: '…泛型…', score: 3 },
+        { module: 'knowledge', articleKey: 'ts-generics', title: '', snippet: '…', score: 2 },
+      ],
+    });
+    const r = await handleMessage(call('knowledge_search', { query: 'TypeScript 泛型的区别是什么' }), agentServer, deps);
+    const items = r.result.structuredContent.items;
+    assert.strictEqual(items[0].articleKey, 'ts-generics');
+    assert.strictEqual(items[0].title, 'TypeScript 泛型');
+    assert.strictEqual(items[0].path, 'TypeScript');
+    assert.ok(!/区别|是什么/.test(seen[0]));
+    assert.strictEqual(cleanQuery('区别'), '区别');
+  });
+
+  it('fuseHits：单字级的弱标题命中不参与', () => {
+    const out = fuseHits(
+      [{ module: 'k', articleKey: 'weak', score: 0.5 }],
+      [{ module: 'k', articleKey: 'body', snippet: 's' }],
+      5
+    );
+    assert.deepStrictEqual(out.map(x => x.articleKey), ['body']);
+  });
+
+  it('检索无结果时提示如实说明未覆盖', async () => {
+    const deps = agentDeps({ searchContent: async () => [], retrieve: async () => [] });
+    const r = await handleMessage(call('knowledge_search', { query: 'Vue3 响应式' }), agentServer, deps);
+    assert.deepStrictEqual(r.result.structuredContent.items, []);
+    assert.ok(/未覆盖/.test(r.result.structuredContent.note));
+  });
+
+  it('面经检索走面经题解目录：按公司路径命中，interview_get 按 articleKey 读', async () => {
+    const nav = [{ label: '美团', children: [{ label: '北斗大模型', children: [{ key: 'meituan-1', label: '美团大模型一面', isLeaf: true }] }] }];
+    const deps = agentDeps({
+      getNavList: async () => ({ navData: nav }),
+      retrieve: async (_q, o) => (o.module === 'interview' ? [{ module: 'interview', articleKey: 'meituan-1', title: '', score: 4 }] : []),
+      searchContent: async () => [],
+      getContent: async (m, k) => ({ module: m, articleKey: k, title: '', content: '## 一面' }),
+    });
+    const r = await handleMessage(call('interview_search', { keyword: '美团' }), agentServer, deps);
+    const it0 = r.result.structuredContent.items[0];
+    assert.strictEqual(it0.articleKey, 'meituan-1');
+    assert.strictEqual(it0.company, '美团 / 北斗大模型');
+    const g = await handleMessage(call('interview_get', { articleKey: 'meituan-1' }), agentServer, deps);
+    assert.strictEqual(g.result.structuredContent.title, '美团大模型一面');
+    assert.ok(g.result.structuredContent.content.includes('一面'));
+  });
+
+  it('题卡与自测题为空时给出替代建议', async () => {
+    const m = await handleMessage(call('mission_list'), agentServer, agentDeps());
+    assert.ok(m.result.structuredContent.note);
+    const q = await handleMessage(call('quiz_get', { module: 'knowledge', articleKey: 'closure' }), agentServer, agentDeps());
+    assert.ok(q.result.structuredContent.note);
   });
 
   it('目录树瘦身保留结构与 articleKey', () => {
@@ -154,6 +228,20 @@ describe('Invest 工具（安全字段投影）', () => {
     const r = await handleMessage(call('market_snapshot'), investServer, investDeps({ bias: async () => { throw new Error('x'); } }));
     assert.ok(!r.result.isError);
     assert.deepStrictEqual(r.result.structuredContent.bias60.items, []);
+  });
+
+  it('宏观序列可按中文关键词找，返回中文名', async () => {
+    assert.ok(findMacroSeries('M2').includes('cn_m.m2_yoy'));
+    assert.ok(findMacroSeries('10 年期国债').includes('em_treasury.cn10y'));
+    assert.ok(findMacroSeries('制造业 PMI').includes('cn_pmi.pmi010000'));
+    const deps = investDeps({
+      macro: async () => ({ latest: [
+        { series: 'cn_m.m2_yoy', period: '202609', value: 7.2, freq: 'M' },
+        { series: 'cn_pmi.pmi010000', period: '202609', value: 50.1, freq: 'M' },
+      ] }),
+    });
+    const r = await handleMessage(call('macro_series', { keyword: 'M2' }), investServer, deps);
+    assert.deepStrictEqual(r.result.structuredContent.latest.map((x: any) => x.label), ['M2 同比（%）']);
   });
 
   it('fear_series 拒绝非法日期', async () => {

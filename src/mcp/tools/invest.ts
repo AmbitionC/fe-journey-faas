@@ -93,6 +93,65 @@ export function projectBias(r: any) {
   };
 }
 
+/**
+ * 常用宏观序列的中文名（序列名是 tushare 接口.列，不看口径文档猜不出含义）。
+ * 只给有把握的列命名；没列出的照常返回，label 为空。
+ */
+export const MACRO_LABELS: Record<string, string> = {
+  'cn_m.m0': 'M0 余额（亿元）',
+  'cn_m.m0_yoy': 'M0 同比（%）',
+  'cn_m.m1': 'M1 余额（亿元）',
+  'cn_m.m1_yoy': 'M1 同比（%）',
+  'cn_m.m1_mom': 'M1 环比（%）',
+  'cn_m.m2': 'M2 余额（亿元）',
+  'cn_m.m2_yoy': 'M2 同比（%）',
+  'cn_m.m2_mom': 'M2 环比（%）',
+  'cn_cpi.nt_yoy': '全国 CPI 同比（%）',
+  'cn_cpi.nt_mom': '全国 CPI 环比（%）',
+  'cn_cpi.town_yoy': '城市 CPI 同比（%）',
+  'cn_cpi.cnt_yoy': '农村 CPI 同比（%）',
+  'cn_ppi.ppi_yoy': 'PPI 同比（%）',
+  'cn_ppi.ppi_mom': 'PPI 环比（%）',
+  'cn_ppi.ppi_mp_yoy': 'PPI 生产资料同比（%）',
+  'cn_ppi.ppi_cg_yoy': 'PPI 生活资料同比（%）',
+  'cn_pmi.pmi010000': '制造业 PMI',
+  'cn_pmi.pmi020100': '非制造业商务活动指数',
+  'cn_pmi.pmi030000': '综合 PMI 产出指数',
+  'cn_gdp.gdp': 'GDP 累计值（亿元）',
+  'cn_gdp.gdp_yoy': 'GDP 累计同比（%）',
+  'sf_month.inc_month': '社融增量 当月（亿元）',
+  'sf_month.inc_cumval': '社融增量 年内累计（亿元）',
+  'sf_month.stk_endval': '社融存量（万亿元）',
+  'mofcom_sf.total': '社融增量 合计（商务部分项表，亿元）',
+  'mofcom_sf.rmb_loan': '社融增量 人民币贷款（亿元）',
+  'mofcom_sf.corp_bond': '社融增量 企业债券（亿元）',
+  'mofcom_sf.equity': '社融增量 股票融资（亿元）',
+  'shibor_lpr.1y': 'LPR 1 年期（%）',
+  'shibor_lpr.5y': 'LPR 5 年期以上（%）',
+  'em_treasury.cn2y': '中国 2 年期国债收益率（%）',
+  'em_treasury.cn5y': '中国 5 年期国债收益率（%）',
+  'em_treasury.cn10y': '中国 10 年期国债收益率（%）',
+  'em_treasury.cn30y': '中国 30 年期国债收益率（%）',
+  'em_treasury.cn10y_2y': '中国 10Y−2Y 国债利差（百分点）',
+  'em_treasury.us2y': '美国 2 年期国债收益率（%）',
+  'em_treasury.us5y': '美国 5 年期国债收益率（%）',
+  'em_treasury.us10y': '美国 10 年期国债收益率（%）',
+  'em_treasury.us30y': '美国 30 年期国债收益率（%）',
+  'em_treasury.us10y_2y': '美国 10Y−2Y 国债利差（百分点）',
+};
+
+/** 按关键词（中文名或序列名的一部分，如「M2」「国债」「PMI」）找序列。 */
+export function findMacroSeries(keyword: string): string[] {
+  const k = keyword.toLowerCase().replace(/\s+/g, '');
+  return Object.entries(MACRO_LABELS)
+    .filter(
+      ([s, l]) =>
+        s.toLowerCase().includes(k) ||
+        l.toLowerCase().replace(/\s+/g, '').includes(k)
+    )
+    .map(([s]) => s);
+}
+
 export const investTools: ToolDef<InvestDeps>[] = [
   {
     name: 'market_snapshot',
@@ -172,7 +231,7 @@ export const investTools: ToolDef<InvestDeps>[] = [
     name: 'bias_series',
     title: '指数乖离率历史',
     description:
-      '取七个指数近一年的 60 日乖离率与近十年排名逐日序列，可按指数代码过滤（如 000300.SH）。' +
+      '取七个指数的 60 日乖离率与近十年排名逐日序列（库内逐日记录 2026-08 起，更早的历史看 methodology_get(bias_rank)），可按指数代码过滤（如 000300.SH）。' +
       '注意：这是读数不是信号，历史验证显示它不适合作买卖依据，详见 methodology_get(bias_rank)。',
     inputSchema: {
       type: 'object',
@@ -203,19 +262,50 @@ export const investTools: ToolDef<InvestDeps>[] = [
     name: 'macro_series',
     title: '宏观数据',
     description:
-      '宏观数据层（M1/M2/社融/CPI/PPI/PMI/GDP/LPR/中美国债收益率/汇率等）。' +
-      '不传 name 返回全部序列的最新值（用它查序列名）；传 name 返回该序列历史。',
+      '宏观数据层（M1/M2/社融/CPI/PPI/PMI/GDP/LPR/中美国债收益率等）。' +
+      '传 keyword（如「M2」「10 年期国债」「制造业 PMI」「社融」）返回匹配序列的最新值与中文名；' +
+      '传 name（如 cn_m.m2_yoy）返回该序列历史；都不传返回全部序列最新值（带中文名的排前面）。',
     inputSchema: {
       type: 'object',
       properties: {
+        keyword: {
+          type: 'string',
+          description: '中文名或序列名关键词，如 M2、国债、PMI',
+        },
         name: { type: 'string', description: '序列名，如 cn_m.m2_yoy' },
       },
     },
     handler: async (a, d) => {
-      const r = await d.macro(
-        a.name ? String(a.name).slice(0, 128) : undefined
-      );
-      return { ...r, disclaimer: DISCLAIMER };
+      if (a.name) {
+        const name = String(a.name).slice(0, 128);
+        const r = await d.macro(name);
+        return {
+          ...r,
+          label: MACRO_LABELS[name] || null,
+          disclaimer: DISCLAIMER,
+        };
+      }
+      const r: any = await d.macro(undefined);
+      let latest: any[] = (r.latest || []).map((x: any) => ({
+        ...x,
+        label: MACRO_LABELS[x.series] || null,
+      }));
+      if (a.keyword) {
+        const want = new Set(findMacroSeries(String(a.keyword).slice(0, 40)));
+        const kw = String(a.keyword).toLowerCase();
+        latest = latest.filter(
+          x => want.has(x.series) || x.series.toLowerCase().includes(kw)
+        );
+        if (!latest.length)
+          return {
+            latest,
+            note: '没有匹配的序列。不传参数可列出全部序列；本数据层没有的指标请如实告诉用户。',
+            disclaimer: DISCLAIMER,
+          };
+      } else {
+        latest.sort((x, y) => Number(!x.label) - Number(!y.label));
+      }
+      return { latest, disclaimer: DISCLAIMER };
     },
   },
   {

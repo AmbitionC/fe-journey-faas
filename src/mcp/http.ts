@@ -343,6 +343,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
     ArticleContentService,
   } = require('../service/content/articleContent');
   const { RetrieveService } = require('../service/ai/retrieve');
+  const { OssService } = require('../service/content/oss');
   const { InterviewService } = require('../service/interview');
   const { MissionService } = require('../service/mission');
   const { QuizService } = require('../service/quiz');
@@ -427,7 +428,19 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       getNavList: m => article.getNavList(m),
       searchContent: (q, o) => content.search(q, o),
       retrieve: (q, o) => retrieve.retrieve(q, o),
-      getContent: (m, k) => content.get(m, k),
+      // 正文库缺行（同步时漏入库）时按导航树 filePath 直接读 OSS 原文，保证目录里有的文章都能读到
+      getContent: async (m, k) => {
+        const row = await content.get(m, k);
+        if (row && row.content) return row;
+        const leaf = await article.findLeafByKey(m, k);
+        if (!leaf) return row;
+        try {
+          const text = await new OssService().get(m, leaf.filePath, k);
+          return { articleKey: k, title: leaf.label, content: text };
+        } catch {
+          return row;
+        }
+      },
       searchInterviews: async ({ keyword, page, pageSize }) => {
         const qb = interview.interviewModel
           .createQueryBuilder('i')
