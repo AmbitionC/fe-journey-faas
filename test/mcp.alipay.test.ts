@@ -1,8 +1,11 @@
 import * as assert from 'assert';
 import { generateKeyPairSync } from 'crypto';
 import {
+  appPublicKeyOf,
   checkPaid,
   extractResponseNode,
+  keyFingerprint,
+  selfCheck,
   loadAlipayConfig,
   pagePayUrl,
   queryTrade,
@@ -12,7 +15,11 @@ import {
   verifyNotify,
   loadPrivateKey,
 } from '../src/mcp/alipay';
-import { handleAlipayNotify, handleSelfServe, pricing } from '../src/mcp/selfServe';
+import {
+  handleAlipayNotify,
+  handleSelfServe,
+  pricing,
+} from '../src/mcp/selfServe';
 
 /**
  * 支付宝网页收款：用本地生成的两对密钥分别扮演「我们的应用」和「支付宝」，
@@ -95,8 +102,13 @@ function fakeRes() {
 describe('MCP 支付宝网页收款', () => {
   it('未配置齐三项时视为未开通', () => {
     assert.strictEqual(loadAlipayConfig({ ALIPAY_APP_ID: 'x' }), null);
-    assert.deepStrictEqual(pricing(new Date(), false).payChannels, ['wechat_qr']);
-    assert.deepStrictEqual(pricing(new Date(), true).payChannels, ['alipay', 'wechat_qr']);
+    assert.deepStrictEqual(pricing(new Date(), false).payChannels, [
+      'wechat_qr',
+    ]);
+    assert.deepStrictEqual(pricing(new Date(), true).payChannels, [
+      'alipay',
+      'wechat_qr',
+    ]);
   });
 
   it('私钥兼容 PKCS#8 与 PKCS#1、带不带 PEM 头尾', () => {
@@ -137,7 +149,10 @@ describe('MCP 支付宝网页收款', () => {
     assert.ok(verifyNotify(cfg, n));
     assert.ok(!verifyNotify(cfg, { ...n, total_amount: '0.01' }));
     const forged = { ...n };
-    forged.sign = rsaSign(signContent(forged, ['sign', 'sign_type']), app.keyObj);
+    forged.sign = rsaSign(
+      signContent(forged, ['sign', 'sign_type']),
+      app.keyObj
+    );
     assert.ok(!verifyNotify(cfg, forged));
   });
 
@@ -235,6 +250,46 @@ describe('MCP 支付宝网页收款', () => {
     const tampered = raw.replace('6.90', '0.01');
     const fetchBad: any = async () => ({ text: async () => tampered });
     await assert.rejects(queryTrade(cfg, 'MJ3', fetchBad), /验签失败/);
+  });
+
+  it('部署自检：推出应用公钥指纹，识别签名被拒与支付宝公钥填错', async () => {
+    assert.strictEqual(appPublicKeyOf(cfg), app.pub);
+    assert.strictEqual(
+      keyFingerprint(app.pub),
+      keyFingerprint(app.pubPem.replace(/-----[^-]+-----/g, ''))
+    );
+    const reply =
+      (node: string, signer = ali.keyObj): any =>
+      async () => ({
+        text: async () =>
+          `{"alipay_trade_query_response":${node},"sign":"${rsaSign(
+            node,
+            signer
+          )}"}`,
+      });
+    const notExist =
+      '{"code":"40004","msg":"Business Failed","sub_code":"ACQ.TRADE_NOT_EXIST","sub_msg":"交易不存在"}';
+    const ok = await selfCheck(cfg, reply(notExist));
+    assert.strictEqual(ok.subCode, 'ACQ.TRADE_NOT_EXIST');
+    assert.strictEqual(ok.signatureAccepted, true);
+    assert.strictEqual(ok.responseVerified, true);
+    assert.ok(!JSON.stringify(ok).includes(app.priv8.slice(40, 80)));
+
+    const badSign =
+      '{"code":"40002","msg":"Invalid Arguments","sub_code":"isv.invalid-signature","sub_msg":"验签出错"}';
+    assert.strictEqual(
+      (await selfCheck(cfg, reply(badSign))).signatureAccepted,
+      false
+    );
+    // 支付宝公钥填成了别的（这里用应用私钥冒充支付宝签名）
+    assert.strictEqual(
+      (await selfCheck(cfg, reply(notExist, app.keyObj))).responseVerified,
+      false
+    );
+    const down: any = async () => {
+      throw new Error('ECONNRESET');
+    };
+    assert.match((await selfCheck(cfg, down)).error!, /ECONNRESET/);
   });
 
   it('付完跳回时主动查单发货，只认自己的订单', async () => {

@@ -292,6 +292,14 @@ jobs:
           grep -qi '^access-control-allow-credentials: true' /tmp/invest-captcha.headers
           node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/invest-captcha.out','utf8')); if (!body || body.code !== 200 || !body.data?.id || !body.data?.imageBase64) throw new Error('invalid invest captcha response')"
 
+      # 支付宝收款自检：用线上同一套密钥查一笔不存在的订单，确认私钥/支付宝公钥/APPID 是同一套。
+      # 结果写进本次运行的 Summary；只报非机密信息，失败也不阻断部署。
+      - name: Alipay payment self-check
+        continue-on-error: true
+        env:
+          FUNCTION_URL: ${{ steps.function_url.outputs.url }}
+        run: node scripts/alipay-selfcheck.js "$FUNCTION_URL"
+
       # 内容发布金丝雀：首篇知识文章与关键配图必须已经由资源仓库 Action 同步到 OSS。
       - name: Smoke test published Transformer article
         env:
