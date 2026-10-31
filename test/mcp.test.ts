@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { handleMessage, validateArgs, MAX_TEXT_CHARS } from '../src/mcp/protocol';
-import { cleanQuery, fuseHits, agentServer, AgentDeps, slimTree } from '../src/mcp/tools/agent';
+import { cleanQuery, fuseHits, agentServer, AgentDeps, slimTree, cleanSnippet, extractQuestions, topicTerms } from '../src/mcp/tools/agent';
 import { investServer, InvestDeps, findMacroSeries } from '../src/mcp/tools/invest';
 import { METHODOLOGY } from '../src/mcp/methodology';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
@@ -191,6 +191,72 @@ describe('Agent 工具', () => {
     const g = await handleMessage(call('interview_get', { articleKey: 'meituan-1' }), agentServer, deps);
     assert.strictEqual(g.result.structuredContent.title, '美团大模型一面');
     assert.ok(g.result.structuredContent.content.includes('一面'));
+  });
+
+  it('片段去掉网页标签与半截标签', () => {
+    assert.strictEqual(
+      cleanSnippet('…y="agent-role"> <summary>（2）怎样理解全栈？</summary> </details> 全栈要贯通…'),
+      '…（2）怎样理解全栈？ 全栈要贯通…'
+    );
+    assert.strictEqual(cleanSnippet('a &gt; 10 且 <b>b</b>=1 <deta'), 'a > 10 且 b =1');
+  });
+
+  it('面经题目抽取：跳过背景学习入口，去掉序号与复习入口前缀', () => {
+    const c = [
+      '<details data-knowledge-key="promise">\n<summary>（5）手写并发调度器</summary>\n</details>',
+      '<details data-knowledge-key="sql">\n<summary>（9）背景学习入口（批处理，不计专题频次）：原问为 SQL</summary></details>',
+      '<details data-knowledge-key="redis">\n<summary>（12）同一原问的复习入口（Redis）：轮播最近 20 条怎么存？</summary></details>',
+    ].join('\n');
+    assert.deepStrictEqual(extractQuestions(c), [
+      { key: 'promise', question: '手写并发调度器' },
+      { key: 'redis', question: '轮播最近 20 条怎么存？' },
+    ]);
+    assert.deepStrictEqual(topicTerms('字节全栈岗位最喜欢问哪些问题'), ['字节全栈']);
+  });
+
+  it('interview_topics 按公司岗位统计考点：连写词拆公司名，只算匹配的面经，同篇只计一次', async () => {
+    const nav = [
+      { label: '字节跳动', children: [{ label: '飞书', children: [
+        { key: 'b1', label: '字节全栈一面', isLeaf: true },
+        { key: 'b2', label: '字节全栈二面', isLeaf: true },
+        { key: 'b3', label: '字节算法一面', isLeaf: true },
+      ] }] },
+      { label: 'OPPO', children: [{ key: 'o1', label: 'OPPO 全栈一面', isLeaf: true }] },
+    ];
+    const knav = [{ label: '异步', children: [{ key: 'promise', label: 'Promise 与并发控制', isLeaf: true }] }];
+    const q = (k: string, t: string) => `<details data-knowledge-key="${k}">\n<summary>${t}</summary>\n</details>`;
+    const content: Record<string, string> = {
+      b1: q('promise', '（1）手写调度器') + q('promise', '（2）add 返回 Promise') + q('mysql', '（3）联合索引'),
+      b2: q('promise', '（1）并发上限 2'),
+      b3: q('mysql', '（1）不该被统计'),
+      o1: q('mysql', '（1）不该被统计'),
+    };
+    const fetched: string[] = [];
+    const deps = agentDeps({
+      getNavList: async m => ({ navData: m === 'knowledge' ? knav : nav }),
+      getContent: async (m, k) => { fetched.push(k); return { module: m, articleKey: k, content: content[k] }; },
+    });
+    const r = await handleMessage(call('interview_topics', { keyword: '字节全栈最喜欢问哪些问题' }), agentServer, deps);
+    const sc = r.result.structuredContent;
+    assert.deepStrictEqual(fetched.sort(), ['b1', 'b2']);
+    assert.strictEqual(sc.articlesAnalyzed, 2);
+    assert.strictEqual(sc.topics[0].knowledgeKey, 'promise');
+    assert.strictEqual(sc.topics[0].topic, 'Promise 与并发控制');
+    assert.strictEqual(sc.topics[0].share, '2/2');
+    assert.strictEqual(sc.topics[0].examples.length, 2);
+    assert.ok(sc.topics[0].learnUrl.includes('promise'));
+    assert.strictEqual(sc.topics[1].share, '1/2');
+    const fb = await handleMessage(call('interview_topics', { keyword: '字节 前端' }), agentServer, deps);
+    assert.strictEqual(fb.result.structuredContent.matchedBy, 'company');
+    assert.strictEqual(fb.result.structuredContent.articlesAnalyzed, 3);
+    assert.ok(/按「字节」的全部面经统计/.test(fb.result.structuredContent.note));
+    const none = await handleMessage(
+      call('interview_topics', { keyword: '不存在的公司' }),
+      agentServer,
+      agentDeps({ getNavList: async () => ({ navData: nav }), searchContent: async () => [], retrieve: async () => [] })
+    );
+    assert.strictEqual(none.result.structuredContent.articlesAnalyzed, 0);
+    assert.ok(/暂无/.test(none.result.structuredContent.note));
   });
 
   it('题卡与自测题为空时给出替代建议', async () => {
