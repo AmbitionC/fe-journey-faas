@@ -1,5 +1,4 @@
-import { createHash } from 'crypto';
-import { AGENT_PDF_PRODUCT } from '../../common/commerce';
+import { LEGACY_PDF_PRODUCT, legacyPdfOrderNo } from '../../common/commerce';
 
 const DAY = 86400000;
 const CST = 8 * 3600000;
@@ -43,7 +42,7 @@ function declarationRank(a: PdfSalesOrder, b: PdfSalesOrder): number {
     || String(a.amount).localeCompare(String(b.amount)) || String(a.channel || '').localeCompare(String(b.channel || ''));
 }
 
-/** 当前商品的自报子集；核实标记不参与金额、资格或去重判断。 */
+/** 已下架 ¥9.9 单卖商品的历史自报子集（2026-11-01 起无新增）；核实标记不参与金额、资格或去重判断。 */
 export function buildPdfSalesReport(input: { orders: PdfSalesOrder[]; days: number; now?: Date; excludedUserIds?: string[] }) {
   const window = pdfSalesWindow(input.days, input.now);
   const start = window.start.getTime();
@@ -53,8 +52,7 @@ export function buildPdfSalesReport(input: { orders: PdfSalesOrder[]; days: numb
   const unique = new Map<string, { snapshot: PdfSalesOrder; statuses: Set<string> }>();
   for (const row of input.orders) {
     if (row.type !== 'pdf' || !row.userId) continue;
-    const canonical = `PDF-${createHash('sha256').update(`${AGENT_PDF_PRODUCT.sku}:${row.userId}`).digest('hex')}`;
-    if (row.orderNo !== canonical) continue;
+    if (row.orderNo !== legacyPdfOrderNo(row.userId)) continue;
     if (!Number.isFinite(time(row.payTime))) quality.invalidRows++;
     if (excluded.has(row.userId)) { quality.internalRows++; continue; }
     const prior = unique.get(row.orderNo);
@@ -94,7 +92,7 @@ export function buildPdfSalesReport(input: { orders: PdfSalesOrder[]; days: numb
   }
   return {
     days: window.days, from: date(start), to: date(end), generatedAt: window.end.toISOString(),
-    timezone: 'Asia/Shanghai', basis: 'self_reported', sku: AGENT_PDF_PRODUCT.sku,
+    timezone: 'Asia/Shanghai', basis: 'self_reported', sku: LEGACY_PDF_PRODUCT.sku,
     summary, daily, channels: [...channels.values()].sort((a, b) => b.amountCents - a.amountCents), quality, excludedStatuses,
   };
 }

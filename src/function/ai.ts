@@ -142,7 +142,8 @@ export class AiHTTPService {
     // 新权益体系（试用/购买）优先——与做题/计划/期次模块口径统一，避免同一会员在
     // AI 端被判非会员（PRD-07 过渡期双写，两套判定必须一致）。
     try {
-      if (await this.entitlementService.hasActiveEntitlement(userId)) return true;
+      // isMember 同时覆盖权益记录与 Skill 会员账户（「一个会员」，2026-10-31）
+      if (await this.entitlementService.isMember(userId)) return true;
     } catch {
       /* 权益查询失败则回落存量判定 */
     }

@@ -42,7 +42,7 @@ const BENEFITS: Record<string, BenefitDef> = {
   service_discount: { memberOnly: true },
   // 推荐项目·手把手陪跑指南
   guided_mission: { memberOnly: true },
-  // 面试知识点 PDF（收费日起并入会员权益；限免期该 SKU 仍独立售卖，见前端 PDF_AS_MEMBER_BENEFIT）
+  // 知识点 PDF：会员权益（2026-11-01 起 ¥9.9 单卖下架；老买家资格由 OrderService.getPdfPurchase 单独保留）
   materials_pdf: { memberOnly: true },
 };
 
@@ -96,23 +96,59 @@ export class EntitlementService {
     }
   }
 
-  /** 会员判定：限免期 → 全员会员；否则看有效权益记录。 */
-  async isMember(userId: string): Promise<boolean> {
-    if (isMembershipFree(this.membershipConfig)) return true;
-    return this.hasActiveEntitlement(userId);
+  /**
+   * Skill 会员（mcp_account，owner 2026-10-31 定的唯一会员档）的到期时间；非会员/已到期/表不存在 → null。
+   * 「一个会员」：开通 Skill 会员即网站会员，PDF 等 memberOnly 权益随之放行。
+   * 档位含 2026-10-30 版的旧名 starter / pro（与 mcp/billing.ts effectiveTier 同口径）。
+   * 时间比较在 SQL 里用 NOW()，避免 FC 实例时区与库时区不一致。
+   */
+  async skillMembershipExpiry(userId: string): Promise<Date | null> {
+    if (!userId || userId.startsWith('guest:')) return null;
+    const query = this.entModel?.manager?.query;
+    if (typeof query !== 'function') return null;
+    try {
+      const rows = await query.call(
+        this.entModel.manager,
+        "SELECT tier_expire_at FROM mcp_account WHERE user_id = ? AND tier IN ('member','starter','pro') " +
+          'AND tier_expire_at IS NOT NULL AND tier_expire_at > NOW() LIMIT 1',
+        [userId]
+      );
+      const raw = Array.isArray(rows) && rows[0] ? rows[0].tier_expire_at : null;
+      if (!raw) return null;
+      const d = new Date(raw);
+      return Number.isFinite(d.getTime()) ? d : null;
+    } catch {
+      // 表尚未建（MCP 从未初始化）或查询失败：按非会员处理，不白送
+      return null;
+    }
   }
 
-  /** 当前有效期到期日（无则 null）。 */
+  async hasActiveSkillMembership(userId: string): Promise<boolean> {
+    return !!(await this.skillMembershipExpiry(userId));
+  }
+
+  /** 会员判定：限免期 → 全员会员；否则看有效权益记录；再看 Skill 会员账户。 */
+  async isMember(userId: string): Promise<boolean> {
+    if (isMembershipFree(this.membershipConfig)) return true;
+    if (await this.hasActiveEntitlement(userId)) return true;
+    return this.hasActiveSkillMembership(userId);
+  }
+
+  /** 当前有效期到期日（权益记录与 Skill 会员取较晚者；无则 null）。 */
   async currentExpiry(userId: string): Promise<Date | null> {
+    let ent: Date | null = null;
     try {
       const row = await this.entModel.findOne({
         where: { userId, expireAt: MoreThan(new Date()) },
         order: { expireAt: 'DESC' },
       });
-      return row ? new Date(row.expireAt) : null;
+      ent = row ? new Date(row.expireAt) : null;
     } catch {
-      return null;
+      ent = null;
     }
+    const skill = await this.skillMembershipExpiry(userId);
+    if (ent && skill) return ent > skill ? ent : skill;
+    return ent || skill;
   }
 
   /** 注册发放 14 天全功能试用（每手机号一次），对齐注册页「赠送14天会员权益」文案。幂等：已发过 trial 不重复发。 */

@@ -6,7 +6,7 @@ import { MaterialsHTTPService } from '../src/function/materials';
 import { EntitlementService } from '../src/service/entitlement';
 import { BookOrderService } from '../src/service/bookOrder';
 
-describe('9.9 PDF / 会员停售安全边界', () => {
+describe('PDF 单卖下架 / 会员停售安全边界', () => {
   it('遗留书籍订单也不能由客户端伪造核验字段', async () => {
     const svc = new BookOrderService();
     let saved: any;
@@ -77,8 +77,9 @@ describe('9.9 PDF / 会员停售安全边界', () => {
     assert.deepStrictEqual(await svc.list(), { success: true, data: [{ key: 'agent', items: [{ key: 'rag' }] }] });
   });
 
-  it('非会员不能因9.9商品展示而领取全部会员PDF', async () => {
+  it('公测期过后，非会员不能因清单展示而领取全部会员PDF', async () => {
     const svc = new MaterialsHTTPService();
+    svc.now = () => new Date('2026-12-05T00:00:00+08:00');
     svc.ctx = { userInfo: { userId: 'u2', role: 'user' } } as any;
     svc.entitlementService = { check: async () => ({ allowed: false }) } as any;
     svc.orderService = { getPdfPurchase: async () => null } as any;
@@ -86,18 +87,16 @@ describe('9.9 PDF / 会员停售安全边界', () => {
     await assert.rejects(svc.list());
   });
 
-  it('公开商品按当前实际清单展示，空清单不能付款，不泄漏下载链接', async () => {
+  it('公开商品是会员权益、不开放单卖付款，不泄漏下载链接', async () => {
     const svc = new MaterialsHTTPService();
     svc.materialsService = { groupedListReady: async () => [], legacyGift: async () => null } as any;
     const response = await svc.product();
-    assert.strictEqual(response.data.priceCents, 990);
-    assert.strictEqual(response.data.purchaseType, 'one_time');
+    assert.strictEqual(response.data.purchaseType, 'membership');
+    assert.strictEqual(response.data.saleClosed, true);
     assert.strictEqual(response.data.purchasingEnabled, false);
-    assert.strictEqual(response.data.includesMembership, false);
-    assert.strictEqual(response.data.scopeConfirmed, true);
-    assert.strictEqual(response.data.scopeStatus, 'confirmed');
-    assert.strictEqual(response.data.bankVerified, false);
-    assert.ok(!/2024|180\+|12 万字|前端面试/.test(JSON.stringify(response)));
+    assert.strictEqual(response.data.ready, false);
+    assert.ok(!('priceCents' in response.data));
+    assert.ok(!/180\+|12 万字|前端面试|收款码|我已支付/.test(JSON.stringify(response)));
     assert.ok(!/https?:\/\//.test(JSON.stringify(response)));
   });
 
