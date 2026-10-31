@@ -4,9 +4,8 @@ import { QueryFn } from './store';
 /**
  * Journey 点计费：账户余额、会员档位、按次扣点、订单。
  *
- * 定价参照可灵（月卡/年卡 + 点数 + 加油包），owner 2026-10-30 定：
- * 实验阶段按草案价**打折**上线，用户规模起来后恢复原价（改 PLANS 里的 priceCents 即可，
- * listCents 是原价，页面显示划线价）。
+ * 定价参照可灵（月卡/年卡 + 点数 + 加油包）。SKU 只写原价 listCents，实际售价由收费阶段决定
+ * （owner 2026-10-31 定三阶段，见 PRICING_PHASES）：首月免费看数据 → 半价（页面展示原价）→ 正式价。
  *
  * 规则（刻意从简）：
  * - 1 点 ≈ ¥0.1 的计价单位，Agent / Invest 两个产品共用一个余额。
@@ -37,9 +36,7 @@ export interface Sku {
   sku: string;
   name: string;
   kind: 'plan' | 'pack';
-  /** 实际售价（分）——实验阶段体验价 */
-  priceCents: number;
-  /** 原价（分）——页面划线显示，恢复原价时把 priceCents 改回它 */
+  /** 原价（分）。实际售价按收费阶段算，见 phasePrice() */
   listCents: number;
   tier?: Tier;
   months?: number;
@@ -56,7 +53,6 @@ export const SKUS: Sku[] = [
     tier: 'starter',
     months: 1,
     points: 300,
-    priceCents: 1990,
     listCents: 2900,
     desc: '每月 300 点 · 2 个 Key · 每日 1000 次',
   },
@@ -67,7 +63,6 @@ export const SKUS: Sku[] = [
     tier: 'starter',
     months: 12,
     points: 300,
-    priceCents: 13900,
     listCents: 19900,
     desc: '每月 300 点 × 12 个月 · 2 个 Key',
   },
@@ -78,7 +73,6 @@ export const SKUS: Sku[] = [
     tier: 'pro',
     months: 1,
     points: 1200,
-    priceCents: 4900,
     listCents: 7900,
     desc: '每月 1200 点 · 5 个 Key · 每日 5000 次',
   },
@@ -89,7 +83,6 @@ export const SKUS: Sku[] = [
     tier: 'pro',
     months: 12,
     points: 1200,
-    priceCents: 39900,
     listCents: 59900,
     desc: '每月 1200 点 × 12 个月 · 5 个 Key',
   },
@@ -98,7 +91,6 @@ export const SKUS: Sku[] = [
     name: '加油包 100 点',
     kind: 'pack',
     points: 100,
-    priceCents: 690,
     listCents: 1000,
     desc: '一次性 100 点，不过期',
   },
@@ -107,7 +99,6 @@ export const SKUS: Sku[] = [
     name: '加油包 500 点',
     kind: 'pack',
     points: 500,
-    priceCents: 2990,
     listCents: 4500,
     desc: '一次性 500 点，不过期',
   },
@@ -116,14 +107,80 @@ export const SKUS: Sku[] = [
     name: '加油包 1100 点',
     kind: 'pack',
     points: 1100,
-    priceCents: 5900,
     listCents: 8800,
     desc: '一次性 1100 点，不过期',
   },
 ];
 
-export const PROMO_NOTE =
-  '实验阶段体验价，用户规模起来后恢复原价；已购会员在有效期内不受影响。';
+export type PhaseId = 'free' | 'half' | 'full';
+
+export interface PricingPhase {
+  id: PhaseId;
+  name: string;
+  /** 北京时间 YYYY-MM-DD 零点起生效；null＝日期待定（还没到这一阶段） */
+  from: string | null;
+  note: string;
+}
+
+/**
+ * 收费三阶段（owner 2026-10-31）：
+ * 1. 首月免费：调用不扣点、不开放购买，重点看有没有人用（看板「用量」）；
+ * 2. 半价：原价五折，页面同时展示原价；
+ * 3. 正式价：按原价。日期等免费期数据出来后由 owner 定，填进 from 即可。
+ */
+export const PRICING_PHASES: PricingPhase[] = [
+  {
+    id: 'free',
+    name: '公测免费',
+    from: '2026-10-31',
+    note: '公测首月免费：所有工具调用不扣点，无需购买。',
+  },
+  {
+    id: 'half',
+    name: '半价',
+    from: '2026-12-01',
+    note: '早期用户半价：按原价五折，已购会员在有效期内不受后续调价影响。',
+  },
+  {
+    id: 'full',
+    name: '正式价',
+    from: null,
+    note: '按原价收费。',
+  },
+];
+
+/** 北京时间 YYYY-MM-DD 零点对应的时刻。 */
+function bjMidnight(ymd: string): number {
+  return Date.parse(`${ymd}T00:00:00+08:00`);
+}
+
+/** 当前生效的阶段，以及下一阶段（日期已定的话）。 */
+export function currentPhase(now = new Date()) {
+  const t = now.getTime();
+  let idx = 0;
+  PRICING_PHASES.forEach((p, i) => {
+    if (p.from && bjMidnight(p.from) <= t) idx = i;
+  });
+  const phase = PRICING_PHASES[idx];
+  const next = PRICING_PHASES[idx + 1];
+  return {
+    ...phase,
+    next:
+      next && next.from
+        ? { id: next.id, name: next.name, from: next.from }
+        : null,
+  };
+}
+
+/** 某阶段下的售价（分）。 */
+export function phasePrice(
+  sku: Pick<Sku, 'listCents'>,
+  phase: PhaseId
+): number {
+  if (phase === 'free') return 0;
+  if (phase === 'half') return Math.round(sku.listCents / 2);
+  return sku.listCents;
+}
 
 export function findSku(sku: string): Sku | undefined {
   return SKUS.find(s => s.sku === sku);
@@ -434,23 +491,25 @@ export class BillingStore {
 
   // ───────── 订单 ─────────
 
-  async createOrder(userId: string, sku: Sku) {
+  /** amountCents 由调用方按当前阶段算好传入（phasePrice），订单落库的就是应付金额。 */
+  async createOrder(userId: string, sku: Sku, amountCents: number) {
     await this.ensureSchema();
     // 同一用户同一商品已有未完成订单就复用，避免重复点出一堆待付款
     const open = await this.q(
-      "SELECT order_no, sku, amount_cents, status, created_at FROM mcp_order WHERE user_id = ? AND sku = ? AND status IN ('pending','self_reported') ORDER BY id DESC LIMIT 1",
-      [userId, sku.sku]
+      // 金额也要一致：跨阶段调价后不复用旧价格的待付款单
+      "SELECT order_no, sku, amount_cents, status, created_at FROM mcp_order WHERE user_id = ? AND sku = ? AND amount_cents = ? AND status IN ('pending','self_reported') ORDER BY id DESC LIMIT 1",
+      [userId, sku.sku, amountCents]
     );
     if (open?.[0]) return { ...open[0], reused: true };
     const orderNo = genOrderNo();
     await this.q(
       'INSERT INTO mcp_order (order_no, user_id, sku, amount_cents, list_cents) VALUES (?, ?, ?, ?, ?)',
-      [orderNo, userId, sku.sku, sku.priceCents, sku.listCents]
+      [orderNo, userId, sku.sku, amountCents, sku.listCents]
     );
     return {
       order_no: orderNo,
       sku: sku.sku,
-      amount_cents: sku.priceCents,
+      amount_cents: amountCents,
       status: 'pending',
       reused: false,
     };
@@ -569,8 +628,11 @@ export class BillingStore {
       [d]
     );
     const num = (v: any) => Number(v || 0);
+    const usage = await this.usageStats(d).catch(() => null);
     return {
       days: d,
+      phase: currentPhase(),
+      usage,
       users: {
         total: num(users.total),
         paying: num(users.paying),
@@ -590,6 +652,97 @@ export class BillingStore {
       dailyRevenue,
       bySku,
       topTools,
+    };
+  }
+
+  /**
+   * 用量看板（免费期的核心数据：有没有人用、用得多不多、回不回来）。
+   * 只统计用户自助开的 Key（管理员手发的测试 Key 不算），数据来自调用日志，与是否扣点无关。
+   * wouldBePoints＝成功调用按单价折算的点数，免费期用来估算付费后的消耗。
+   */
+  async usageStats(days = 30) {
+    const d = Math.max(1, Math.min(180, Math.floor(days)));
+    const from = 'l.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)';
+    const base =
+      'FROM mcp_call_log l JOIN mcp_api_key k ON k.id = l.key_id WHERE k.user_id IS NOT NULL AND ' +
+      from;
+    const num = (v: any) => Number(v || 0);
+    const [totals] = await this.q(
+      'SELECT COUNT(*) calls, SUM(l.ok = 0) failed, COUNT(DISTINCT k.user_id) users ' +
+        base,
+      [d]
+    );
+    const [repeat] = await this.q(
+      'SELECT COUNT(*) n FROM (SELECT k.user_id ' +
+        base +
+        ' GROUP BY k.user_id HAVING COUNT(DISTINCT DATE(l.created_at)) >= 2) t',
+      [d]
+    );
+    const [accounts] = await this.q(
+      'SELECT COUNT(*) total, SUM(created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)) recent FROM mcp_account',
+      [d]
+    );
+    const [everCalled] = await this.q(
+      'SELECT COUNT(DISTINCT k.user_id) n FROM mcp_call_log l JOIN mcp_api_key k ON k.id = l.key_id WHERE k.user_id IS NOT NULL'
+    );
+    const daily = await this.q(
+      'SELECT DATE(l.created_at) day, COUNT(*) calls, SUM(l.ok = 0) failed, COUNT(DISTINCT k.user_id) users ' +
+        base +
+        ' GROUP BY DATE(l.created_at) ORDER BY day',
+      [d]
+    );
+    const signups = await this.q(
+      'SELECT DATE(created_at) day, COUNT(*) n FROM mcp_account WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY DATE(created_at) ORDER BY day',
+      [d]
+    );
+    const tools = (
+      await this.q(
+        'SELECT l.product, l.tool, COUNT(*) calls, SUM(l.ok = 0) failed, COUNT(DISTINCT k.user_id) users ' +
+          base +
+          ' GROUP BY l.product, l.tool ORDER BY calls DESC LIMIT 30',
+        [d]
+      )
+    ).map((r: any) => ({
+      product: r.product,
+      tool: r.tool,
+      calls: num(r.calls),
+      failed: num(r.failed),
+      users: num(r.users),
+      wouldBePoints: (num(r.calls) - num(r.failed)) * toolCost(r.tool),
+    }));
+    const topUsers = await this.q(
+      'SELECT k.user_id, COUNT(*) calls, COUNT(DISTINCT DATE(l.created_at)) active_days, MAX(l.created_at) last_at ' +
+        base +
+        ' GROUP BY k.user_id ORDER BY calls DESC LIMIT 20',
+      [d]
+    );
+    return {
+      basis: '只统计用户自助开的 Key；管理员测试 Key 不计入',
+      activeUsers: num(totals?.users),
+      repeatUsers: num(repeat?.n),
+      calls: num(totals?.calls),
+      failed: num(totals?.failed),
+      wouldBePoints: tools.reduce(
+        (a: number, t: any) => a + t.wouldBePoints,
+        0
+      ),
+      accounts: num(accounts?.total),
+      newAccounts: num(accounts?.recent),
+      everCalledUsers: num(everCalled?.n),
+      daily: daily.map((r: any) => ({
+        day: r.day,
+        calls: num(r.calls),
+        failed: num(r.failed),
+        users: num(r.users),
+      })),
+      signups: signups.map((r: any) => ({ day: r.day, n: num(r.n) })),
+      tools,
+      topUsers: topUsers.map((r: any) => ({
+        userId: r.user_id,
+        calls: num(r.calls),
+        activeDays: num(r.active_days),
+        lastAt: r.last_at,
+      })),
     };
   }
 }

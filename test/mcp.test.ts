@@ -378,10 +378,13 @@ function fakeBilling(points = 10, tier: any = 'free') {
     activate: async () => ({ created: true }),
     ledgerOf: async () => [],
     ordersOf: async () => [],
-    createOrder: async (_u: string, sku: any) => ({ order_no: 'MJ20261030ABCDEF12', sku: sku.sku, amount_cents: sku.priceCents, status: 'pending' }),
+    createOrder: async (_u: string, sku: any, amount: number) => ({ order_no: 'MJ20261030ABCDEF12', sku: sku.sku, amount_cents: amount, status: 'pending' }),
   };
   return b;
 }
+
+const HALF = () => new Date('2026-12-15T12:00:00+08:00');
+const FREE = () => new Date('2026-11-10T12:00:00+08:00');
 
 describe('MCP HTTP 适配', () => {
   const ROW: ApiKeyRow = {
@@ -484,7 +487,7 @@ describe('MCP HTTP 适配', () => {
 
   describe('自助 Key 扣点', () => {
     const USER_ROW = { ...ROW, scope: 'all' as any, user_id: 'u1', daily_limit: 100 };
-    function userRt(points: number) {
+    function userRt(points: number, now = HALF) {
       const billing = fakeBilling(points);
       const store: any = {
         findActive: async (k: string) => (k === KEY ? USER_ROW : null),
@@ -493,7 +496,7 @@ describe('MCP HTTP 适配', () => {
       };
       const rt: McpRuntime = {
         store, billing, agentDeps: () => agentDeps(), investDeps: () => investDeps(),
-        isAdmin: async () => false, userIdOf: async () => null,
+        isAdmin: async () => false, userIdOf: async () => null, now,
       };
       return { rt, billing };
     }
@@ -523,6 +526,14 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(billing.state.points, 10);
     });
 
+    it('公测免费期不扣点、调用照常记日志', async () => {
+      const { rt, billing } = userRt(0, FREE);
+      const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      assert.ok(!r.json.result.isError);
+      assert.strictEqual(billing.state.points, 0);
+      assert.deepStrictEqual(billing.state.charges, []);
+    });
+
     it('管理员手发的 Key 不扣点', async () => {
       const { rt, logs } = fakeRuntime();
       (rt as any).billing.charge = async () => { throw new Error('不应扣点'); };
@@ -546,14 +557,35 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual((await run(rt, { path: '/mcp/me', method: 'GET' })).status, 401);
     });
 
-    it('下单返回收款码与备注码；未知商品 400', async () => {
-      const { rt } = fakeRuntime({ userIdOf: async () => 'u1' });
+    it('价目按阶段：免费期价格 0 且不可购买，半价期为原价五折并带原价', async () => {
+      const free = await run(fakeRuntime({ now: FREE }).rt, { path: '/mcp/pricing', method: 'GET' });
+      assert.strictEqual(free.json.data.phase.id, 'free');
+      assert.strictEqual(free.json.data.phase.next.from, '2026-12-01');
+      assert.strictEqual(free.json.data.chargeCalls, false);
+      const sm = free.json.data.skus.find((x: any) => x.sku === 'starter_month');
+      assert.deepStrictEqual([sm.price, sm.listPrice, sm.halfPrice, sm.purchasable], [0, 29, 14.5, false]);
+      const half = await run(fakeRuntime({ now: HALF }).rt, { path: '/mcp/pricing', method: 'GET' });
+      assert.strictEqual(half.json.data.phase.id, 'half');
+      const hm = half.json.data.skus.find((x: any) => x.sku === 'starter_month');
+      assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [14.5, 29, true]);
+    });
+
+    it('免费期下单返回 400 并说明何时开始收费', async () => {
+      const { rt } = fakeRuntime({ userIdOf: async () => 'u1', now: FREE });
+      const r = await run(rt, { path: '/mcp/me/orders', body: { sku: 'pro_month' } });
+      assert.strictEqual(r.status, 400);
+      assert.ok(/免费期/.test(r.json.message) && r.json.message.includes('2026-12-01'));
+    });
+
+    it('下单返回收款码与备注码，金额为半价；未知商品 400', async () => {
+      const { rt } = fakeRuntime({ userIdOf: async () => 'u1', now: HALF });
       const bad = await run(rt, { path: '/mcp/me/orders', body: { sku: 'nope' } });
       assert.strictEqual(bad.status, 400);
       const ok = await run(rt, { path: '/mcp/me/orders', body: { sku: 'pro_month' } });
       assert.strictEqual(ok.status, 200);
       assert.strictEqual(ok.json.data.payCode, 'DEF12'.padStart(6, 'C'));
       assert.ok(ok.json.data.qr.endsWith('payment.png'));
+      assert.strictEqual(ok.json.data.amount, 39.5);
     });
 
     it('Key 数量受档位限制', async () => {

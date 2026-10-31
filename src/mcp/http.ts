@@ -10,7 +10,13 @@ import {
 } from './store';
 import { agentServer, AgentDeps, AGENT_MODULES } from './tools/agent';
 import { investServer, InvestDeps } from './tools/invest';
-import { BillingStore, TIERS, effectiveTier, toolCost } from './billing';
+import {
+  BillingStore,
+  TIERS,
+  currentPhase,
+  effectiveTier,
+  toolCost,
+} from './billing';
 import { handleSelfServe, handleBillingAdmin } from './selfServe';
 
 /**
@@ -39,6 +45,8 @@ export interface McpRuntime {
   adminIdOf?(headers: Record<string, any>): Promise<string>;
   /** 用户点「我已支付」后是否直接发货（默认否：等管理员确认到账） */
   autoFulfill?: boolean;
+  /** 当前时间（决定收费阶段）；单测注入 */
+  now?: () => Date;
 }
 
 const SPECS: Record<Product, ServerSpec<any>> = {
@@ -178,14 +186,17 @@ export async function handleMcpHttp(
         }
       }
       const q = await rt.store.countCall(keyRow, new Date(), limit);
+      const free = currentPhase(rt.now ? rt.now() : new Date()).id === 'free';
       if (q.over) {
         return toolError(
           msg.id,
-          `今日调用已达上限（${q.limit} 次），北京时间零点重置。升级 Pro 可提高上限。`
+          `今日调用已达上限（${q.limit} 次），北京时间零点重置。` +
+            (free ? '' : '升级 Pro 可提高上限。')
         );
       }
       const name = msg.params?.name;
-      if (userId && spec.tools.some(t => t.name === name)) {
+      // 公测免费期不扣点；用量照常进调用日志（看板「用量」按日志统计）
+      if (userId && !free && spec.tools.some(t => t.name === name)) {
         const cost = toolCost(name);
         if (cost > 0) {
           let left: number | null;

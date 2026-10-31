@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { BillingStore, findSku, effectiveTier, toolCost, SKUS } from '../src/mcp/billing';
+import { BillingStore, findSku, effectiveTier, toolCost, SKUS, phasePrice, currentPhase } from '../src/mcp/billing';
 import { McpStore } from '../src/mcp/store';
 
 /**
@@ -73,9 +73,13 @@ describe('MCP 计费（真 MySQL）', function () {
   it('订单：复用未完成单 → 自报 → 确认发货 → 重复确认不重复发点', async () => {
     const b = new BillingStore(q);
     const sku = findSku('starter_month')!;
-    const o1 = await b.createOrder('u4', sku);
-    const o2 = await b.createOrder('u4', sku);
+    const o1 = await b.createOrder('u4', sku, phasePrice(sku, 'half'));
+    const o2 = await b.createOrder('u4', sku, phasePrice(sku, 'half'));
     assert.strictEqual(o2.order_no, o1.order_no);
+    // 跨阶段调价后不复用旧价格的待付款单
+    const o3 = await b.createOrder('u4', sku, sku.listCents);
+    assert.notStrictEqual(o3.order_no, o1.order_no);
+    assert.strictEqual(Number(o3.amount_cents), sku.listCents);
     assert.strictEqual(await b.reportPaid(o1.order_no, 'someone_else'), false);
     assert.strictEqual(await b.reportPaid(o1.order_no, 'u4'), true);
     assert.strictEqual(await b.fulfill(o1.order_no, 'admin'), 'ok');
@@ -124,15 +128,15 @@ describe('MCP 计费（真 MySQL）', function () {
   it('加油包加点；驳回的订单不能再确认；看板统计已确认收入', async () => {
     const b = new BillingStore(q);
     const pack = findSku('pack_500')!;
-    const o = await b.createOrder('u8', pack);
+    const o = await b.createOrder('u8', pack, phasePrice(pack, 'half'));
     await b.reportPaid(o.order_no, 'u8');
     assert.strictEqual(await b.fulfill(o.order_no, 'admin'), 'ok');
     assert.strictEqual((await b.getAccount('u8'))!.points, 500);
-    const bad = await b.createOrder('u8', findSku('pack_100')!);
+    const bad = await b.createOrder('u8', findSku('pack_100')!, 500);
     assert.strictEqual(await b.reject(bad.order_no, 'admin', '未收到款'), true);
     assert.strictEqual(await b.fulfill(bad.order_no, 'admin'), 'already');
     const s = await b.stats(30);
-    assert.ok(s.revenue.windowCents >= pack.priceCents + findSku('starter_month')!.priceCents);
+    assert.ok(s.revenue.windowCents >= phasePrice(pack, 'half'));
     assert.ok(s.users.total >= 1);
     // 失败退点要从热门工具的点数里扣掉（u2 扣 60 后退回 60）
     const x = s.topTools.find((t: any) => t.tool === 'x');
@@ -157,11 +161,40 @@ describe('MCP 计费（真 MySQL）', function () {
     assert.strictEqual(await s.revokeOwn(Number(row!.id), 'u9'), true);
     assert.strictEqual(await s.findActive(key), null);
   });
+
+  it('用量看板只算用户自助 Key：活跃用户、回访、失败、按单价折算点数', async () => {
+    const s = new McpStore(q);
+    const b = new BillingStore(q);
+    await b.activate('ua');
+    const { key: ka } = await s.create({ scope: 'all', owner: 'user:ua', userId: 'ua' });
+    const { key: kadmin } = await s.create({ scope: 'all', owner: '测试' });
+    const ra = (await s.findActive(ka))!;
+    const radm = (await s.findActive(kadmin))!;
+    for (const [tool, ok] of [['knowledge_get', true], ['knowledge_get', true], ['knowledge_get', false]] as const)
+      await s.log({ keyId: Number(ra.id), product: 'agent', tool, ok, latencyMs: 5 });
+    await s.log({ keyId: Number(radm.id), product: 'agent', tool: 'knowledge_get', ok: true, latencyMs: 5 });
+    // 昨天也来过一次＝回访
+    await q("INSERT INTO mcp_call_log (key_id, product, tool, ok, latency_ms, created_at) VALUES (?, 'agent', 'knowledge_search', 1, 5, DATE_SUB(NOW(), INTERVAL 1 DAY))", [ra.id]);
+    const u = await b.usageStats(30);
+    const kg = u.tools.find((t: any) => t.tool === 'knowledge_get');
+    assert.deepStrictEqual([kg.calls, kg.failed, kg.users, kg.wouldBePoints], [3, 1, 1, 4]);
+    assert.ok(u.activeUsers >= 1 && u.repeatUsers >= 1);
+    assert.ok(u.topUsers.some((x: any) => x.userId === 'ua' && x.activeDays === 2));
+    assert.ok(!u.topUsers.some((x: any) => !x.userId));
+    assert.ok(u.signups.length >= 1);
+  });
 });
 
 describe('MCP 计价表', () => {
-  it('体验价不高于原价；口径类工具免费', () => {
-    for (const s of SKUS) assert.ok(s.priceCents <= s.listCents, s.sku);
+  it('三阶段价格：免费 0、半价五折、正式价＝原价；阶段按北京时间切换', () => {
+    for (const s of SKUS) {
+      assert.strictEqual(phasePrice(s, 'free'), 0);
+      assert.strictEqual(phasePrice(s, 'half'), Math.round(s.listCents / 2));
+      assert.strictEqual(phasePrice(s, 'full'), s.listCents);
+    }
+    assert.strictEqual(currentPhase(new Date('2026-11-30T23:59:59+08:00')).id, 'free');
+    assert.strictEqual(currentPhase(new Date('2026-12-01T00:00:00+08:00')).id, 'half');
+    assert.strictEqual(currentPhase(new Date('2027-06-01T00:00:00+08:00')).next, null);
     assert.strictEqual(toolCost('methodology_get'), 0);
     assert.strictEqual(toolCost('unknown_tool'), 1);
   });
