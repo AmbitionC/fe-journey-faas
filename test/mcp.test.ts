@@ -563,14 +563,14 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(free.json.data.phase.next.from, '2026-12-01');
       assert.strictEqual(free.json.data.chargeCalls, false);
       const sm = free.json.data.skus.find((x: any) => x.sku === 'member_month');
-      assert.deepStrictEqual([sm.price, sm.listPrice, sm.halfPrice, sm.purchasable], [0, 49, 24.5, false]);
+      assert.deepStrictEqual([sm.price, sm.listPrice, sm.halfPrice, sm.purchasable], [0, 29, 14.5, false]);
       // 只有体验与会员两档，不再分入门 / Pro
       assert.deepStrictEqual(free.json.data.tiers.map((t: any) => t.id), ['free', 'member']);
       assert.ok(free.json.data.skus.filter((x: any) => x.kind === 'plan').every((x: any) => x.tier === 'member'));
       const half = await run(fakeRuntime({ now: HALF }).rt, { path: '/mcp/pricing', method: 'GET' });
       assert.strictEqual(half.json.data.phase.id, 'half');
       const hm = half.json.data.skus.find((x: any) => x.sku === 'member_month');
-      assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [24.5, 49, true]);
+      assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [14.5, 29, true]);
     });
 
     it('免费期下单返回 400 并说明何时开始收费', async () => {
@@ -591,7 +591,7 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(ok.status, 200);
       assert.strictEqual(ok.json.data.payCode, 'DEF12'.padStart(6, 'C'));
       assert.ok(ok.json.data.qr.endsWith('payment.png'));
-      assert.strictEqual(ok.json.data.amount, 24.5);
+      assert.strictEqual(ok.json.data.amount, 14.5);
     });
 
     it('Key 数量受档位限制', async () => {

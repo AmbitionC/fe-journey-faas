@@ -85,9 +85,9 @@ describe('MCP 计费（真 MySQL）', function () {
     assert.strictEqual(await b.fulfill(o1.order_no, 'admin'), 'ok');
     assert.strictEqual(await b.fulfill(o1.order_no, 'admin'), 'already');
     const a = (await b.getAccount('u4'))!;
-    assert.strictEqual(a.points, 800);
+    assert.strictEqual(a.points, 400);
     assert.strictEqual(effectiveTier(a), 'member');
-    assert.strictEqual(a.monthly_points, 800);
+    assert.strictEqual(a.monthly_points, 400);
   });
 
   it('会员续费顺延到期日、不立刻加点；旧版入门/Pro 账户与订单按会员处理', async () => {
@@ -116,10 +116,10 @@ describe('MCP 计费（真 MySQL）', function () {
     await b.applyPlan('u6', findSku('member_year')!, 'o');
     await q("UPDATE mcp_account SET next_grant_at = DATE_SUB(NOW(), INTERVAL 45 DAY) WHERE user_id = 'u6'");
     const a = (await b.getAccount('u6'))!;
-    // 首月 800 + 补发两次（-45 天、-15 天）
-    assert.strictEqual(a.points, 800 * 3);
+    // 首月 400 + 补发两次（-45 天、-15 天）
+    assert.strictEqual(a.points, 400 * 3);
     const again = (await b.getAccount('u6'))!;
-    assert.strictEqual(again.points, 800 * 3);
+    assert.strictEqual(again.points, 400 * 3);
   });
 
   it('会员过期后按体验档处理，余额照常可用', async () => {
@@ -128,8 +128,8 @@ describe('MCP 计费（真 MySQL）', function () {
     await q("UPDATE mcp_account SET tier_expire_at = DATE_SUB(NOW(), INTERVAL 1 DAY), next_grant_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE user_id = 'u7'");
     const a = (await b.getAccount('u7'))!;
     assert.strictEqual(effectiveTier(a), 'free');
-    assert.strictEqual(a.points, 800); // 月卡：下次发放日 = 到期日，过期后不再补发
-    assert.strictEqual(await b.charge('u7', 2, 'x'), 798);
+    assert.strictEqual(a.points, 400); // 月卡：下次发放日 = 到期日，过期后不再补发
+    assert.strictEqual(await b.charge('u7', 2, 'x'), 398);
   });
 
   it('加油包加点；驳回的订单不能再确认；看板统计已确认收入', async () => {
