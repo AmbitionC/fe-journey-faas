@@ -16,7 +16,12 @@ import { QueryFn } from './store';
  * - 所有时间比较都在 SQL 里用 NOW() 做，避免 FC 实例时区与库时区不一致。
  */
 
-export type Tier = 'free' | 'starter' | 'pro';
+/**
+ * 档位只有「体验」和「会员」两档（owner 2026-10-31：产品能力还没到能分级的程度，不分入门 / Pro）。
+ * 'starter' / 'pro' 是 2026-10-30 版的旧档位名，库里若有存量账户按会员处理（effectiveTier）。
+ */
+export type Tier = 'free' | 'member';
+type StoredTier = Tier | 'starter' | 'pro';
 
 export interface TierSpec {
   name: string;
@@ -26,9 +31,11 @@ export interface TierSpec {
 
 export const TIERS: Record<Tier, TierSpec> = {
   free: { name: '体验', maxKeys: 1, dailyLimit: 200 },
-  starter: { name: '入门', maxKeys: 2, dailyLimit: 1000 },
-  pro: { name: 'Pro', maxKeys: 5, dailyLimit: 5000 },
+  member: { name: '会员', maxKeys: 3, dailyLimit: 3000 },
 };
+
+/** 会员每月发放点数 */
+export const MEMBER_MONTHLY_POINTS = 800;
 
 export const TRIAL_POINTS = 100;
 
@@ -47,44 +54,24 @@ export interface Sku {
 
 export const SKUS: Sku[] = [
   {
-    sku: 'starter_month',
-    name: '入门月卡',
+    sku: 'member_month',
+    name: '会员月卡',
     kind: 'plan',
-    tier: 'starter',
+    tier: 'member',
     months: 1,
-    points: 300,
-    listCents: 2900,
-    desc: '每月 300 点 · 2 个 Key · 每日 1000 次',
+    points: MEMBER_MONTHLY_POINTS,
+    listCents: 4900,
+    desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 · ${TIERS.member.maxKeys} 个 Key · 每日 ${TIERS.member.dailyLimit} 次`,
   },
   {
-    sku: 'starter_year',
-    name: '入门年卡',
+    sku: 'member_year',
+    name: '会员年卡',
     kind: 'plan',
-    tier: 'starter',
+    tier: 'member',
     months: 12,
-    points: 300,
-    listCents: 19900,
-    desc: '每月 300 点 × 12 个月 · 2 个 Key',
-  },
-  {
-    sku: 'pro_month',
-    name: 'Pro 月卡',
-    kind: 'plan',
-    tier: 'pro',
-    months: 1,
-    points: 1200,
-    listCents: 7900,
-    desc: '每月 1200 点 · 5 个 Key · 每日 5000 次',
-  },
-  {
-    sku: 'pro_year',
-    name: 'Pro 年卡',
-    kind: 'plan',
-    tier: 'pro',
-    months: 12,
-    points: 1200,
-    listCents: 59900,
-    desc: '每月 1200 点 × 12 个月 · 5 个 Key',
+    points: MEMBER_MONTHLY_POINTS,
+    listCents: 39900,
+    desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 × 12 个月 · 约 8 折`,
   },
   {
     sku: 'pack_100',
@@ -182,8 +169,34 @@ export function phasePrice(
   return sku.listCents;
 }
 
-export function findSku(sku: string): Sku | undefined {
+/**
+ * 旧版（入门 / Pro）商品：不再出售，只用于给改版前下的订单发货——
+ * 按下单时的点数发放，档位记为会员。
+ */
+const LEGACY_SKUS: Sku[] = [
+  ['starter_month', '入门月卡', 1, 300, 2900],
+  ['starter_year', '入门年卡', 12, 300, 19900],
+  ['pro_month', 'Pro 月卡', 1, 1200, 7900],
+  ['pro_year', 'Pro 年卡', 12, 1200, 59900],
+].map(([sku, name, months, points, listCents]) => ({
+  sku: sku as string,
+  name: name as string,
+  kind: 'plan' as const,
+  tier: 'member' as const,
+  months: months as number,
+  points: points as number,
+  listCents: listCents as number,
+  desc: '已下架',
+}));
+
+/** 在售商品（下单只认这些） */
+export function findSellableSku(sku: string): Sku | undefined {
   return SKUS.find(s => s.sku === sku);
+}
+
+/** 含已下架商品（发货、展示历史订单用） */
+export function findSku(sku: string): Sku | undefined {
+  return SKUS.find(s => s.sku === sku) || LEGACY_SKUS.find(s => s.sku === sku);
 }
 
 /** 每次调用扣多少点。未列出的工具默认 1 点；口径/清单/用量查询免费。 */
@@ -213,7 +226,7 @@ export function toolCost(tool: string): number {
 export interface Account {
   user_id: string;
   points: number;
-  tier: Tier;
+  tier: StoredTier;
   /** 档位是否在有效期内（过期即按 free 处理，余额照常可用） */
   active: boolean;
   tier_expire_at: string | null;
@@ -225,7 +238,7 @@ export function effectiveTier(
   a: Pick<Account, 'tier' | 'active'> | null
 ): Tier {
   if (!a || !a.active) return 'free';
-  return (TIERS[a.tier] ? a.tier : 'free') as Tier;
+  return ['member', 'starter', 'pro'].includes(a.tier) ? 'member' : 'free';
 }
 
 export function genOrderNo(now = new Date()): string {
@@ -442,8 +455,8 @@ export class BillingStore {
   }
 
   /**
-   * 开通/续费会员。同档位且未过期 → 顺延到期日（月度点照常按月发）；
-   * 否则（新开、过期、换档）→ 从现在起算，立刻发第一个月的点。
+   * 开通/续费会员。会员未过期 → 顺延到期日（月度点照常按月发）；
+   * 否则（新开、过期）→ 从现在起算，立刻发第一个月的点。
    */
   async applyPlan(userId: string, sku: Sku, ref: string) {
     await this.ensureSchema();
@@ -453,7 +466,7 @@ export class BillingStore {
     );
     const a = await this.getAccount(userId);
     const months = sku.months || 1;
-    if (a && a.active && a.tier === sku.tier) {
+    if (a && effectiveTier(a) === sku.tier) {
       await this.q(
         'UPDATE mcp_account SET tier_expire_at = DATE_ADD(tier_expire_at, INTERVAL ? MONTH), monthly_points = ? WHERE user_id = ?',
         [months, sku.points, userId]
@@ -594,7 +607,7 @@ export class BillingStore {
       (await this.q(sql, params))?.[0] || {};
     const users = await one(
       'SELECT COUNT(*) total, SUM(tier_expire_at IS NOT NULL AND tier_expire_at > NOW()) paying, ' +
-        "SUM(tier = 'pro' AND tier_expire_at > NOW()) pro, SUM(points) points_outstanding FROM mcp_account"
+        'SUM(points) points_outstanding FROM mcp_account'
     );
     const revenue = await one(
       "SELECT COALESCE(SUM(amount_cents),0) paid_cents, COUNT(*) paid_orders FROM mcp_order WHERE status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY)",
@@ -636,7 +649,6 @@ export class BillingStore {
       users: {
         total: num(users.total),
         paying: num(users.paying),
-        pro: num(users.pro),
         pointsOutstanding: num(users.points_outstanding),
       },
       revenue: {

@@ -10,6 +10,7 @@ import {
   TOOL_COST,
   effectiveTier,
   findSku,
+  findSellableSku,
   payCode,
 } from './billing';
 import { checkPaid, pagePayUrl, queryTrade, verifyNotify } from './alipay';
@@ -254,7 +255,9 @@ export async function handleSelfServe(
       if (n >= TIERS[tier].maxKeys) {
         return send(res, 400, {
           success: false,
-          message: `${TIERS[tier].name}档最多 ${TIERS[tier].maxKeys} 个有效 Key，请先吊销不用的或升级`,
+          message: `${TIERS[tier].name}档最多 ${
+            TIERS[tier].maxKeys
+          } 个有效 Key，请先吊销不用的${tier === 'free' ? '或开通会员' : ''}`,
         });
       }
       const created = await rt.store.create({
@@ -280,7 +283,7 @@ export async function handleSelfServe(
     }
 
     if (path === '/mcp/me/orders' && method === 'POST') {
-      const sku = findSku(String(data.sku || ''));
+      const sku = findSellableSku(String(data.sku || ''));
       if (!sku)
         return send(res, 400, { success: false, message: '商品不存在' });
       const phase = currentPhase(now);

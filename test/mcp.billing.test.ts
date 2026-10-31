@@ -72,7 +72,7 @@ describe('MCP 计费（真 MySQL）', function () {
 
   it('订单：复用未完成单 → 自报 → 确认发货 → 重复确认不重复发点', async () => {
     const b = new BillingStore(q);
-    const sku = findSku('starter_month')!;
+    const sku = findSku('member_month')!;
     const o1 = await b.createOrder('u4', sku, phasePrice(sku, 'half'));
     const o2 = await b.createOrder('u4', sku, phasePrice(sku, 'half'));
     assert.strictEqual(o2.order_no, o1.order_no);
@@ -85,44 +85,51 @@ describe('MCP 计费（真 MySQL）', function () {
     assert.strictEqual(await b.fulfill(o1.order_no, 'admin'), 'ok');
     assert.strictEqual(await b.fulfill(o1.order_no, 'admin'), 'already');
     const a = (await b.getAccount('u4'))!;
-    assert.strictEqual(a.points, 300);
-    assert.strictEqual(effectiveTier(a), 'starter');
-    assert.strictEqual(a.monthly_points, 300);
+    assert.strictEqual(a.points, 800);
+    assert.strictEqual(effectiveTier(a), 'member');
+    assert.strictEqual(a.monthly_points, 800);
   });
 
-  it('同档续费顺延到期日、不立刻加点；换档立刻生效并发首月点', async () => {
+  it('会员续费顺延到期日、不立刻加点；旧版入门/Pro 账户与订单按会员处理', async () => {
     const b = new BillingStore(q);
-    await b.applyPlan('u5', findSku('starter_month')!, 'o1');
+    await b.applyPlan('u5', findSku('member_month')!, 'o1');
     const before = (await b.getAccount('u5'))!;
-    await b.applyPlan('u5', findSku('starter_year')!, 'o2');
+    await b.applyPlan('u5', findSku('member_year')!, 'o2');
     const after = (await b.getAccount('u5'))!;
     assert.strictEqual(after.points, before.points);
     assert.ok(after.tier_expire_at! > before.tier_expire_at!);
-    await b.applyPlan('u5', findSku('pro_month')!, 'o3');
-    const pro = (await b.getAccount('u5'))!;
-    assert.strictEqual(effectiveTier(pro), 'pro');
-    assert.strictEqual(pro.points, before.points + 1200);
+    // 存量的 pro 档账户：仍是会员，续会员卡走顺延而不是重开
+    await q("UPDATE mcp_account SET tier = 'pro' WHERE user_id = 'u5'");
+    assert.strictEqual(effectiveTier((await b.getAccount('u5'))!), 'member');
+    await b.applyPlan('u5', findSku('member_month')!, 'o3');
+    assert.strictEqual((await b.getAccount('u5'))!.points, before.points);
+    // 改版前下的 Pro 月卡订单：按当时的 1200 点发货，档位记会员
+    const legacy = findSku('pro_month')!;
+    assert.strictEqual(legacy.tier, 'member');
+    await b.applyPlan('u5b', legacy, 'o4');
+    const lb = (await b.getAccount('u5b'))!;
+    assert.deepStrictEqual([effectiveTier(lb), lb.points], ['member', 1200]);
   });
 
   it('会员月度点懒发放：到期前每满一月补一次', async () => {
     const b = new BillingStore(q);
-    await b.applyPlan('u6', findSku('pro_year')!, 'o');
+    await b.applyPlan('u6', findSku('member_year')!, 'o');
     await q("UPDATE mcp_account SET next_grant_at = DATE_SUB(NOW(), INTERVAL 45 DAY) WHERE user_id = 'u6'");
     const a = (await b.getAccount('u6'))!;
-    // 首月 1200 + 补发两次（-45 天、-15 天）
-    assert.strictEqual(a.points, 1200 * 3);
+    // 首月 800 + 补发两次（-45 天、-15 天）
+    assert.strictEqual(a.points, 800 * 3);
     const again = (await b.getAccount('u6'))!;
-    assert.strictEqual(again.points, 1200 * 3);
+    assert.strictEqual(again.points, 800 * 3);
   });
 
   it('会员过期后按体验档处理，余额照常可用', async () => {
     const b = new BillingStore(q);
-    await b.applyPlan('u7', findSku('starter_month')!, 'o');
+    await b.applyPlan('u7', findSku('member_month')!, 'o');
     await q("UPDATE mcp_account SET tier_expire_at = DATE_SUB(NOW(), INTERVAL 1 DAY), next_grant_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE user_id = 'u7'");
     const a = (await b.getAccount('u7'))!;
     assert.strictEqual(effectiveTier(a), 'free');
-    assert.strictEqual(a.points, 300); // 月卡：下次发放日 = 到期日，过期后不再补发
-    assert.strictEqual(await b.charge('u7', 2, 'x'), 298);
+    assert.strictEqual(a.points, 800); // 月卡：下次发放日 = 到期日，过期后不再补发
+    assert.strictEqual(await b.charge('u7', 2, 'x'), 798);
   });
 
   it('加油包加点；驳回的订单不能再确认；看板统计已确认收入', async () => {

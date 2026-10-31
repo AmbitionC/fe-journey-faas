@@ -201,7 +201,7 @@ export async function handleMcpHttp(
         return toolError(
           msg.id,
           `今日调用已达上限（${q.limit} 次），北京时间零点重置。` +
-            (free ? '' : '升级 Pro 可提高上限。')
+            (free ? '' : '开通会员可提高上限。')
         );
       }
       const name = msg.params?.name;
