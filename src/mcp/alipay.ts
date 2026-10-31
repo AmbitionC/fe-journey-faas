@@ -1,4 +1,11 @@
-import { createSign, createVerify, createPrivateKey, KeyObject } from 'crypto';
+import {
+  createHash,
+  createPublicKey,
+  createSign,
+  createVerify,
+  createPrivateKey,
+  KeyObject,
+} from 'crypto';
 import fetch from 'node-fetch';
 
 /**
@@ -219,12 +226,11 @@ export function extractResponseNode(raw: string, node: string): string | null {
   return null;
 }
 
-/** 主动查单（用户付完跳回、或通知没到时补查）。返回已验签的 alipay_trade_query_response。 */
-export async function queryTrade(
+async function postQuery(
   cfg: AlipayConfig,
   orderNo: string,
-  doFetch: typeof fetch = fetch
-): Promise<Record<string, any>> {
+  doFetch: typeof fetch
+): Promise<string> {
   const params: Record<string, string> = {
     ...commonParams(cfg, 'alipay.trade.query', new Date()),
     biz_content: JSON.stringify({ out_trade_no: orderNo }),
@@ -238,7 +244,77 @@ export async function queryTrade(
     body: new URLSearchParams(params).toString(),
     timeout: 10000,
   } as any);
-  const raw = await resp.text();
+  return resp.text();
+}
+
+/** 由应用私钥推出的应用公钥（SPKI，base64，非机密），用于核对填进去的私钥与支付宝登记的公钥是否同一对。 */
+export function appPublicKeyOf(cfg: AlipayConfig): string {
+  return createPublicKey(cfg.privateKey)
+    .export({ type: 'spki', format: 'der' })
+    .toString('base64');
+}
+
+export function keyFingerprint(spkiBase64: string): string {
+  return createHash('sha256')
+    .update(Buffer.from(spkiBase64.replace(/\s+/g, ''), 'base64'))
+    .digest('hex')
+    .slice(0, 16);
+}
+
+export interface SelfCheck {
+  appId: string;
+  gateway: string;
+  appPublicKeySha256: string;
+  /** 支付宝对「查一笔不存在的订单」的回答：签名对时应为 40004 / ACQ.TRADE_NOT_EXIST。 */
+  code?: string;
+  subCode?: string;
+  subMsg?: string;
+  /** 响应带签名且能用 ALIPAY_PUBLIC_KEY 验过＝支付宝公钥填对了。 */
+  responseVerified?: boolean;
+  /** 应用私钥能被支付宝认出（签名没被拒）。 */
+  signatureAccepted?: boolean;
+  error?: string;
+}
+
+/**
+ * 部署后自检：用真实配置查一笔不存在的订单。
+ * 只产出非机密事实（APPID、应用公钥指纹、支付宝返回码），不打印任何私钥材料。
+ */
+export async function selfCheck(
+  cfg: AlipayConfig,
+  doFetch: typeof fetch = fetch
+): Promise<SelfCheck> {
+  const out: SelfCheck = {
+    appId: cfg.appId,
+    gateway: cfg.gateway,
+    appPublicKeySha256: keyFingerprint(appPublicKeyOf(cfg)),
+  };
+  try {
+    const raw = await postQuery(cfg, `SELFCHECK${Date.now()}`, doFetch);
+    const node = extractResponseNode(raw, 'alipay_trade_query_response');
+    if (!node) throw new Error('响应无法解析');
+    const r = JSON.parse(node);
+    const sign = JSON.parse(raw).sign;
+    out.code = r.code;
+    out.subCode = r.sub_code;
+    out.subMsg = r.sub_msg;
+    out.responseVerified = !!sign && rsaVerify(node, sign, cfg.alipayPublicKey);
+    out.signatureAccepted = !/invalid-signature|invalid-app-?id/i.test(
+      String(r.sub_code || '')
+    );
+  } catch (e: any) {
+    out.error = String(e?.message || e);
+  }
+  return out;
+}
+
+/** 主动查单（用户付完跳回、或通知没到时补查）。返回已验签的 alipay_trade_query_response。 */
+export async function queryTrade(
+  cfg: AlipayConfig,
+  orderNo: string,
+  doFetch: typeof fetch = fetch
+): Promise<Record<string, any>> {
+  const raw = await postQuery(cfg, orderNo, doFetch);
   const node = extractResponseNode(raw, 'alipay_trade_query_response');
   if (!node) throw new Error('支付宝查单响应无法解析');
   const parsed = JSON.parse(raw);
