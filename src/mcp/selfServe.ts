@@ -4,7 +4,9 @@ import {
   SKUS,
   TIERS,
   TRIAL_POINTS,
-  PROMO_NOTE,
+  currentPhase,
+  phasePrice,
+  PRICING_PHASES,
   TOOL_COST,
   effectiveTier,
   findSku,
@@ -34,10 +36,13 @@ function parse(body: Buffer): any {
   }
 }
 
-export function pricing() {
+export function pricing(now = new Date()) {
+  const phase = currentPhase(now);
   return {
     currency: 'CNY',
-    promo: PROMO_NOTE,
+    phase,
+    phases: PRICING_PHASES,
+    promo: phase.note,
     unit: '1 点 ≈ ¥0.1，Agent 与 Invest 两个服务共用余额',
     trialPoints: TRIAL_POINTS,
     tiers: Object.entries(TIERS).map(([id, t]) => ({ id, ...t })),
@@ -48,12 +53,16 @@ export function pricing() {
       tier: s.tier || null,
       months: s.months || null,
       points: s.points,
-      price: s.priceCents / 100,
+      // 当前阶段的售价；免费期为 0 且不开放购买（purchasable=false）
+      price: phasePrice(s, phase.id) / 100,
       listPrice: s.listCents / 100,
+      halfPrice: phasePrice(s, 'half') / 100,
+      purchasable: phase.id !== 'free',
       desc: s.desc,
     })),
     toolCost: TOOL_COST,
     defaultToolCost: 1,
+    chargeCalls: phase.id !== 'free',
   };
 }
 
@@ -81,8 +90,9 @@ export async function handleSelfServe(
   method: string
 ) {
   const path = url.pathname.replace(/\/+$/, '');
+  const now = rt.now ? rt.now() : new Date();
   if (path === '/mcp/pricing' && method === 'GET')
-    return send(res, 200, { success: true, data: pricing() });
+    return send(res, 200, { success: true, data: pricing(now) });
 
   const userId = await rt.userIdOf(req.headers as any);
   if (!userId) return send(res, 401, { success: false, message: '请先登录' });
@@ -103,6 +113,7 @@ export async function handleSelfServe(
       return send(res, 200, {
         success: true,
         data: {
+          phase: currentPhase(now),
           activated: !!account,
           account: account
             ? {
@@ -182,14 +193,23 @@ export async function handleSelfServe(
       const sku = findSku(String(data.sku || ''));
       if (!sku)
         return send(res, 400, { success: false, message: '商品不存在' });
+      const phase = currentPhase(now);
+      if (phase.id === 'free')
+        return send(res, 400, {
+          success: false,
+          message: phase.next
+            ? `公测免费期内调用不扣点，无需购买。${phase.next.from} 起${phase.next.name}。`
+            : '公测免费期内调用不扣点，无需购买。',
+        });
       await rt.billing.activate(userId); // 下单即视为开通
-      const o = await rt.billing.createOrder(userId, sku);
+      const amount = phasePrice(sku, phase.id);
+      const o = await rt.billing.createOrder(userId, sku, amount);
       return send(res, 200, {
         success: true,
         data: {
           ...orderView({ ...o, created_at: o.created_at || null }),
           qr: PAY_QR,
-          howToPay: `微信扫码支付 ¥${(sku.priceCents / 100).toFixed(
+          howToPay: `微信扫码支付 ¥${(Number(o.amount_cents) / 100).toFixed(
             2
           )}，转账备注填写 ${payCode(o.order_no)}，付完点「我已支付」。`,
         },
