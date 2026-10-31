@@ -18,6 +18,7 @@ import { QueryFn } from './store';
 
 /**
  * 档位只有「体验」和「会员」两档（owner 2026-10-31：产品能力还没到能分级的程度，不分入门 / Pro）。
+ * 会员原价 ¥29/月（owner 定，卖点「一天不到一块钱」），年卡 ¥239。
  * 'starter' / 'pro' 是 2026-10-30 版的旧档位名，库里若有存量账户按会员处理（effectiveTier）。
  */
 export type Tier = 'free' | 'member';
@@ -31,11 +32,11 @@ export interface TierSpec {
 
 export const TIERS: Record<Tier, TierSpec> = {
   free: { name: '体验', maxKeys: 1, dailyLimit: 200 },
-  member: { name: '会员', maxKeys: 3, dailyLimit: 3000 },
+  member: { name: '会员', maxKeys: 2, dailyLimit: 1500 },
 };
 
 /** 会员每月发放点数 */
-export const MEMBER_MONTHLY_POINTS = 800;
+export const MEMBER_MONTHLY_POINTS = 400;
 
 export const TRIAL_POINTS = 100;
 
@@ -60,8 +61,8 @@ export const SKUS: Sku[] = [
     tier: 'member',
     months: 1,
     points: MEMBER_MONTHLY_POINTS,
-    listCents: 4900,
-    desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 · ${TIERS.member.maxKeys} 个 Key · 每日 ${TIERS.member.dailyLimit} 次`,
+    listCents: 2900,
+    desc: `一天不到一块钱 · 每月 ${MEMBER_MONTHLY_POINTS} 点 · ${TIERS.member.maxKeys} 个 Key · 每日 ${TIERS.member.dailyLimit} 次`,
   },
   {
     sku: 'member_year',
@@ -70,8 +71,8 @@ export const SKUS: Sku[] = [
     tier: 'member',
     months: 12,
     points: MEMBER_MONTHLY_POINTS,
-    listCents: 39900,
-    desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 × 12 个月 · 约 8 折`,
+    listCents: 23900,
+    desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 × 12 个月 · 约 7 折`,
   },
   {
     sku: 'pack_100',
