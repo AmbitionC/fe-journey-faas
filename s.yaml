@@ -96,6 +96,13 @@ resources:
         HEALTH_VISION_BASE_URL: ${env('HEALTH_VISION_BASE_URL', '')}
         HEALTH_VISION_API_KEY: ${env('HEALTH_VISION_API_KEY', '')}
         HEALTH_VISION_MODEL: ${env('HEALTH_VISION_MODEL', '')}
+        # 开发者服务支付宝网页收款（src/mcp/alipay.ts）。三项缺一即不开通，官网只显示微信收款码。
+        ALIPAY_APP_ID: ${env('ALIPAY_APP_ID', '')}
+        ALIPAY_PRIVATE_KEY: ${env('ALIPAY_PRIVATE_KEY', '')}
+        ALIPAY_PUBLIC_KEY: ${env('ALIPAY_PUBLIC_KEY', '')}
+        ALIPAY_GATEWAY: ${env('ALIPAY_GATEWAY', '')}
+        ALIPAY_NOTIFY_URL: ${env('ALIPAY_NOTIFY_URL', '')}
+        ALIPAY_RETURN_URL: ${env('ALIPAY_RETURN_URL', '')}
       triggers:
         - triggerName: httpTrigger
           triggerType: http

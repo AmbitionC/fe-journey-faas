@@ -65,6 +65,14 @@ env:
   HEALTH_VISION_BASE_URL: ${{ vars.HEALTH_VISION_BASE_URL }}
   HEALTH_VISION_API_KEY: ${{ secrets.HEALTH_VISION_API_KEY }}
   HEALTH_VISION_MODEL: ${{ vars.HEALTH_VISION_MODEL }}
+  # 开发者服务支付宝网页收款：ALIPAY_APP_ID / ALIPAY_PRIVATE_KEY（应用私钥）/ ALIPAY_PUBLIC_KEY（支付宝公钥）三个 secret 齐了才开通。
+  # 沙箱联调时把仓库变量 ALIPAY_GATEWAY 设为 https://openapi-sandbox.dl.alipaydev.com/gateway.do。
+  ALIPAY_APP_ID: ${{ secrets.ALIPAY_APP_ID }}
+  ALIPAY_PRIVATE_KEY: ${{ secrets.ALIPAY_PRIVATE_KEY }}
+  ALIPAY_PUBLIC_KEY: ${{ secrets.ALIPAY_PUBLIC_KEY }}
+  ALIPAY_GATEWAY: ${{ vars.ALIPAY_GATEWAY }}
+  ALIPAY_NOTIFY_URL: ${{ vars.ALIPAY_NOTIFY_URL || 'https://fe-journey-main-ktantdfjcs.cn-hangzhou.fcapp.run/mcp/pay/alipay/notify' }}
+  ALIPAY_RETURN_URL: ${{ vars.ALIPAY_RETURN_URL || 'https://www.agent-journey.cn/developer' }}
 
 jobs:
   # ── fe-journey Web 函数（原有部署，逻辑不变，仅收窄为只部署 fcJourneyMain）──

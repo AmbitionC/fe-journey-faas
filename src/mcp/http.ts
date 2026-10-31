@@ -17,7 +17,12 @@ import {
   effectiveTier,
   toolCost,
 } from './billing';
-import { handleSelfServe, handleBillingAdmin } from './selfServe';
+import {
+  handleSelfServe,
+  handleBillingAdmin,
+  handleAlipayNotify,
+} from './selfServe';
+import { AlipayConfig, loadAlipayConfig } from './alipay';
 
 /**
  * MCP 的 HTTP 适配层（server.js 在 Midway 之外直接分流 /mcp/* 到这里）。
@@ -28,6 +33,7 @@ import { handleSelfServe, handleBillingAdmin } from './selfServe';
  * - /mcp/pricing      公开价目表
  * - /mcp/me/*         自助后台：开通、Key、下单、余额与流水（平台用户登录态）
  * - /mcp/admin/*      管理端：发 Key / 吊销 / 用量 / 订单确认 / 加点 / 经营看板（平台 admin 登录态）
+ * - POST /mcp/pay/alipay/notify  支付宝异步通知（验签后自动发货，无登录态）
  *
  * 为什么绕开 Midway：MCP 客户端要求精确的状态码语义（202 / 405 / 401），
  * 且 /invest/* 的鉴权中间件要求平台 admin，与 API Key 鉴权是两套体系，单独一路最干净。
@@ -47,6 +53,8 @@ export interface McpRuntime {
   autoFulfill?: boolean;
   /** 当前时间（决定收费阶段）；单测注入 */
   now?: () => Date;
+  /** 支付宝网页收款配置；未配置为 null，只走微信收款码 */
+  alipay?: AlipayConfig | null;
 }
 
 const SPECS: Record<Product, ServerSpec<any>> = {
@@ -101,6 +109,8 @@ export async function handleMcpHttp(
     return;
   }
 
+  if (url.pathname.replace(/\/+$/, '') === '/mcp/pay/alipay/notify')
+    return handleAlipayNotify(res, rt, body, method);
   if (url.pathname.startsWith('/mcp/admin/'))
     return handleAdmin(req, res, url, rt, body, method);
   if (url.pathname === '/mcp/pricing' || url.pathname.startsWith('/mcp/me'))
@@ -424,6 +434,15 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
     store,
     billing,
     autoFulfill: process.env.MCP_ORDER_AUTO_FULFILL === '1',
+    alipay: (() => {
+      try {
+        return loadAlipayConfig();
+      } catch (e: any) {
+        // 密钥格式错只关掉支付宝通道，不拖垮整个 MCP 服务
+        console.error('[mcp] 支付宝配置无效，已停用支付宝收款:', e?.message);
+        return null;
+      }
+    })(),
     isAdmin: async headers => {
       const info = await userInfoOf(headers);
       return !!info && info.role === 'admin';
