@@ -14,17 +14,31 @@ import { MaterialsService } from '../service/materials';
 import { EntitlementService } from '../service/entitlement';
 import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
-import { AGENT_PDF_PRODUCT } from '../common/commerce';
+import { PDF_MEMBER_BENEFIT, PdfAccessBasis, pdfFreeClaimActive } from '../common/commerce';
 import { OrderService } from '../service/order';
+import { SKUS, currentPhase, phasePrice } from '../mcp/billing';
+
+interface PdfAccess {
+  userId: string;
+  canDownload: boolean;
+  basis: PdfAccessBasis | null;
+  needsLogin: boolean;
+  /** 老 ¥9.9 订单回执（仅 basis=legacy_purchase） */
+  order: any | null;
+}
 
 /**
- * 知识点资料（按一级分类 PDF）下载。会员权益：会员校验通过后签发 24h 临时链接。
+ * 知识点资料（按知识库二级分类的 PDF）下载。
+ * 2026-11-01 起是会员权益（¥9.9 单卖下架）：会员权益 → 老 ¥9.9 买家 → 公测免费期已登录，三者之一即签发 24h 临时链接。
  * PDF 为 OSS 私有对象，公网直链不可达——只能经此签名链接下载，过期即失效（防泄漏）。
  */
 @Provide()
 export class MaterialsHTTPService {
+  /** 当前时间（决定公测免费期）；单测注入 */
+  now: () => Date = () => new Date();
+
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: 'Agent PDF 单次购买商品和已生成清单',
+    description: '知识点 PDF 会员权益说明、会员价与已生成清单',
     functionName: 'materialsProduct',
     name: 'materialsProduct',
     path: '/materials/product',
@@ -35,8 +49,30 @@ export class MaterialsHTTPService {
     const [groups, gift] = await Promise.all([
       this.materialsService.groupedListReady(), this.materialsService.legacyGift(),
     ]);
-    const purchasingEnabled = groups.some(g => g.items.length > 0);
-    return { success: true, data: { ...AGENT_PDF_PRODUCT, groups, purchasingEnabled, gift } };
+    const now = this.now();
+    const phase = currentPhase(now);
+    const freeClaim = pdfFreeClaimActive(now);
+    // 会员价只从 mcp/billing 读（与 /mcp/pricing 同源），这里不写死数字
+    const plans = SKUS.filter(s => s.kind === 'plan').map(s => ({
+      sku: s.sku, name: s.name, months: s.months || 1,
+      listPrice: s.listCents / 100, price: phasePrice(s, phase.id) / 100,
+      purchasable: phase.id !== 'free',
+    }));
+    const message = freeClaim
+      ? `公测期登录即可领取全部 PDF；${phase.next?.from ? phase.next.from.replace(/^\d{4}-/, '').replace('-', ' 月 ') + ' 日' : '公测结束'}起随会员开售，早期用户半价。`
+      : '开通会员即可下载全部 PDF；已购 ¥9.9 资料的用户继续可下载。';
+    return {
+      success: true,
+      data: {
+        ...PDF_MEMBER_BENEFIT,
+        groups, gift,
+        ready: groups.some(g => g.items.length > 0),
+        // 老前端据此隐藏付款按钮：单卖已下架，永远为 false
+        purchasingEnabled: false,
+        membership: { phase: { id: phase.id, name: phase.name, next: phase.next }, plans, freeClaim },
+        message,
+      },
+    };
   }
 
   @Inject()
@@ -54,6 +90,20 @@ export class MaterialsHTTPService {
   @Inject()
   orderService: OrderService;
 
+  /** 下载资格：会员权益（网站存量会员 / Skill 会员）→ 老 ¥9.9 买家 → 公测免费期已登录 → 拒绝 */
+  private async pdfAccess(): Promise<PdfAccess> {
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    const userId = info?.userId || '';
+    const denied: PdfAccess = { userId, canDownload: false, basis: null, needsLogin: !userId, order: null };
+    if (!userId) return denied;
+    const entitlement = await this.entitlementService.check(userId, 'materials_pdf', {});
+    if (entitlement.allowed) return { ...denied, canDownload: true, basis: 'member' };
+    const order = await this.orderService.getPdfPurchase(userId);
+    if (order) return { ...denied, canDownload: true, basis: 'legacy_purchase', order };
+    if (pdfFreeClaimActive(this.now())) return { ...denied, canDownload: true, basis: 'free_phase' };
+    return denied;
+  }
+
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '当前账号的资料领取资格',
     functionName: 'materialsPurchase', name: 'materialsPurchase',
@@ -61,33 +111,27 @@ export class MaterialsHTTPService {
   })
   @NoAuth()
   async purchaseStatus(): Promise<any> {
-    const info = await resolveUserInfo(this.ctx, this.redisService);
-    const userId = info?.userId || '';
-    const entitlement = await this.entitlementService.check(userId, 'materials_pdf', {});
-    if (entitlement.allowed) return { success: true, data: { canDownload: true, basis: 'existing_entitlement' } };
-    const order = userId ? await this.orderService.getPdfPurchase(userId) : null;
-    return { success: true, data: { canDownload: !!order, basis: order ? 'self_reported' : null, needsLogin: !userId, order } };
+    const { userId, ...access } = await this.pdfAccess();
+    return { success: true, data: { ...access, saleClosed: true, memberUrl: PDF_MEMBER_BENEFIT.memberUrl } };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '记录当前账号的资料支付声明（未核验到账）',
+    description: '旧「我已支付」接口：¥9.9 单卖已下架，不再写自报订单；已有资格的照常返回可下载',
     functionName: 'materialsPurchaseConfirm', name: 'materialsPurchaseConfirm',
     path: '/materials/purchase/confirm', method: 'post',
   })
   @NoAuth()
-  async confirmPurchase(@Body(ALL) body: { channel?: string }): Promise<any> {
-    const info = await resolveUserInfo(this.ctx, this.redisService);
-    if (!info?.userId) throw R.unauthorizedError('请先登录后购买资料');
-    const entitlement = await this.entitlementService.check(info.userId, 'materials_pdf', {});
-    if (entitlement.allowed) return { success: true, data: { created: false, canDownload: true, basis: 'existing_entitlement' } };
-    const groups = await this.materialsService.groupedListReady();
-    if (!groups.some(g => g.items.length > 0)) throw R.error('资料尚未生成，暂不可购买');
-    const result = await this.orderService.reportPdfPurchase(info.userId, body?.channel);
-    return { success: true, data: { ...result, canDownload: true, basis: 'self_reported', bankVerified: result.order?.bankVerified === true } };
+  async confirmPurchase(@Body(ALL) _body: { channel?: string }): Promise<any> {
+    const access = await this.pdfAccess();
+    if (access.needsLogin) throw R.unauthorizedError('请先登录');
+    if (access.canDownload) {
+      return { success: true, data: { created: false, canDownload: true, basis: access.basis, order: access.order, bankVerified: access.order?.bankVerified === true } };
+    }
+    throw R.error('知识点 PDF 已并入会员权益，不再单独售卖；请勿转账，开通会员后即可领取');
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '资料管理：自报与历史资料订单的人工核实记录',
+    description: '资料管理：历史 ¥9.9 自报订单的人工核实记录',
     functionName: 'materialsAdminPurchases', name: 'materialsAdminPurchases',
     path: '/materials/admin/purchases', method: 'get',
   })
@@ -109,20 +153,18 @@ export class MaterialsHTTPService {
     return { success: true, data };
   }
 
-  /** 会员权益校验（限免期 freeForAll 自动放行）；返回 userId（游客为空串） */
+  /** 资格校验；返回 userId（游客为空串） */
   private async gateMember(): Promise<string> {
-    const info = await resolveUserInfo(this.ctx, this.redisService);
-    const userId = info?.userId || '';
-    const res = await this.entitlementService.check(userId, 'materials_pdf', {});
-    if (!res.allowed) {
-      const order = userId ? await this.orderService.getPdfPurchase(userId) : null;
-      if (!order) throw R.forbiddenError('请先购买资料；已有会员权益继续有效');
+    const access = await this.pdfAccess();
+    if (!access.canDownload) {
+      if (access.needsLogin) throw R.unauthorizedError('请先登录后领取');
+      throw R.forbiddenError('知识点 PDF 为会员权益，请先开通会员；已购资料与已有会员权益继续有效');
     }
-    return userId;
+    return access.userId;
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '资料 PDF 分类清单（已有权益或单次领取）',
+    description: '资料 PDF 分类清单（会员 / 老买家 / 公测期）',
     functionName: 'materialsList',
     name: 'materialsList',
     path: '/materials/list',

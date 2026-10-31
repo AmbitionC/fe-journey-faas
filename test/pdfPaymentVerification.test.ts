@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import { OrderService } from '../src/service/order';
 import { MaterialsHTTPService } from '../src/function/materials';
 import { UserEntity } from '../src/entity/user';
+import { legacyPdfOrderNo } from '../src/common/commerce';
 
 function fixture() {
   const rows: any[] = [];
@@ -22,6 +23,12 @@ function fixture() {
   };
   const users = { findOne: async ({ where }: any) => ['u1', 'u2'].includes(where.phoneNumber) ? { id: where.phoneNumber } : null };
   const manager = { getRepository: (entity: any) => entity === UserEntity ? users : repo };
+  /** 2026-11-01 前由「我已支付」写入的老 ¥9.9 自报订单（下架后只读） */
+  const seedLegacy = async (userId: string) => {
+    const row = await repo.save(repo.create({ userId, orderNo: legacyPdfOrderNo(userId), type: 'pdf', name: 'Agent 求职资料（PDF）',
+      amount: 9.9, payTime: new Date('2026-10-20T00:00:00Z'), status: 'self_reported', bankVerified: false }));
+    return { order: row };
+  };
   const service = new OrderService();
   service.orderModel = { ...repo, manager: { transaction: async (fn: any) => {
     const prior = queue;
@@ -35,6 +42,7 @@ function fixture() {
     c.ctx = { userInfo: userId ? { userId, role } : undefined } as any;
     c.orderService = service;
     c.entitlementService = { check: async () => ({ allowed: false }) } as any;
+    c.now = () => new Date('2026-12-05T00:00:00+08:00'); // 公测免费期之后
     c.materialsService = {
       groupedListReady: async () => [{ key: 'agent', items: [{ key: 'agent-basics' }] }],
       isReady: async () => true,
@@ -42,14 +50,14 @@ function fixture() {
     } as any;
     return c;
   };
-  return { service, rows, controller, saves: () => saves };
+  return { service, rows, controller, seedLegacy, saves: () => saves };
 }
 
 describe('资料人工核实与下载资格兼容', () => {
   for (const status of ['self_reported', 'paid']) {
     for (const verified of [undefined, false, true]) {
-      it(status + ' / bankVerified=' + verified + ' 均可下载，重复声明不新增或覆盖', async () => {
-        const f = fixture(); await f.service.reportPdfPurchase('u1');
+      it(status + ' / bankVerified=' + verified + ' 均可下载，再点「我已支付」不新增或覆盖', async () => {
+        const f = fixture(); await f.seedLegacy('u1');
         Object.assign(f.rows[0], { status, bankVerified: verified, amount: 9.9 });
         const before = { ...f.rows[0] };
         const repeat = await f.controller().confirmPurchase({ bankVerified: true, status: 'paid', userId: 'u2' } as any);
@@ -65,19 +73,17 @@ describe('资料人工核实与下载资格兼容', () => {
     }
   }
 
-  it('用户声明不核实到账、不写 paid，身份和核实字段不能由 body 伪造', async () => {
+  it('旧「我已支付」接口不再写订单：无资格者被拒且零写入，body 里的身份/核实字段无效', async () => {
     const f = fixture();
-    const result = await f.controller().confirmPurchase({ userId: 'u2', bankVerified: true, bankVerifiedBy: 'admin', status: 'paid' } as any);
-    assert.strictEqual(result.data.bankVerified, false);
-    assert.strictEqual(f.rows[0].userId, 'u1');
-    assert.strictEqual(f.rows[0].status, 'self_reported');
-    assert.strictEqual(f.rows[0].bankVerified, false);
+    await assert.rejects(f.controller('u2').confirmPurchase({ userId: 'u1', bankVerified: true, bankVerifiedBy: 'admin', status: 'paid' } as any), /不再单独售卖/);
+    assert.strictEqual(f.rows.length, 0);
+    assert.strictEqual(f.saves(), 0);
     assert.strictEqual(await f.service.getPdfPurchase('u2'), null);
     await assert.rejects(f.controller('u2').download('agent-basics'));
   });
 
   it('人工核实幂等，保留原订单状态和下载；取消核实也不取消下载', async () => {
-    const f = fixture(); const order = (await f.service.reportPdfPurchase('u1')).order;
+    const f = fixture(); const order = (await f.seedLegacy('u1')).order;
     const before = { ...f.rows[0] };
     const [first, repeat] = await Promise.all([
       f.service.setPdfPaymentVerification(order.orderNo, true, 'admin-a'),
@@ -100,13 +106,13 @@ describe('资料人工核实与下载资格兼容', () => {
   });
 
   for (const status of ['refunded', 'cancelled', 'canceled', 'pending', 'failed']) {
-    it(status + ' 不可下载、重报或核实复活，已有记录不被修改', async () => {
-      const f = fixture(); const order = (await f.service.reportPdfPurchase('u1')).order;
+    it(status + ' 不可下载、不能借旧接口复活或核实，已有记录不被修改', async () => {
+      const f = fixture(); const order = (await f.seedLegacy('u1')).order;
       Object.assign(f.rows[0], { status, bankVerified: true });
       const before = { ...f.rows[0] };
       assert.strictEqual(await f.service.getPdfPurchase('u1'), null);
       await assert.rejects(f.controller().download('agent-basics'));
-      await assert.rejects(f.service.reportPdfPurchase('u1'));
+      await assert.rejects(f.controller().confirmPurchase({}));
       await assert.rejects(f.service.setPdfPaymentVerification(order.orderNo, true, 'admin'));
       assert.deepStrictEqual(f.rows[0], before);
       assert.strictEqual(f.saves(), 1);
@@ -114,7 +120,7 @@ describe('资料人工核实与下载资格兼容', () => {
   }
 
   it('只有管理员可列订单及核实，操作者取登录身份，忽略伪造身份/状态', async () => {
-    const f = fixture(); const order = (await f.service.reportPdfPurchase('u1')).order;
+    const f = fixture(); const order = (await f.seedLegacy('u1')).order;
     for (const c of [f.controller(), f.controller('')]) {
       await assert.rejects(c.adminPurchases({}));
       await assert.rejects(c.adminPaymentVerification({ orderNo: order.orderNo, bankVerified: true }));
@@ -138,7 +144,7 @@ describe('资料人工核实与下载资格兼容', () => {
   });
 
   it('该商品外的 paid PDF 订单不冒充当前商品资格，会员订单不能被该接口核实', async () => {
-    const f = fixture(); await f.service.reportPdfPurchase('u1');
+    const f = fixture(); await f.seedLegacy('u1');
     f.rows[0].orderNo = 'other-product'; f.rows[0].status = 'paid';
     assert.strictEqual(await f.service.getPdfPurchase('u1'), null);
     f.rows[0].type = 'member';

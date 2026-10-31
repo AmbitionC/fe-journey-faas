@@ -69,6 +69,14 @@ export class UserService {
     };
   }
 
+  private async skillMembershipExpiry(userId: string): Promise<Date | null> {
+    try {
+      return (await this.entitlementService?.skillMembershipExpiry?.(userId)) || null;
+    } catch {
+      return null;
+    }
+  }
+
   async getUserById(userId: string): Promise<any> {
     const userInfo = await this.userModel
       .createQueryBuilder('user')
@@ -81,8 +89,10 @@ export class UserService {
       // 而 isMember 列到期后不会被改回 false ⟹ 试用过期的用户照样拿到
       // isMember=true、会员额度和整套会员 UI；可 ai.ts 的限流是带日期判断的，
       // 于是界面说你是会员、接口按非会员拒。两处口径现已统一到 hasValidMemberColumn。
-      const isMember =
-        freeForAll || hasValidMemberColumn(userInfo.isMember, userInfo.memberDate);
+      const columnMember = hasValidMemberColumn(userInfo.isMember, userInfo.memberDate);
+      // Skill 会员（owner 2026-10-31 定的唯一会员档）同样是网站会员：存量列无效时拿它的到期日当 memberDate
+      const skillExpiry = freeForAll || columnMember ? null : await this.skillMembershipExpiry(userId);
+      const isMember = freeForAll || columnMember || !!skillExpiry;
       const quota = await this.aiProxyService.getQuota(userId, isMember);
       const vo = userInfo.toVO();
       return {
@@ -92,6 +102,7 @@ export class UserService {
           // 回写计算后的会员态，别让前端读到库里那个只增不减的裸标记
           isMember,
           ...(freeForAll ? { memberDate: '2099-12-31 23:59:59' } : {}),
+          ...(skillExpiry ? { memberDate: skillExpiry.toISOString().slice(0, 19).replace('T', ' ') } : {}),
           aiQuota: quota,
         },
       };

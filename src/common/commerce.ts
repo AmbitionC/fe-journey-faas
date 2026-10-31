@@ -1,14 +1,49 @@
-/** 用户已选定当前 Agent 求职 PDF；支付声明不代表到账核验。 */
-export const AGENT_PDF_PRODUCT = Object.freeze({
+import { createHash } from 'crypto';
+import { currentPhase } from '../mcp/billing';
+
+/**
+ * 知识点 PDF 的售卖形态（owner 2026-10-31 定，2026-11-01 起生效）：
+ * ¥9.9 单卖下架，PDF 并入唯一的「会员」档（Skill 会员，¥29/月、¥239/年，定价与收费阶段
+ * 只在 mcp/billing.ts 一处定义，这里不写价格）。
+ *
+ * 下载资格四条路，按序判定（function/materials.ts）：
+ *   会员权益（含网站存量会员与 Skill 会员）→ 已付 ¥9.9 的老买家 → 公测免费期已登录 → 拒绝。
+ */
+
+/** 已下架的 ¥9.9 单卖商品。只用于识别历史订单：订单号由 sku+userId 派生，改了就对不上老订单。 */
+export const LEGACY_PDF_PRODUCT = Object.freeze({
   sku: 'agent-career-pdf-v1',
   name: 'Agent 求职资料（PDF）',
   priceCents: 990,
-  purchaseType: 'one_time',
-  scopeStatus: 'confirmed',
-  scopeConfirmed: true,
-  scope: '当前已生成的 Agent 求职知识点 PDF，具体主题与文件见下方清单。',
-  includesMembership: false,
-  paymentBasis: 'user_self_reported',
-  bankVerified: false,
-  message: '使用微信个人收款码转账 ¥9.9 后，点击「我已支付」开放当前清单的下载。本站记录你的支付声明，未核验到账。',
+  closedAt: '2026-11-01',
+});
+
+/** 老 ¥9.9 订单的确定性订单号（每账号一笔）。 */
+export function legacyPdfOrderNo(userId: string): string {
+  return `PDF-${createHash('sha256').update(`${LEGACY_PDF_PRODUCT.sku}:${userId}`).digest('hex')}`;
+}
+
+/**
+ * 公测免费期（billing 阶段 free，至 2026-11-30）登录即可领 PDF，与「公测期所有调用不扣点」口径一致，
+ * 把 PDF 当 12 月 1 日转会员的钩子。owner 若决定公测期只给老会员/老买家，置 false 即可。
+ */
+export const PDF_FREE_PHASE_CLAIM = true;
+
+export function pdfFreeClaimActive(now = new Date()): boolean {
+  return PDF_FREE_PHASE_CLAIM && currentPhase(now).id === 'free';
+}
+
+/** 下载资格依据：会员权益 / 老 ¥9.9 买家 / 公测免费期登录用户 */
+export type PdfAccessBasis = 'member' | 'legacy_purchase' | 'free_phase';
+
+export const PDF_MEMBER_BENEFIT = Object.freeze({
+  sku: 'member_pdf',
+  name: '知识点 PDF（会员权益）',
+  purchaseType: 'membership',
+  scope: '按知识库目录整理的全套知识点 PDF，随知识点更新；开通会员即可下载全部，附赠 2024 年前端知识点汇总。',
+  /** ¥9.9 单卖已下架；老买家下载资格永久保留 */
+  saleClosed: true,
+  legacy: LEGACY_PDF_PRODUCT,
+  /** 开通会员的页面 */
+  memberUrl: '/developer',
 });

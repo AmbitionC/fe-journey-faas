@@ -31,7 +31,8 @@ function controller(userId: string, allowed: boolean, ownPurchase: boolean) {
   c.ctx = { userInfo: userId ? { userId, role: 'user' } : undefined } as any;
   c.materialsService = service;
   c.entitlementService = { check: async () => ({ allowed }) } as any;
-  c.orderService = { getPdfPurchase: async (id: string) => ownPurchase && id === userId ? { status: 'self_reported' } : null, reportPdfPurchase: async () => assert.fail('gift must not create orders') } as any;
+  c.orderService = { getPdfPurchase: async (id: string) => ownPurchase && id === userId ? { status: 'self_reported' } : null } as any;
+  c.now = () => new Date('2026-12-05T00:00:00+08:00'); // 公测免费期之后，只认会员与老买家
   return c;
 }
 
@@ -50,7 +51,7 @@ describe('2024 年原版前端 PDF 免费附赠', () => {
   it('Agent 目录与免费附赠分开，勘误指向合并 PDF 的正确页码', async () => {
     const c = controller('', false, false);
     const offer = (await c.product()).data;
-    assert.strictEqual(offer.priceCents, 990);
+    assert.strictEqual(offer.purchaseType, 'membership');
     assert.strictEqual(offer.gift.priceCents, 0);
     assert.strictEqual(offer.gift.pageCount, 365);
     assert.strictEqual(offer.gift.referenceOnly, true);
@@ -58,11 +59,12 @@ describe('2024 年原版前端 PDF 免费附赠', () => {
     assert.strictEqual(offer.groups.flatMap((g: any) => g.items).length, 1);
     assert.ok(!JSON.stringify(offer).includes('fixture.invalid'));
   });
-  it('附赠文件就绪不能单独触发 Agent 商品售卖', async () => {
+  it('附赠文件就绪不代表主资料就绪，且永远不开放单卖付款', async () => {
     const c = controller('', false, false);
     c.materialsService.groupedListReady = async () => [];
     const offer = (await c.product()).data;
     assert.ok(offer.gift);
+    assert.strictEqual(offer.ready, false);
     assert.strictEqual(offer.purchasingEnabled, false);
   });
   it('管理员清单提供固定附赠分类，未上传时标为未生成', async () => {
@@ -72,7 +74,7 @@ describe('2024 年原版前端 PDF 免费附赠', () => {
     assert.strictEqual(groups.find(g => g.key === 'historical-gift')!.items[0].ready, false);
     assert.strictEqual(groups.find(g => g.key === 'historical-gift')!.items[0].key, LEGACY_PDF_KEY);
   });
-  it('现有会员和已单次领取者复用原交付资格，无新订单或会员写入', async () => {
+  it('现有会员和老 ¥9.9 买家复用原交付资格，无新订单或会员写入', async () => {
     for (const c of [controller('old-member', true, false), controller('buyer', false, true)]) {
       const result = await c.download(LEGACY_PDF_KEY);
       assert.strictEqual(result.data.expiresInSec, 86400);
