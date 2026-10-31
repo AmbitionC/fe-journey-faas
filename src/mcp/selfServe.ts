@@ -12,12 +12,16 @@ import {
   findSku,
   payCode,
 } from './billing';
+import { checkPaid, pagePayUrl, queryTrade, verifyNotify } from './alipay';
 
 /**
  * 自助开通与购买（/mcp/pricing、/mcp/me/*），以及管理端的订单/点数/看板（/mcp/admin/* 的计费部分）。
  *
- * 收款方式（现阶段）：个人微信收款码 + 用户自报「我已支付」+ 管理员人工确认到账后发货，
- * 与站内 PDF 资料同一模式；接入商户号后把「确认到账」换成支付回调即可，发货逻辑（fulfill）不变。
+ * 收款方式：
+ * - 支付宝网页收款（配置了 ALIPAY_* 时）：下单即带付款链接，异步通知验签后自动发货，
+ *   用户跳回时再主动查一次单兜底（见 ./alipay.ts）。
+ * - 个人微信收款码（兜底）：用户自报「我已支付」+ 管理员人工确认到账后发货。
+ * 两条路都只调 fulfill（幂等），handled_by 记 `alipay:<支付宝交易号>` 或管理员标识，后台据此区分渠道。
  */
 
 const PAY_QR = 'https://www.agent-journey.cn/payment.png';
@@ -36,9 +40,10 @@ function parse(body: Buffer): any {
   }
 }
 
-export function pricing(now = new Date()) {
+export function pricing(now = new Date(), alipay = false) {
   const phase = currentPhase(now);
   return {
+    payChannels: alipay ? ['alipay', 'wechat_qr'] : ['wechat_qr'],
     currency: 'CNY',
     phase,
     phases: PRICING_PHASES,
@@ -78,7 +83,89 @@ function orderView(o: any) {
     createdAt: o.created_at,
     reportedAt: o.reported_at || null,
     paidAt: o.paid_at || null,
+    paidVia: o.status === 'paid' ? paidVia(o.handled_by) : null,
   };
+}
+
+function paidVia(handledBy?: string | null): 'alipay' | 'manual' | 'auto' {
+  if (handledBy && handledBy.startsWith('alipay:')) return 'alipay';
+  return handledBy === 'auto' ? 'auto' : 'manual';
+}
+
+const PAYABLE = ['pending', 'self_reported'];
+
+function alipayUrlOf(rt: McpRuntime, o: any): string | null {
+  if (!rt.alipay || !PAYABLE.includes(o.status)) return null;
+  const sku = findSku(o.sku);
+  return pagePayUrl(rt.alipay, {
+    orderNo: o.order_no,
+    amountCents: Number(o.amount_cents),
+    subject: `Journey 开发者服务 · ${sku?.name || o.sku}`,
+  });
+}
+
+/** 主动查单并在确认到账时发货；通知与查单同时到也只会发一次（fulfill 幂等）。 */
+async function syncAlipay(rt: McpRuntime, o: any) {
+  const r = await queryTrade(rt.alipay!, o.order_no);
+  if (r.code !== '10000') {
+    // ACQ.TRADE_NOT_EXIST：用户还没扫码付款，不是错误
+    return { paid: false, reason: r.sub_code || r.code };
+  }
+  const c = checkPaid(rt.alipay!, r, o);
+  if (!c.ok) {
+    if (c.reason === 'amount_mismatch')
+      console.error('[mcp] 支付宝查单金额不符', o.order_no, r.total_amount);
+    return { paid: false, reason: c.reason };
+  }
+  await rt.billing.fulfill(o.order_no, `alipay:${c.tradeNo}`);
+  return { paid: true, reason: 'ok' };
+}
+
+/**
+ * POST /mcp/pay/alipay/notify：支付宝服务器回调（application/x-www-form-urlencoded）。
+ * 必须回纯文本 success，否则支付宝会在 25 小时内重复推送；验签失败回 failure。
+ */
+export async function handleAlipayNotify(
+  res: ServerResponse,
+  rt: McpRuntime,
+  body: Buffer,
+  method: string
+) {
+  const text = (code: number, s: string) => {
+    res.statusCode = code;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end(s);
+  };
+  if (!rt.alipay) return text(404, 'alipay disabled');
+  if (method !== 'POST') return text(405, 'failure');
+  const params: Record<string, string> = {};
+  new URLSearchParams(body.toString('utf8')).forEach((v, k) => {
+    params[k] = v;
+  });
+  if (!verifyNotify(rt.alipay, params)) {
+    console.error('[mcp] 支付宝通知验签失败', params.out_trade_no);
+    return text(200, 'failure');
+  }
+  try {
+    const o = await rt.billing.getOrder(String(params.out_trade_no || ''));
+    const c = checkPaid(rt.alipay, params, o);
+    if (c.ok) {
+      const r = await rt.billing.fulfill(o.order_no, `alipay:${c.tradeNo}`);
+      if (r === 'already' && o.status === 'rejected')
+        console.error('[mcp] 已驳回订单收到支付宝付款，需人工退款', o.order_no);
+    } else if (
+      c.reason === 'amount_mismatch' ||
+      c.reason === 'app_id_mismatch'
+    ) {
+      console.error('[mcp] 支付宝通知不可发货', c.reason, params.out_trade_no);
+    }
+    // 交易关闭、待付款等非成功状态也回 success：这条通知已处理完，不需要支付宝再推
+    return text(200, 'success');
+  } catch (e: any) {
+    // 库暂时不可用：回 failure 让支付宝稍后重推
+    console.error('[mcp] 支付宝通知处理失败', e?.message);
+    return text(200, 'failure');
+  }
 }
 
 export async function handleSelfServe(
@@ -92,7 +179,10 @@ export async function handleSelfServe(
   const path = url.pathname.replace(/\/+$/, '');
   const now = rt.now ? rt.now() : new Date();
   if (path === '/mcp/pricing' && method === 'GET')
-    return send(res, 200, { success: true, data: pricing(now) });
+    return send(res, 200, {
+      success: true,
+      data: pricing(now, !!rt.alipay),
+    });
 
   const userId = await rt.userIdOf(req.headers as any);
   if (!userId) return send(res, 401, { success: false, message: '请先登录' });
@@ -208,6 +298,7 @@ export async function handleSelfServe(
         success: true,
         data: {
           ...orderView({ ...o, created_at: o.created_at || null }),
+          alipayUrl: alipayUrlOf(rt, o),
           qr: PAY_QR,
           howToPay: `微信扫码支付 ¥${(Number(o.amount_cents) / 100).toFixed(
             2
@@ -237,6 +328,43 @@ export async function handleSelfServe(
         message: rt.autoFulfill
           ? '已到账发放'
           : '已收到你的支付声明，核对到账后自动发放（通常 12 小时内）',
+      });
+    }
+
+    // 点「支付宝付款」时现取一条新签的链接（同一订单号重复付款支付宝会关联到原单，不会扣两次）
+    if (path === '/mcp/me/orders/alipay' && method === 'POST') {
+      if (!rt.alipay)
+        return send(res, 400, { success: false, message: '支付宝收款未开通' });
+      const o = await rt.billing.getOrder(String(data.orderNo || ''));
+      if (!o || o.user_id !== userId)
+        return send(res, 404, { success: false, message: '订单不存在' });
+      const url = alipayUrlOf(rt, o);
+      if (!url)
+        return send(res, 400, {
+          success: false,
+          data: orderView(o),
+          message: '订单已处理，无需再付款',
+        });
+      return send(res, 200, { success: true, data: { alipayUrl: url } });
+    }
+
+    // 付完跳回官网时调用：主动向支付宝查单，到账即发货（不依赖异步通知是否已到）
+    if (path === '/mcp/me/orders/alipay/sync' && method === 'POST') {
+      if (!rt.alipay)
+        return send(res, 400, { success: false, message: '支付宝收款未开通' });
+      const o = await rt.billing.getOrder(String(data.orderNo || ''));
+      if (!o || o.user_id !== userId)
+        return send(res, 404, { success: false, message: '订单不存在' });
+      if (o.status === 'paid')
+        return send(res, 200, { success: true, data: orderView(o) });
+      const r = PAYABLE.includes(o.status)
+        ? await syncAlipay(rt, o)
+        : { paid: false, reason: o.status };
+      const now = await rt.billing.getOrder(o.order_no);
+      return send(res, 200, {
+        success: true,
+        data: orderView(now),
+        message: r.paid ? '已到账发放' : '暂未查到付款，付完稍等几秒再刷新',
       });
     }
 
