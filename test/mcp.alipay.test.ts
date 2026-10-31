@@ -292,6 +292,48 @@ describe('MCP 支付宝网页收款', () => {
     assert.match((await selfCheck(cfg, down)).error!, /ECONNRESET/);
   });
 
+  it('管理员可下 1 分钱测试单（免费期也可），普通用户不行', async () => {
+    const created: any[] = [];
+    const { rt } = fakeRuntime({});
+    rt.billing.activate = async () => ({ created: false });
+    rt.billing.createOrder = async (uid: string, sku: any, cents: number) => {
+      const o = {
+        order_no: 'MJTEST1',
+        user_id: uid,
+        sku: sku.sku,
+        amount_cents: cents,
+        status: 'pending',
+      };
+      created.push(o);
+      return o;
+    };
+    rt.userIdOf = async () => 'u1';
+    const call = async (admin: boolean) => {
+      rt.isAdmin = async () => admin;
+      const res = fakeRes();
+      await handleSelfServe(
+        { headers: {} } as any,
+        res,
+        new URL('http://x/mcp/me/orders/alipay/test'),
+        rt,
+        Buffer.from('{}'),
+        'POST'
+      );
+      return { status: res.statusCode, body: JSON.parse(res.body) };
+    };
+    assert.strictEqual((await call(false)).status, 403);
+    assert.strictEqual(created.length, 0);
+    const ok = await call(true);
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(ok.body.data.amount, 0.01);
+    assert.strictEqual(ok.body.data.name, '支付宝收款测试');
+    const biz = JSON.parse(
+      new URL(ok.body.data.alipayUrl).searchParams.get('biz_content')!
+    );
+    assert.strictEqual(biz.total_amount, '0.01');
+    assert.strictEqual(biz.out_trade_no, 'MJTEST1');
+  });
+
   it('付完跳回时主动查单发货，只认自己的订单', async () => {
     const orders: Record<string, any> = {
       MJ4: {

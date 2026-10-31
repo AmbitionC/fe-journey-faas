@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { BillingStore, findSku, effectiveTier, toolCost, SKUS, phasePrice, currentPhase } from '../src/mcp/billing';
+import { BillingStore, findSku, findSellableSku, effectiveTier, toolCost, SKUS, phasePrice, currentPhase, PAY_TEST_SKU } from '../src/mcp/billing';
 import { McpStore } from '../src/mcp/store';
 
 /**
@@ -150,6 +150,23 @@ describe('MCP 计费（真 MySQL）', function () {
     assert.ok(Number(x.failed) >= 1);
     const charged = await q("SELECT SUM(-delta) n FROM mcp_points_ledger WHERE reason = 'call' AND ref = 'x'");
     assert.strictEqual(Number(x.points), Number(charged[0].n) - 60);
+  });
+
+  it('支付宝测试单：不在售、发货不加点不记流水、不计入营收', async () => {
+    const b = new BillingStore(q);
+    assert.strictEqual(findSellableSku('pay_test'), undefined);
+    assert.strictEqual(findSku('pay_test'), PAY_TEST_SKU);
+    await b.activate('ut');
+    const before = (await b.getAccount('ut'))!.points;
+    const s0 = await b.stats(30);
+    const o = await b.createOrder('ut', PAY_TEST_SKU, PAY_TEST_SKU.listCents);
+    assert.strictEqual(Number(o.amount_cents), 1);
+    assert.strictEqual(await b.fulfill(o.order_no, 'alipay:T1'), 'ok');
+    assert.strictEqual((await b.getAccount('ut'))!.points, before);
+    const rows = await q('SELECT COUNT(*) n FROM mcp_points_ledger WHERE ref = ?', [o.order_no]);
+    assert.strictEqual(Number(rows[0].n), 0);
+    const s1 = await b.stats(30);
+    assert.deepStrictEqual(s1.revenue, s0.revenue);
   });
 
   it('旧版 mcp_api_key 表自动补 user_id 列；用户只能吊销自己的 Key', async () => {

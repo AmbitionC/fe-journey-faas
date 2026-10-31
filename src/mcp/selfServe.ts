@@ -12,6 +12,7 @@ import {
   findSku,
   findSellableSku,
   payCode,
+  PAY_TEST_SKU,
 } from './billing';
 import { checkPaid, pagePayUrl, queryTrade, verifyNotify } from './alipay';
 
@@ -196,10 +197,13 @@ export async function handleSelfServe(
     if (path === '/mcp/me' && method === 'GET') {
       const account = await rt.billing.getAccount(userId);
       const tier = effectiveTier(account);
-      const [keys, ledger, orders] = await Promise.all([
+      const [keys, ledger, orders, admin] = await Promise.all([
         rt.store.listByUser(userId),
         account ? rt.billing.ledgerOf(userId, 30) : Promise.resolve([]),
         rt.billing.ordersOf(userId),
+        rt.alipay
+          ? rt.isAdmin(req.headers as any).catch(() => false)
+          : Promise.resolve(false),
       ]);
       return send(res, 200, {
         success: true,
@@ -228,6 +232,8 @@ export async function handleSelfServe(
           })),
           ledger,
           orders: orders.map(orderView),
+          // 管理员可下 1 分钱支付宝测试单（正式收费前验证收银台与到账通知）
+          canTestPay: admin,
         },
       });
     }
@@ -349,6 +355,31 @@ export async function handleSelfServe(
           message: '订单已处理，无需再付款',
         });
       return send(res, 200, { success: true, data: { alipayUrl: url } });
+    }
+
+    // 管理员专用：下一笔 ¥0.01 支付宝测试单（不受免费期限制、不发点、不计营收），
+    // 付款后与正式订单走同一条通知 / 查单 / 发货链路。
+    if (path === '/mcp/me/orders/alipay/test' && method === 'POST') {
+      if (!rt.alipay)
+        return send(res, 400, { success: false, message: '支付宝收款未开通' });
+      if (!(await rt.isAdmin(req.headers as any)))
+        return send(res, 403, {
+          success: false,
+          message: '仅管理员可下测试单',
+        });
+      await rt.billing.activate(userId);
+      const o = await rt.billing.createOrder(
+        userId,
+        PAY_TEST_SKU,
+        PAY_TEST_SKU.listCents
+      );
+      return send(res, 200, {
+        success: true,
+        data: {
+          ...orderView({ ...o, created_at: o.created_at || null }),
+          alipayUrl: alipayUrlOf(rt, o),
+        },
+      });
     }
 
     // 付完跳回官网时调用：主动向支付宝查单，到账即发货（不依赖异步通知是否已到）
