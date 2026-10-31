@@ -190,6 +190,19 @@ const LEGACY_SKUS: Sku[] = [
   desc: '已下架',
 }));
 
+/**
+ * 支付宝收款测试单：仅管理员可下（免费期也能下），¥0.01，不发点、不计入营收统计。
+ * 用于正式收费前真实走一遍收银台 → 异步通知 → 发货。
+ */
+export const PAY_TEST_SKU: Sku = {
+  sku: 'pay_test',
+  name: '支付宝收款测试',
+  kind: 'pack',
+  points: 0,
+  listCents: 1,
+  desc: '仅管理员可下，用于验证支付宝收款，不发点',
+};
+
 /** 在售商品（下单只认这些） */
 export function findSellableSku(sku: string): Sku | undefined {
   return SKUS.find(s => s.sku === sku);
@@ -197,6 +210,7 @@ export function findSellableSku(sku: string): Sku | undefined {
 
 /** 含已下架商品（发货、展示历史订单用） */
 export function findSku(sku: string): Sku | undefined {
+  if (sku === PAY_TEST_SKU.sku) return PAY_TEST_SKU;
   return SKUS.find(s => s.sku === sku) || LEGACY_SKUS.find(s => s.sku === sku);
 }
 
@@ -574,7 +588,8 @@ export class BillingStore {
     const sku = findSku(o.sku);
     if (!sku) return 'ok';
     if (sku.kind === 'plan') await this.applyPlan(o.user_id, sku, orderNo);
-    else await this.addPoints(o.user_id, sku.points, 'pack', orderNo, sku.name);
+    else if (sku.points > 0)
+      await this.addPoints(o.user_id, sku.points, 'pack', orderNo, sku.name);
     return 'ok';
   }
 
@@ -611,11 +626,11 @@ export class BillingStore {
         'SUM(points) points_outstanding FROM mcp_account'
     );
     const revenue = await one(
-      "SELECT COALESCE(SUM(amount_cents),0) paid_cents, COUNT(*) paid_orders FROM mcp_order WHERE status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY)",
+      "SELECT COALESCE(SUM(amount_cents),0) paid_cents, COUNT(*) paid_orders FROM mcp_order WHERE status = 'paid' AND sku <> 'pay_test' AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY)",
       [d]
     );
     const revenueMonth = await one(
-      "SELECT COALESCE(SUM(amount_cents),0) paid_cents, COUNT(*) paid_orders FROM mcp_order WHERE status = 'paid' AND paid_at >= DATE_FORMAT(NOW(), '%Y-%m-01')"
+      "SELECT COALESCE(SUM(amount_cents),0) paid_cents, COUNT(*) paid_orders FROM mcp_order WHERE status = 'paid' AND sku <> 'pay_test' AND paid_at >= DATE_FORMAT(NOW(), '%Y-%m-01')"
     );
     const pending = await one(
       "SELECT COUNT(*) n, COALESCE(SUM(amount_cents),0) cents FROM mcp_order WHERE status = 'self_reported'"
@@ -629,11 +644,11 @@ export class BillingStore {
       [d]
     );
     const dailyRevenue = await this.q(
-      "SELECT DATE(paid_at) day, SUM(amount_cents) cents, COUNT(*) orders FROM mcp_order WHERE status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY DATE(paid_at) ORDER BY day",
+      "SELECT DATE(paid_at) day, SUM(amount_cents) cents, COUNT(*) orders FROM mcp_order WHERE status = 'paid' AND sku <> 'pay_test' AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY DATE(paid_at) ORDER BY day",
       [d]
     );
     const bySku = await this.q(
-      "SELECT sku, COUNT(*) orders, SUM(amount_cents) cents FROM mcp_order WHERE status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY sku ORDER BY cents DESC",
+      "SELECT sku, COUNT(*) orders, SUM(amount_cents) cents FROM mcp_order WHERE status = 'paid' AND sku <> 'pay_test' AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY sku ORDER BY cents DESC",
       [d]
     );
     const topTools = await this.q(
