@@ -5,6 +5,7 @@ import { investServer, InvestDeps, findMacroSeries } from '../src/mcp/tools/inve
 import { METHODOLOGY } from '../src/mcp/methodology';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
 import { McpStore, extractKey, hashKey, generateKey, beijingYmd, ApiKeyRow } from '../src/mcp/store';
+import { PRODUCT_TOOLS } from '../src/mcp/billing';
 
 const call = (name: string, args: any = {}, id: any = 1) => ({
   jsonrpc: '2.0',
@@ -561,10 +562,21 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(r.json.result.isError, true);
       const text = r.json.result.content[0].text;
       assert.ok(text.includes('需要 2 点') && text.includes('剩余 1 点'), text);
-      assert.ok(text.includes('https://www.agent-journey.cn/developer?from=credit_exhausted#pricing'), text);
+      // Invest 的调用引到 Invest 自己的站，不再一律引去 Agent Journey
+      assert.ok(text.includes('https://invest-journey.vercel.app/skills?from=credit_exhausted#pricing'), text);
+      assert.ok(!text.includes('agent-journey.cn'), text);
       assert.ok(text.includes('会员月卡 ¥14.5（原价 ¥29）') && text.includes('加油包 100 点 ¥5（原价 ¥10）'), text);
       assert.ok(!/免费/.test(text), text);
       assert.strictEqual(billing.state.points, 1);
+    });
+
+    it('点数不足 / 余额提醒 / 用量里的链接按产品分流：Agent 回 Agent 站', async () => {
+      const { rt } = userRt(3, NOV);
+      await run(rt, { path: '/mcp/agent', headers: auth, body: call('knowledge_get', { module: 'knowledge', articleKey: 'closure' }) });
+      const r = await run(rt, { path: '/mcp/agent', headers: auth, body: call('knowledge_get', { module: 'knowledge', articleKey: 'closure' }) });
+      const text = r.json.result.content[0].text;
+      assert.ok(text.includes('https://www.agent-journey.cn/developer?from=credit_exhausted#pricing'), text);
+      assert.ok(!text.includes('invest-journey'), text);
     });
 
     it('工具失败退点；免费工具不扣点；未知工具不扣点', async () => {
@@ -625,10 +637,29 @@ describe('MCP HTTP 适配', () => {
         assert.deepStrictEqual(half.json.data.phases.map((p: any) => p.id), ['half', 'full']);
         assert.strictEqual(half.json.data.trialPoints, 50);
         assert.strictEqual(half.json.data.rechargeUrl, 'https://www.agent-journey.cn/developer#pricing');
+        assert.ok(!/Agent|Invest/.test(half.json.data.unit), half.json.data.unit);
         assert.ok(!/免费/.test(half.json.data.promo));
         const hm = half.json.data.skus.find((x: any) => x.sku === 'member_month');
         assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [14.5, 29, true]);
       }
+    });
+
+    it('价目按产品过滤：?product=invest 只给 Invest 的工具与 Invest 站的充值链接；不传给全部', async () => {
+      const all = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing', method: 'GET' });
+      const inv = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=invest', method: 'GET' });
+      const ag = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=agent', method: 'GET' });
+      const bad = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=nope', method: 'GET' });
+      assert.strictEqual(inv.json.data.rechargeUrl, 'https://invest-journey.vercel.app/skills#pricing');
+      assert.strictEqual(inv.json.data.product, 'invest');
+      assert.deepStrictEqual(Object.keys(inv.json.data.toolCost).sort(), PRODUCT_TOOLS.invest.slice().sort());
+      assert.deepStrictEqual(Object.keys(ag.json.data.toolCost).sort(), PRODUCT_TOOLS.agent.slice().sort());
+      assert.strictEqual(ag.json.data.rechargeUrl, 'https://www.agent-journey.cn/developer#pricing');
+      assert.ok(Object.keys(all.json.data.toolCost).includes('market_snapshot') && Object.keys(all.json.data.toolCost).includes('knowledge_get'));
+      assert.strictEqual(bad.json.data.product, null);
+      assert.strictEqual(bad.json.data.rechargeUrl, 'https://www.agent-journey.cn/developer#pricing');
+      // 两张价目表与两个 MCP 实际暴露的工具一一对应，防漂
+      assert.deepStrictEqual(agentServer.tools.map((t: any) => t.name).sort(), PRODUCT_TOOLS.agent.slice().sort());
+      assert.deepStrictEqual(investServer.tools.map((t: any) => t.name).sort(), PRODUCT_TOOLS.invest.slice().sort());
     });
 
     it('免费那天下单返回 400 并说明何时开始收费；11 月起可下单', async () => {

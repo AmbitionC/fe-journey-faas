@@ -76,7 +76,7 @@ describe('知识点 PDF 并入会员权益', () => {
     const paid = controller({ now: PAID_PHASE });
     const status = (await paid.purchaseStatus()).data;
     assert.deepStrictEqual([status.canDownload, status.basis, status.needsLogin], [false, null, false]);
-    assert.strictEqual(status.memberUrl, '/developer');
+    assert.strictEqual(status.memberUrl, '/membership');
     await assert.rejects(paid.list(), /会员/);
     await assert.rejects(paid.download('agent-basics'), /会员/);
   });

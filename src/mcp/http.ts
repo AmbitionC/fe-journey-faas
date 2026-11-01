@@ -17,8 +17,8 @@ import {
   effectiveTier,
   toolCost,
   creditExhaustedMessage,
-  RECHARGE_URL,
 } from './billing';
+import { siteOf } from './sites';
 import {
   handleSelfServe,
   handleBillingAdmin,
@@ -317,13 +317,14 @@ export async function handleMcpHttp(
               creditExhaustedMessage(
                 cost,
                 balance,
-                rt.now ? rt.now() : new Date()
+                rt.now ? rt.now() : new Date(),
+                product
               )
             );
           }
           charged = cost;
           chargedTool = name;
-          notice = lowBalanceNotice(left, cost);
+          notice = lowBalanceNotice(left, cost, product);
           if (notice)
             await track(rt, {
               ...evBase,
@@ -576,8 +577,9 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       planExpireAt: acct?.active ? acct.tier_expire_at : null,
       points: acct?.points ?? 0,
       dailyLimit: TIERS[tier].dailyLimit,
-      manage: 'https://www.agent-journey.cn/developer',
-      recharge: RECHARGE_URL,
+      // 管理页与充值页按产品：Invest 的 Key 不把用户引到 Agent Journey
+      manage: siteOf(product).manage,
+      recharge: siteOf(product).recharge,
       onboarding: onboardingFor(product, tier, acct?.points ?? 0),
     };
   };

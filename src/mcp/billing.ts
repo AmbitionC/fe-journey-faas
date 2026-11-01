@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
-import { QueryFn } from './store';
+import { QueryFn, Product } from './store';
+import { SITES, rechargeLink } from './sites';
 
 /**
  * Journey 点计费：账户余额、会员档位、按次扣点、订单。
@@ -46,8 +47,11 @@ export const MEMBER_MONTHLY_POINTS = 400;
  */
 export const TRIAL_POINTS = 50;
 
-/** 点数用完时引导用户去的充值页（Skill 报错信息、/mcp/pricing、account_usage 都用这一个） */
-export const RECHARGE_URL = 'https://www.agent-journey.cn/developer#pricing';
+/**
+ * @deprecated 充值页按产品取：`siteOf(product).recharge`（./sites.ts）。
+ * 这里只保留 Agent Journey 的那一条给没有产品上下文的老调用方。
+ */
+export const RECHARGE_URL = SITES.agent.recharge;
 
 export interface Sku {
   sku: string;
@@ -220,7 +224,8 @@ export const PAY_TEST_SKU: Sku = {
 export function creditExhaustedMessage(
   cost: number,
   balance: number,
-  now = new Date()
+  now = new Date(),
+  product: Product = 'agent'
 ): string {
   const phase = currentPhase(now);
   const yuan = (c: number) =>
@@ -240,10 +245,7 @@ export function creditExhaustedMessage(
     .join('；');
   return (
     `Journey 点数不足：本次调用需要 ${cost} 点，账户剩余 ${balance} 点（体验额度已用完）。` +
-    `请到 ${RECHARGE_URL.replace(
-      '#',
-      '?from=credit_exhausted#'
-    )} 充值后继续使用：${options}。` +
+    `请到 ${rechargeLink('credit_exhausted', product)} 充值后继续使用：${options}。` +
     '充值到账后直接重试即可，Key 不用换。'
   );
 }
@@ -281,6 +283,42 @@ export const TOOL_COST: Record<string, number> = {
 
 export function toolCost(tool: string): number {
   return TOOL_COST[tool] ?? 1;
+}
+
+/**
+ * 每个产品对外的工具名（与 tools/agent.ts、tools/invest.ts 的 tools 一一对应，单测钉住不漂）。
+ * /mcp/pricing?product= 据此只下发该产品的价目：两个站各自只讲自己的工具。
+ */
+export const PRODUCT_TOOLS: Record<Product, string[]> = {
+  agent: [
+    'knowledge_tree',
+    'knowledge_search',
+    'knowledge_get',
+    'interview_search',
+    'interview_get',
+    'interview_topics',
+    'mission_list',
+    'mission_get',
+    'quiz_get',
+    'account_usage',
+  ],
+  invest: [
+    'market_snapshot',
+    'fear_series',
+    'bias_series',
+    'macro_series',
+    'indicator_list',
+    'methodology_get',
+    'account_usage',
+  ],
+};
+
+/** 某产品的价目（工具 → 点数）；不传产品返回全部。 */
+export function toolCostFor(product?: Product | null): Record<string, number> {
+  if (!product) return TOOL_COST;
+  const out: Record<string, number> = {};
+  for (const t of PRODUCT_TOOLS[product]) out[t] = toolCost(t);
+  return out;
 }
 
 export interface Account {

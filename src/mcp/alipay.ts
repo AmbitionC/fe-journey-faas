@@ -157,6 +157,8 @@ export interface PayOrder {
   orderNo: string;
   amountCents: number;
   subject: string;
+  /** 付款完成后的回跳页；不传用配置里的默认（Agent Journey）。按下单站点传，Invest 的单回 Invest 站 */
+  returnUrl?: string;
 }
 
 /**
@@ -172,7 +174,7 @@ export function pagePayUrl(
 ): string {
   const params: Record<string, string> = {
     ...commonParams(cfg, 'alipay.trade.page.pay', now),
-    return_url: cfg.returnUrl,
+    return_url: o.returnUrl || cfg.returnUrl,
     biz_content: JSON.stringify({
       out_trade_no: o.orderNo,
       total_amount: (o.amountCents / 100).toFixed(2),

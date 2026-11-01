@@ -47,6 +47,6 @@ export const PDF_MEMBER_BENEFIT = Object.freeze({
   /** ¥9.9 单卖已下架；老买家下载资格永久保留 */
   saleClosed: true,
   legacy: LEGACY_PDF_PRODUCT,
-  /** 开通会员的页面 */
-  memberUrl: '/developer',
+  /** 开通会员的页面（Agent Journey 会员页；Skill 接入在 /developer） */
+  memberUrl: '/membership',
 });

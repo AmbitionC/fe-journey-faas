@@ -142,6 +142,22 @@ describe('MCP 支付宝网页收款', () => {
     assert.strictEqual(biz.product_code, 'FAST_INSTANT_TRADE_PAY');
     assert.ok(!/[/=&]/.test(biz.subject));
     assert.ok(rsaVerify(signContent(p), p.sign, app.pubPem));
+    assert.strictEqual(p.return_url, cfg.returnUrl);
+  });
+
+  it('付款链接可按下单站点指定回跳页（Invest 的单付完回 Invest 站）', () => {
+    const url = new URL(
+      pagePayUrl(cfg, {
+        orderNo: 'MJ20261101ABCDEF12',
+        amountCents: 1450,
+        subject: 'Invest Journey 会员与点数 · 会员月卡',
+        returnUrl: 'https://invest-journey.vercel.app/skills',
+      })
+    );
+    const p: Record<string, string> = {};
+    url.searchParams.forEach((v, k) => (p[k] = v));
+    assert.strictEqual(p.return_url, 'https://invest-journey.vercel.app/skills');
+    assert.ok(rsaVerify(signContent(p), p.sign, app.pubPem));
   });
 
   it('通知验签：支付宝签的通过，被篡改或别人签的不通过', () => {
