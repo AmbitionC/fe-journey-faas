@@ -65,7 +65,8 @@ export class UserService {
       .exec();
     return {
       success: true,
-      data: { ...omit(entity, ['password']), expire, token },
+      // 验证码与 captchaId 是请求参数、不是用户属性，不回显（此前随 entity 原样透出）
+      data: { ...omit(entity, ['password', 'captcha', 'captchaId']), expire, token },
     };
   }
 

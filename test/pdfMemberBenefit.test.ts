@@ -33,6 +33,7 @@ describe('知识点 PDF 并入会员权益', () => {
     assert.strictEqual(r.legacy.priceCents, 990);
     assert.strictEqual(r.membership.phase.id, 'half');
     assert.strictEqual(r.membership.freeClaim, false);
+    assert.strictEqual(r.membership.freeClaimUntil, null);
     const month = r.membership.plans.find((p: any) => p.sku === 'member_month');
     assert.strictEqual(month.listPrice, 29);
     assert.strictEqual(month.price, 14.5);
@@ -45,7 +46,8 @@ describe('知识点 PDF 并入会员权益', () => {
     assert.strictEqual(r.membership.phase.id, 'half');
     assert.strictEqual(r.membership.freeClaim, true);
     assert.ok(r.membership.plans.every((p: any) => p.purchasable === true && p.price > 0));
-    assert.ok(r.message.includes('公测期') && r.message.includes('12 月 1 日'));
+    assert.ok(r.message.includes('12 月 1 日前') && r.message.includes('免费领取'));
+    assert.strictEqual(r.membership.freeClaimUntil, '2026-12-01');
     assert.strictEqual(pdfFreeClaimActive(FREE_PHASE), true);
     assert.strictEqual(pdfFreeClaimActive(new Date('2026-11-30T23:59:59+08:00')), true);
     assert.strictEqual(pdfFreeClaimActive(new Date('2026-12-01T00:00:00+08:00')), false);

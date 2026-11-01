@@ -39,6 +39,23 @@ export class MissionService {
     }
   }
 
+  /**
+   * 幂等导入种子题卡：只插入库里还没有的 slug，已存在的（含后台改过的）一律不动。
+   * 返回实际插入条数。不受 missionEnabled 开关影响（只写库，不对外）。
+   */
+  async seedMissions(seed: Partial<MissionEntity>[]): Promise<number> {
+    if (!seed.length) return 0;
+    const existing = await this.missionModel.find({
+      where: { slug: In(seed.map(m => m.slug)) },
+      select: ['slug'],
+    });
+    const have = new Set(existing.map(m => m.slug));
+    const fresh = seed.filter(m => !have.has(m.slug));
+    if (!fresh.length) return 0;
+    await this.missionModel.save(fresh.map(m => this.missionModel.create(m)));
+    return fresh.length;
+  }
+
   /** 题卡详情 + 当前用户的做题状态。 */
   async detail(slug: string, userId: string): Promise<any> {
     this.ensureEnabled();

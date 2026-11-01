@@ -65,7 +65,7 @@ const SPECS: Record<Product, ServerSpec<any>> = {
 };
 const MAX_BODY = 1024 * 1024;
 const KEY_HELP =
-  '缺少或无效的 API Key：请在请求头带 Authorization: Bearer jk_xxx（Key 申请见 Skill 仓库 README）。';
+  '缺少或无效的 API Key：请在请求头带 Authorization: Bearer jk_xxx（登录 https://www.agent-journey.cn/developer 开通并创建 Key）。';
 
 function setCors(res: ServerResponse) {
   // 纯 Bearer 鉴权、不用 Cookie，放开任意来源（浏览器内的 MCP 客户端也能连）

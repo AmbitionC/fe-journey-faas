@@ -14,7 +14,7 @@ import { MaterialsService } from '../service/materials';
 import { EntitlementService } from '../service/entitlement';
 import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
-import { PDF_MEMBER_BENEFIT, PdfAccessBasis, pdfFreeClaimActive } from '../common/commerce';
+import { PDF_FREE_CLAIM_UNTIL, PDF_MEMBER_BENEFIT, PdfAccessBasis, pdfFreeClaimActive } from '../common/commerce';
 import { OrderService } from '../service/order';
 import { SKUS, currentPhase, phasePrice } from '../mcp/billing';
 
@@ -58,8 +58,9 @@ export class MaterialsHTTPService {
       listPrice: s.listCents / 100, price: phasePrice(s, phase.id) / 100,
       purchasable: phase.id !== 'free',
     }));
+    // 口径与 Skill 页一致：Skill 已收费（新用户送 50 点），PDF 是会员权益，只有「领取」在 12-01 前对登录用户免费
     const message = freeClaim
-      ? '公测期登录即可领取全部 PDF；12 月 1 日起仅会员可下载，现在开通会员享早期用户半价。'
+      ? '12 月 1 日前登录即可免费领取全部 PDF；之后仅会员可下载。开通会员现在享早期用户半价，Skill 点数一并到账。'
       : '开通会员即可下载全部 PDF；已购 ¥9.9 资料的用户继续可下载。';
     return {
       success: true,
@@ -69,7 +70,13 @@ export class MaterialsHTTPService {
         ready: groups.some(g => g.items.length > 0),
         // 老前端据此隐藏付款按钮：单卖已下架，永远为 false
         purchasingEnabled: false,
-        membership: { phase: { id: phase.id, name: phase.name, next: phase.next }, plans, freeClaim },
+        membership: {
+          phase: { id: phase.id, name: phase.name, next: phase.next },
+          plans,
+          freeClaim,
+          // 免费领取截止日（北京时间，当日 0 点起不可领），前端文案据此生成、不写死日期
+          freeClaimUntil: freeClaim ? PDF_FREE_CLAIM_UNTIL : null,
+        },
         message,
       },
     };

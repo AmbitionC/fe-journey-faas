@@ -581,6 +581,8 @@ export class BillingStore {
       sku: sku.sku,
       amount_cents: amountCents,
       status: 'pending',
+      // 与复用分支（SELECT 回来的 created_at）对齐，前端订单弹框据此显示下单时间
+      created_at: new Date(),
       reused: false,
     };
   }
