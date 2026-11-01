@@ -145,11 +145,11 @@ describe('MCP 计费（真 MySQL）', function () {
     const s = await b.stats(30);
     assert.ok(s.revenue.windowCents >= phasePrice(pack, 'half'));
     assert.ok(s.users.total >= 1);
-    // 失败退点要从热门工具的点数里扣掉（u2 扣 60 后退回 60）
+    // 失败退点要从热门工具的点数里扣掉（u2 扣 30 后退回 30）
     const x = s.topTools.find((t: any) => t.tool === 'x');
     assert.ok(Number(x.failed) >= 1);
     const charged = await q("SELECT SUM(-delta) n FROM mcp_points_ledger WHERE reason = 'call' AND ref = 'x'");
-    assert.strictEqual(Number(x.points), Number(charged[0].n) - 60);
+    assert.strictEqual(Number(x.points), Number(charged[0].n) - 30);
   });
 
   it('支付宝测试单：不在售、发货不加点不记流水、不计入营收', async () => {
