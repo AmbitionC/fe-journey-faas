@@ -2,10 +2,16 @@ import * as assert from 'assert';
 import {
   aggregateTopics,
   buildQuestionIndex,
+  buildSheet,
+  decideSheetQuota,
+  extractQuestionBlocks,
   FREE_TOPIC_LIMIT,
+  leafKeysUnder,
   pickExamples,
   sanitizeKeys,
+  sheetSignature,
 } from '../src/common/interviewTopics';
+import { extractQuestions } from '../src/mcp/tools/agent';
 
 const q = (key: string, text: string) =>
   `<details data-knowledge-key="${key}"><summary>${text}</summary></details>\n<p>答</p>\n`;
@@ -137,5 +143,114 @@ describe('面经高频考点榜', () => {
       ['bd-1', 'tx-1']
     );
     assert.deepStrictEqual(sanitizeKeys('bd-1'), []);
+  });
+
+  it('题单取题与 Skill 同一口径，并带上题下第一段答题思路', () => {
+    const md = [
+      '公司：字节；方向：Agent。',
+      '',
+      '<details data-knowledge-key="rag-reranking">',
+      '<summary>（1）粗排与二阶段**重排**怎样实现？</summary>',
+      '</details>',
+      '',
+      '知识导航：[重排](../x.md)',
+      '',
+      '先融合、去重多路召回候选，再用 [Cross-Encoder](https://x.y) 给 `query` 与候选打分。',
+      '',
+      '第二段不取。',
+      '',
+      '<details data-knowledge-key="bg">',
+      '<summary>（2）背景学习入口：RAG</summary>',
+      '</details>',
+      '',
+      '<details data-knowledge-key="agent-eval">',
+      '<summary>（3）一面：怎样评估？</summary>',
+      '</details>',
+      '',
+      '<details data-knowledge-key="agent-eval"><summary><strong>（4）离线评测怎样做？</strong></summary></details>',
+      '<p>先固定样本与<strong>评分规则</strong>。</p>',
+      '',
+      '<details data-knowledge-key="agent-eval"><summary>（5）只有图</summary></details>',
+      '',
+      '<img src="x.png">',
+      '',
+      '## 面试口述迁移',
+      '',
+      '这一段属于下一个标题，不是答案。',
+    ].join('\n');
+    const blocks = extractQuestionBlocks(md);
+    assert.deepStrictEqual(
+      blocks.map(({ key, question }) => ({ key, question })),
+      extractQuestions(md)
+    );
+    assert.strictEqual(
+      blocks[0].answer,
+      '先融合、去重多路召回候选，再用 Cross-Encoder 给 query 与候选打分。'
+    );
+    assert.strictEqual(blocks[1].question, '怎样评估？');
+    assert.strictEqual(blocks[1].answer, '');
+    assert.strictEqual(blocks[2].question, '离线评测怎样做？');
+    assert.strictEqual(blocks[2].answer, '先固定样本与评分规则。');
+    assert.strictEqual(blocks[3].answer, '');
+  });
+
+  it('题单按考点归组，同一道题只留一次', () => {
+    const dupIndex = buildQuestionIndex(
+      navData,
+      new Map([
+        ...contents,
+        ['tx-1', q('rag-pipeline', '（1）RAG 链路怎么设计？') + q('mcp-protocol', '（2）MCP')],
+      ])
+    );
+    const sheet = buildSheet(dupIndex, { knowledgeTitles });
+    assert.strictEqual(sheet.articlesAnalyzed, 3);
+    const rag = sheet.topics[0];
+    assert.strictEqual(rag.topic, 'RAG 完整流程');
+    assert.strictEqual(rag.articles, 2);
+    // bd-1 两道 + tx-1 一道与 bd-1 文字相同 → 去重后两道
+    assert.deepStrictEqual(
+      rag.questions.map(x => x.question),
+      ['RAG 链路怎么设计？', '追问：召回不准怎么办？']
+    );
+    assert.strictEqual(
+      sheet.totalQuestions,
+      sheet.topics.reduce((n, t) => n + t.questions.length, 0)
+    );
+    const only = buildSheet(dupIndex, { keys: ['bd-2'], knowledgeTitles });
+    assert.deepStrictEqual(
+      only.topics.map(t => t.knowledgeKey).sort(),
+      ['mysql-index', 'redis-cache']
+    );
+  });
+
+  it('简历与面试这类非技术考点放到题单最后', () => {
+    const career = leafKeysUnder(
+      [
+        { key: 'agent-llm', children: [{ key: 'rag-pipeline', isLeaf: true }] },
+        {
+          key: 'career',
+          children: [
+            { key: 'c1', children: [{ key: 'redis-cache', isLeaf: true }] },
+          ],
+        },
+      ],
+      'career'
+    );
+    assert.deepStrictEqual([...career], ['redis-cache']);
+    const sheet = buildSheet(index, { knowledgeTitles, lastKeys: career });
+    assert.strictEqual(sheet.topics[sheet.topics.length - 1].knowledgeKey, 'redis-cache');
+    assert.strictEqual(sheet.topics[0].knowledgeKey, 'rag-pipeline');
+  });
+
+  it('题单标识与面经顺序无关', () => {
+    assert.strictEqual(sheetSignature(['b', 'a']), sheetSignature(['a', 'b']));
+    assert.notStrictEqual(sheetSignature(['a']), sheetSignature(['a', 'b']));
+  });
+
+  it('未开通会员每月 1 份题单：先确认再领，同一份重复打开不扣，换一份锁住', () => {
+    assert.strictEqual(decideSheetQuota(null, 's1', false), 'needsConfirm');
+    assert.strictEqual(decideSheetQuota(null, 's1', true), 'claim');
+    assert.strictEqual(decideSheetQuota({ sig: 's1' }, 's1', false), 'ok');
+    assert.strictEqual(decideSheetQuota({ sig: 's1' }, 's2', true), 'locked');
   });
 });

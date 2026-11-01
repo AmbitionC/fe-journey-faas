@@ -20,9 +20,28 @@ import {
   aggregateTopics,
   ArticleQuestions,
   buildQuestionIndex,
+  buildSheet,
+  decideSheetQuota,
   FREE_TOPIC_LIMIT,
+  leafKeysUnder,
   sanitizeKeys,
+  sheetSignature,
 } from '../common/interviewTopics';
+
+/** 未开通会员每月可导出的题单份数（同一批面经重复打开不再扣）。 */
+const FREE_SHEETS_PER_MONTH = 1;
+const SHEET_QUOTA_TTL = 40 * 24 * 60 * 60;
+
+/** 北京时间的年月，作为免费额度的计数周期。 */
+function beijingMonth(now = Date.now()): string {
+  return new Date(now + 8 * 60 * 60 * 1000).toISOString().slice(0, 7);
+}
+
+function sanitizeTitle(raw: unknown): string {
+  return typeof raw === 'string'
+    ? raw.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 60)
+    : '';
+}
 
 /** 进程内缓存：题目索引按目录版本失效，最长 10 分钟。 */
 const INDEX_TTL_MS = 10 * 60 * 1000;
@@ -31,6 +50,7 @@ let cached: {
   at: number;
   index: ArticleQuestions[];
   knowledge: Map<string, { title: string; path: string }>;
+  careerKeys: Set<string>;
 } | null = null;
 
 /**
@@ -81,8 +101,16 @@ export class InterviewTopicsHTTPService {
       at: Date.now(),
       index: buildQuestionIndex(interview.navData || [], contents),
       knowledge: navIndex(knowledge.navData || []),
+      careerKeys: leafKeysUnder(knowledge.navData || [], 'career'),
     };
     return cached;
+  }
+
+  private async currentUserId(): Promise<string> {
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    return info?.userId && !String(info.userId).startsWith('guest:')
+      ? String(info.userId)
+      : '';
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -95,11 +123,7 @@ export class InterviewTopicsHTTPService {
   @NoAuth()
   async topics(@Body(ALL) body: { keys?: unknown; limit?: number }) {
     const keys = sanitizeKeys(body?.keys);
-    const info = await resolveUserInfo(this.ctx, this.redisService);
-    const userId =
-      info?.userId && !String(info.userId).startsWith('guest:')
-        ? String(info.userId)
-        : '';
+    const userId = await this.currentUserId();
     const unlocked = userId
       ? (await this.entitlementService.check(userId, 'interview_topics_full'))
           .allowed
@@ -120,5 +144,74 @@ export class InterviewTopicsHTTPService {
         freeLimit: FREE_TOPIC_LIMIT,
       },
     };
+  }
+
+  /**
+   * 题单：把当前筛出来的那批面经里的全部题按考点归组，附第一段答题思路，前端排版后存成 PDF。
+   * 会员不限；未开通每月 1 份（先返回 needsConfirm，前端确认后带 confirm 再领），
+   * 同一批面经重复打开不再扣；未登录需先登录。
+   */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '面经题单（按当前筛选的那批面经出全部题与答题要点；会员不限，未开通每月 1 份）',
+    functionName: 'interviewSheet',
+    name: 'interviewSheet',
+    path: '/interview/sheet',
+    method: 'post',
+  })
+  @NoAuth()
+  async sheet(
+    @Body(ALL) body: { keys?: unknown; title?: unknown; confirm?: boolean }
+  ) {
+    const keys = sanitizeKeys(body?.keys);
+    const title = sanitizeTitle(body?.title);
+    const userId = await this.currentUserId();
+    if (!userId) return { success: true, data: { needsLogin: true } };
+
+    const member = (
+      await this.entitlementService.check(userId, 'interview_sheet')
+    ).allowed;
+    const { index, knowledge, careerKeys } = await this.loadIndex();
+    const sheet = buildSheet(index, {
+      keys,
+      knowledgeTitles: knowledge,
+      lastKeys: careerKeys,
+    });
+    const base = { member, freeLimit: FREE_SHEETS_PER_MONTH, title };
+    if (member || !sheet.totalQuestions)
+      return { success: true, data: { ...base, ...sheet } };
+
+    const quotaKey = `interview_sheet:${beijingMonth()}:${userId}`;
+    const sig = sheetSignature(keys);
+    const readUsed = async (): Promise<{ sig?: string; title?: string } | null> => {
+      const raw = await this.redisService.get(quotaKey);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return { sig: raw };
+      }
+    };
+    let used = await readUsed();
+    let decision = decideSheetQuota(used, sig, !!body?.confirm);
+    if (decision === 'needsConfirm')
+      return { success: true, data: { ...base, needsConfirm: true } };
+    if (decision === 'claim') {
+      const claimed = await this.redisService.set(
+        quotaKey,
+        JSON.stringify({ sig, title }),
+        'EX',
+        SHEET_QUOTA_TTL,
+        'NX'
+      );
+      // 并发下别的请求先领了：按它领到的那份重新判定
+      used = claimed ? { sig, title } : await readUsed();
+      decision = decideSheetQuota(used, sig, false);
+    }
+    if (decision !== 'ok')
+      return {
+        success: true,
+        data: { ...base, locked: true, usedTitle: used?.title || '' },
+      };
+    return { success: true, data: { ...base, ...sheet, freeUsed: true } };
   }
 }

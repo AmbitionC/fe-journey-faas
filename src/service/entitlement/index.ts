@@ -46,6 +46,8 @@ const BENEFITS: Record<string, BenefitDef> = {
   materials_pdf: { memberOnly: true },
   // 面经高频考点榜：完整榜单与每个考点的全部原题（2026-11-01 起；面经正文本身免费，未开通看前 3 条）
   interview_topics_full: { memberOnly: true },
+  // 面经题单 PDF：会员不限；未开通每月 1 份由 function/interviewTopics.ts 单独计数（同一批面经重复打开不扣）
+  interview_sheet: { memberOnly: true },
 };
 
 export interface CheckResult {
