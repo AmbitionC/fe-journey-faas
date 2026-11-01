@@ -36,9 +36,10 @@ export interface TrackInput {
  * - key_created          { tier, activeKeys }
  * - key_revoked          { keyId }
  * - mcp_initialize       { clientName, clientVersion, protocolVersion, via }
- * - auth_failed          { reason: 'missing'|'invalid'|'scope', via }
+ * - auth_failed          { reason: 'missing'|'env_unset'|'bad_format'|'invalid'|'revoked'|'scope', via }
  * - quota_exceeded       { tool, limit, tier }
  * - credit_exhausted     { tool, cost, balance, tier, phase }
+ * - credit_low           { tool, cost, balance, tier }  余额第一次跌破 10 点，工具结果末尾附提醒
  * - order_created        { orderNo, sku, amountCents, listCents, phase, reused }
  * - pay_link_issued      { orderNo, channel: 'alipay' }
  * - order_reported       { orderNo }
@@ -54,6 +55,7 @@ export const SERVER_EVENTS = [
   'auth_failed',
   'quota_exceeded',
   'credit_exhausted',
+  'credit_low',
   'order_created',
   'pay_link_issued',
   'order_reported',
@@ -75,6 +77,7 @@ export const WEB_EVENTS = [
   'pricing_view', // 看到价目 { phase }
   'pay_return', // 从支付宝跳回 { orderNo, paid }
   'error_shown', // 页面上给用户看到的报错 { label, message }
+  'onboarding_step', // 上手进度条走到某一步 { step: activated|key|connected|first_call|done, client }
 ] as const;
 
 /** Skill 页 → 产品（漏斗按产品拆分用） */

@@ -1,4 +1,5 @@
 import { ToolDef, ToolError, ServerSpec } from '../protocol';
+import { ONBOARDING_INSTRUCTIONS } from '../onboarding';
 
 /**
  * Agent Journey 的 MCP 工具（第一版：只读）。
@@ -323,7 +324,7 @@ export const agentTools: ToolDef<AgentDeps>[] = [
         ...(items.length
           ? {}
           : {
-              note: '站内没有相关文章。请如实告诉用户本站未覆盖这个主题，不要编造出处。',
+              note: '站内没有相关文章。可以换个说法或更通用的关键词再搜一次，或用 knowledge_tree 看目录；仍没有就如实告诉用户本站未覆盖这个主题，不要编造出处。',
             }),
       };
     },
@@ -695,7 +696,8 @@ export const agentTools: ToolDef<AgentDeps>[] = [
   {
     name: 'account_usage',
     title: '今日用量',
-    description: '查看当前 API Key 的今日调用次数与每日上限。',
+    description:
+      '查看点数余额、今日调用次数与每日上限；体验用户还会返回 onboarding（能做什么、示例问法）。不扣点，用户第一次使用时先调它。',
     inputSchema: { type: 'object', properties: {} },
     handler: async (_a, d) => d.usage(),
   },
@@ -707,6 +709,7 @@ export const agentServer: ServerSpec<AgentDeps> = {
   instructions:
     'Agent Journey 数据服务：前端/AI 工程知识体系、真实面经、实战题卡与自测题。' +
     '回答技术问题先 knowledge_search 再 knowledge_get，引用时附上文章标题与链接；' +
-    '面试准备：问某公司 / 岗位高频考点用 interview_topics，查具体面经用 interview_search 再 interview_get(articleKey)；做项目练习用 mission_list / mission_get 并按验收标准自查。',
+    '面试准备：问某公司 / 岗位高频考点用 interview_topics，查具体面经用 interview_search 再 interview_get(articleKey)；做项目练习用 mission_list / mission_get 并按验收标准自查。' +
+    ONBOARDING_INSTRUCTIONS,
   tools: agentTools,
 };

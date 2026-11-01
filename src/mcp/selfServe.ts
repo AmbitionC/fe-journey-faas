@@ -290,6 +290,7 @@ export async function handleSelfServe(
             status: k.status,
             createdAt: k.created_at,
             lastUsedAt: k.last_used_at,
+            connectedAt: k.connected_at || null,
           })),
           ledger,
           orders: orders.map(orderView),

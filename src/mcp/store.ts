@@ -22,6 +22,8 @@ export interface ApiKeyRow {
   daily_limit: number;
   created_at: string;
   last_used_at: string | null;
+  /** 第一次 MCP 握手（initialize）的时间：Skill 页据此显示「已连通」 */
+  connected_at?: string | null;
   /** 自助开通的 Key 归属的平台用户；管理员手发的为 null（不扣点）。 */
   user_id?: string | null;
 }
@@ -112,6 +114,12 @@ export class McpStore {
             'ALTER TABLE mcp_api_key ADD COLUMN user_id VARCHAR(64) NULL, ADD KEY idx_mcp_key_user (user_id)'
           );
         }
+        // 第四版（新用户引导）：第一次握手时间
+        if (!names.has('connected_at')) {
+          await this.q(
+            'ALTER TABLE mcp_api_key ADD COLUMN connected_at DATETIME NULL'
+          );
+        }
         // 第三版（埋点）：调用日志补「实扣点数」与「客户端」两列
         const logCols = await this.q(
           "SELECT COLUMN_NAME c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mcp_call_log'"
@@ -140,11 +148,30 @@ export class McpStore {
   async findActive(key: string): Promise<ApiKeyRow | null> {
     await this.ensureSchema();
     const rows = await this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, user_id ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id ' +
         "FROM mcp_api_key WHERE key_hash = ? AND status = 'active' LIMIT 1",
       [hashKey(key)]
     );
     return rows && rows[0] ? rows[0] : null;
+  }
+
+  /** Key 的状态（不论是否有效）：'revoked' 时报错提示新建，查不到返回 null。 */
+  async statusOf(key: string): Promise<string | null> {
+    await this.ensureSchema();
+    const rows = await this.q(
+      'SELECT status FROM mcp_api_key WHERE key_hash = ? LIMIT 1',
+      [hashKey(key)]
+    );
+    return rows && rows[0] ? String(rows[0].status) : null;
+  }
+
+  /** 记第一次握手时间（只写一次）。 */
+  async markConnected(keyId: number): Promise<void> {
+    await this.ensureSchema();
+    await this.q(
+      'UPDATE mcp_api_key SET connected_at = NOW() WHERE id = ? AND connected_at IS NULL',
+      [keyId]
+    );
   }
 
   async create(p: {
@@ -184,7 +211,7 @@ export class McpStore {
   async list(): Promise<ApiKeyRow[]> {
     await this.ensureSchema();
     return this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, user_id ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id ' +
         'FROM mcp_api_key ORDER BY id DESC LIMIT 500'
     );
   }
@@ -193,7 +220,7 @@ export class McpStore {
   async listByUser(userId: string): Promise<ApiKeyRow[]> {
     await this.ensureSchema();
     return this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, user_id ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id ' +
         'FROM mcp_api_key WHERE user_id = ? ORDER BY id DESC LIMIT 50',
       [userId]
     );
