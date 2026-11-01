@@ -13,6 +13,7 @@ import { DefaultErrorFilter } from './filter/default';
 import { AuthErrorFilter } from './filter/auth';
 import { ValidateErrorFilter } from './filter/validate';
 import { seedSwordOffer } from './bootstrap/seedSwordOffer';
+import { seedMissions } from './bootstrap/seedMissions';
 import { ensureInvestAdmin } from './bootstrap/ensureInvestAdmin';
 
 @Configuration({
@@ -53,6 +54,9 @@ export class MainConfiguration implements ILifeCycle {
 
     // 幂等导入剑指 Offer 题库(仅首次冷启动实际写入；自带 try/catch，不阻断启动)。
     await seedSwordOffer(this.app.getApplicationContext());
+
+    // 幂等导入首批实战题卡(按 slug 判重，不覆盖后台改过的内容)。
+    await seedMissions(this.app.getApplicationContext());
 
     // 幂等提升投资驾驶舱管理员(自带 try/catch，不阻断启动)。
     await ensureInvestAdmin(this.app.getApplicationContext());
