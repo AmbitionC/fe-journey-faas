@@ -3,6 +3,7 @@ import {
   aggregateTopics,
   buildQuestionIndex,
   FREE_TOPIC_LIMIT,
+  pickExamples,
   sanitizeKeys,
 } from '../src/common/interviewTopics';
 
@@ -111,6 +112,23 @@ describe('面经高频考点榜', () => {
       assert.ok(t.articles > 0 && t.topic);
     });
     assert.ok(r.topics.some(t => t.locked));
+  });
+
+  it('原题按公司轮流挑', () => {
+    const ex = (company: string, n: number) => ({
+      question: `${company}${n}`,
+      articleKey: `${company}-${n}`,
+      title: '',
+      company,
+    });
+    const picked = pickExamples(
+      [ex('字节', 1), ex('字节', 2), ex('字节', 3), ex('腾讯', 1), ex('美团', 1)],
+      4
+    );
+    assert.deepStrictEqual(
+      picked.map(e => e.question),
+      ['字节1', '腾讯1', '美团1', '字节2']
+    );
   });
 
   it('请求里的 keys 只收合法字符串', () => {

@@ -103,11 +103,8 @@ export function aggregateTopics(
             (t.companies.get(article.company) || 0) + 1
           );
       }
-      // 同一篇只取一道作原题，原题尽量来自不同面经
-      if (
-        t.examples.length < MAX_EXAMPLES &&
-        !t.examples.some(e => e.articleKey === article.articleKey)
-      ) {
+      // 同一篇只取一道作候选原题；最终按公司轮流挑，见 pickExamples
+      if (!t.examples.some(e => e.articleKey === article.articleKey)) {
         t.examples.push({
           question: q.question,
           articleKey: article.articleKey,
@@ -135,11 +132,37 @@ export function aggregateTopics(
       companies: [...t.companies.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .map(([c]) => c),
-      examples: locked ? [] : t.examples,
+      examples: locked ? [] : pickExamples(t.examples),
       locked,
     };
   });
   return { articlesAnalyzed: scope.length, totalTopics: ranked.length, topics };
+}
+
+/** 原题按公司轮流挑，免得前几道全是收录最多的那家。 */
+export function pickExamples(
+  candidates: TopicExample[],
+  max = MAX_EXAMPLES
+): TopicExample[] {
+  const byCompany = new Map<string, TopicExample[]>();
+  for (const e of candidates) {
+    const list = byCompany.get(e.company) || [];
+    list.push(e);
+    byCompany.set(e.company, list);
+  }
+  const queues = [...byCompany.values()];
+  const out: TopicExample[] = [];
+  for (let round = 0; out.length < max; round++) {
+    let added = false;
+    for (const q of queues) {
+      if (round < q.length && out.length < max) {
+        out.push(q[round]);
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+  return out;
 }
 
 /** 请求体里的 keys：只收字符串、去重、截断。 */
