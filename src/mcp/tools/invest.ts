@@ -1,5 +1,6 @@
 import { ToolDef, ToolError, ServerSpec } from '../protocol';
 import { METHODOLOGY, INDICATORS } from '../methodology';
+import { ONBOARDING_INSTRUCTIONS } from '../onboarding';
 
 /**
  * Invest Journey 的 MCP 工具（第一版：只读读数 + 口径）。
@@ -341,7 +342,8 @@ export const investTools: ToolDef<InvestDeps>[] = [
   {
     name: 'account_usage',
     title: '今日用量',
-    description: '查看当前 API Key 的今日调用次数与每日上限。',
+    description:
+      '查看点数余额、今日调用次数与每日上限；体验用户还会返回 onboarding（能做什么、示例问法）。不扣点，用户第一次使用时先调它。',
     inputSchema: { type: 'object', properties: {} },
     handler: async (_a, d) => d.usage(),
   },
@@ -353,6 +355,7 @@ export const investServer: ServerSpec<InvestDeps> = {
   instructions:
     'Invest Journey 数据服务：A 股市场加工读数（恐慌指数、宽基相对长期中枢位置、乖离率、股息率、宏观数据）与完整口径。' +
     '先 market_snapshot 看全貌，再按需取历史序列；解释任何数字前用 methodology_get 查口径。' +
-    '所有数据仅供研究，不构成投资建议；不要把读数直接说成买卖指令，用户的仓位与风险偏好由用户自己决定。',
+    '所有数据仅供研究，不构成投资建议；不要把读数直接说成买卖指令，用户的仓位与风险偏好由用户自己决定。' +
+    ONBOARDING_INSTRUCTIONS,
   tools: investTools,
 };

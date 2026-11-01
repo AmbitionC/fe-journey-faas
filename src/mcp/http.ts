@@ -26,6 +26,14 @@ import {
 } from './selfServe';
 import { AlipayConfig, loadAlipayConfig } from './alipay';
 import { Analytics, clientOf, sanitizeWebBatch, track } from './analytics';
+import {
+  AuthFailReason,
+  authHelp,
+  lowBalanceNotice,
+  missingKeyReason,
+  onboardingFor,
+  scopeHelp,
+} from './onboarding';
 
 /**
  * MCP 的 HTTP 适配层（server.js 在 Midway 之外直接分流 /mcp/* 到这里）。
@@ -68,8 +76,6 @@ const SPECS: Record<Product, ServerSpec<any>> = {
   invest: investServer,
 };
 const MAX_BODY = 1024 * 1024;
-const KEY_HELP =
-  '缺少或无效的 API Key：请在请求头带 Authorization: Bearer jk_xxx（登录 https://www.agent-journey.cn/developer 开通并创建 Key）。';
 
 function setCors(res: ServerResponse) {
   // 纯 Bearer 鉴权、不用 Cookie，放开任意来源（浏览器内的 MCP 客户端也能连）
@@ -149,12 +155,17 @@ export async function handleMcpHttp(
   const via = /^plugin\//.test(client || '') ? 'plugin' : 'mcp';
   const key = extractKey(req.headers as any);
   if (!key) {
+    const reason = missingKeyReason(req.headers as any);
     await track(rt, {
       event: 'auth_failed',
       product,
-      props: { reason: 'missing', via, client },
+      props: { reason, via, client },
     });
-    return sendJson(res, 401, rpcErr(RpcError.INVALID_REQUEST, KEY_HELP));
+    return sendJson(
+      res,
+      401,
+      rpcErr(RpcError.INVALID_REQUEST, authHelp(reason, product))
+    );
   }
   let row: ApiKeyRow | null;
   try {
@@ -167,12 +178,22 @@ export async function handleMcpHttp(
     );
   }
   if (!row) {
+    // 区分「输错了」和「已吊销」，两者修法不同；查询失败按输错处理
+    let reason: AuthFailReason = 'invalid';
+    if (typeof rt.store.statusOf === 'function') {
+      const st = await rt.store.statusOf(key).catch(() => null);
+      if (st === 'revoked') reason = 'revoked';
+    }
     await track(rt, {
       event: 'auth_failed',
       product,
-      props: { reason: 'invalid', via, client },
+      props: { reason, via, client },
     });
-    return sendJson(res, 401, rpcErr(RpcError.INVALID_REQUEST, KEY_HELP));
+    return sendJson(
+      res,
+      401,
+      rpcErr(RpcError.INVALID_REQUEST, authHelp(reason, product))
+    );
   }
   if (!scopeAllows(row.scope as KeyScope, product)) {
     await track(rt, {
@@ -185,7 +206,7 @@ export async function handleMcpHttp(
     return sendJson(
       res,
       403,
-      rpcErr(RpcError.INVALID_REQUEST, `该 Key 未开通 ${product} 服务`)
+      rpcErr(RpcError.INVALID_REQUEST, scopeHelp(product))
     );
   }
 
@@ -213,7 +234,11 @@ export async function handleMcpHttp(
   const one = async (msg: any) => {
     let charged = 0;
     let chargedTool = '';
+    let notice: string | null = null;
     if (msg && msg.method === 'initialize' && msg.id != null) {
+      // Skill 页轮询这个时间点判断「已连通」
+      if (typeof rt.store.markConnected === 'function')
+        await rt.store.markConnected(Number(keyRow.id)).catch(() => {});
       // 客户端连上＝装好了：记客户端名与版本（无状态模式下只有握手带 clientInfo）
       const ci = msg.params?.clientInfo || {};
       await track(rt, {
@@ -298,6 +323,13 @@ export async function handleMcpHttp(
           }
           charged = cost;
           chargedTool = name;
+          notice = lowBalanceNotice(left, cost);
+          if (notice)
+            await track(rt, {
+              ...evBase,
+              event: 'credit_low',
+              props: { tool: name, cost, balance: left, tier },
+            });
         }
       }
     }
@@ -317,6 +349,9 @@ export async function handleMcpHttp(
     // 工具失败（参数错、上游报错）不收费
     if (charged && userId && (!out || out.error || out.result?.isError)) {
       await rt.billing.refund(userId, charged, chargedTool).catch(() => {});
+    } else if (notice && out?.result && Array.isArray(out.result.content)) {
+      // 余额第一次跌破阈值：结果照常返回，末尾附一行提醒（Agent 会转告用户）
+      out.result.content.push({ type: 'text', text: notice });
     }
     return out;
   };
@@ -520,7 +555,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
   const billing = new BillingStore((sql, params) => ds.query(sql, params));
   const analytics = new Analytics((sql, params) => ds.query(sql, params));
 
-  const usageOf = (row: ApiKeyRow) => async () => {
+  const usageOf = (row: ApiKeyRow, product: Product) => async () => {
     const base = {
       keyPrefix: row.key_prefix,
       scope: row.scope,
@@ -543,6 +578,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       dailyLimit: TIERS[tier].dailyLimit,
       manage: 'https://www.agent-journey.cn/developer',
       recharge: RECHARGE_URL,
+      onboarding: onboardingFor(product, tier, acct?.points ?? 0),
     };
   };
 
@@ -647,7 +683,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
         AGENT_MODULES.includes(m)
           ? quiz.listForTake(m, k)
           : Promise.resolve([]),
-      usage: usageOf(row),
+      usage: usageOf(row, 'agent'),
     }),
     investDeps: row => ({
       fearLatest: () => insight.fearLatest(),
@@ -655,7 +691,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       bias: () => insight.bias(),
       broad: () => insight.broad(),
       macro: n => insight.macro(n),
-      usage: usageOf(row),
+      usage: usageOf(row, 'invest'),
     }),
   };
 }

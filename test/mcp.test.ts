@@ -436,6 +436,30 @@ describe('MCP HTTP 适配', () => {
     assert.strictEqual((await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') })).status, 403);
   });
 
+  it('401 按原因给修法：环境变量没生效 / 格式不对 / 输错 / 已吊销', async () => {
+    const { rt } = fakeRuntime();
+    (rt.store as any).statusOf = async (k: string) => (k === 'jk_old' ? 'revoked' : null);
+    const msg = async (headers: any, path = '/mcp/agent') => {
+      const r = await run(rt, { path, headers, body: call('knowledge_tree', { module: 'knowledge' }) });
+      assert.strictEqual(r.status, 401);
+      return r.json.error.message as string;
+    };
+    assert.ok(/缺少 API Key/.test(await msg({})));
+    assert.ok(/AGENT_JOURNEY_API_KEY 没有生效/.test(await msg({ authorization: 'Bearer ${AGENT_JOURNEY_API_KEY}' })));
+    assert.ok(/INVEST_JOURNEY_API_KEY 没有生效/.test(await msg({ authorization: 'Bearer ' }, '/mcp/invest')));
+    assert.ok(/格式不对/.test(await msg({ authorization: 'Bearer sk-123' })));
+    assert.ok(/不存在/.test(await msg({ authorization: 'Bearer jk_typo' })));
+    assert.ok(/已被吊销/.test(await msg({ authorization: 'Bearer jk_old' })));
+  });
+
+  it('握手记连通时间', async () => {
+    const { rt } = fakeRuntime();
+    const marked: number[] = [];
+    (rt.store as any).markConnected = async (id: number) => { marked.push(id); };
+    await run(rt, { headers: auth, body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} } });
+    assert.deepStrictEqual(marked, [7]);
+  });
+
   it('GET 返回 405（无状态模式不提供 SSE 流）', async () => {
     const { rt } = fakeRuntime();
     const r = await run(rt, { method: 'GET', headers: auth });
@@ -510,6 +534,16 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(billing.state.points, 8);
     });
 
+    it('余额第一次跌破 10 点时结果末尾附一次提醒', async () => {
+      const { rt, billing } = userRt(11);
+      const r1 = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      const texts = r1.json.result.content.map((c: any) => c.text);
+      assert.strictEqual(billing.state.points, 9);
+      assert.ok(texts.some((t: string) => t.includes('【Journey 提示】') && t.includes('还剩 9 点') && t.includes('from=credit_low')), texts.join('|'));
+      const r2 = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      assert.ok(!r2.json.result.content.some((c: any) => /Journey 提示/.test(c.text)));
+    });
+
     it('余额不足拒绝调用并给购买指引，不执行工具', async () => {
       const { rt, billing } = userRt(1);
       const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
@@ -527,7 +561,7 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(r.json.result.isError, true);
       const text = r.json.result.content[0].text;
       assert.ok(text.includes('需要 2 点') && text.includes('剩余 1 点'), text);
-      assert.ok(text.includes('https://www.agent-journey.cn/developer#pricing'), text);
+      assert.ok(text.includes('https://www.agent-journey.cn/developer?from=credit_exhausted#pricing'), text);
       assert.ok(text.includes('会员月卡 ¥14.5（原价 ¥29）') && text.includes('加油包 100 点 ¥5（原价 ¥10）'), text);
       assert.ok(!/免费/.test(text), text);
       assert.strictEqual(billing.state.points, 1);

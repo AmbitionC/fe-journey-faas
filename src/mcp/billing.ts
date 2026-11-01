@@ -240,7 +240,10 @@ export function creditExhaustedMessage(
     .join('；');
   return (
     `Journey 点数不足：本次调用需要 ${cost} 点，账户剩余 ${balance} 点（体验额度已用完）。` +
-    `请到 ${RECHARGE_URL} 充值后继续使用：${options}。` +
+    `请到 ${RECHARGE_URL.replace(
+      '#',
+      '?from=credit_exhausted#'
+    )} 充值后继续使用：${options}。` +
     '充值到账后直接重试即可，Key 不用换。'
   );
 }
