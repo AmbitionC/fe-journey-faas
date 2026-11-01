@@ -44,6 +44,8 @@ const BENEFITS: Record<string, BenefitDef> = {
   guided_mission: { memberOnly: true },
   // 知识点 PDF：会员权益（2026-11-01 起 ¥9.9 单卖下架；老买家资格由 OrderService.getPdfPurchase 单独保留）
   materials_pdf: { memberOnly: true },
+  // 面经高频考点榜：完整榜单与每个考点的全部原题（2026-11-01 起；面经正文本身免费，未开通看前 3 条）
+  interview_topics_full: { memberOnly: true },
 };
 
 export interface CheckResult {
