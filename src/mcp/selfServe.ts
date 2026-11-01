@@ -15,7 +15,13 @@ import {
   payCode,
   PAY_TEST_SKU,
 } from './billing';
-import { checkPaid, pagePayUrl, queryTrade, verifyNotify } from './alipay';
+import {
+  checkPaid,
+  pagePayUrl,
+  queryTrade,
+  verifyNotify,
+  withinAlipayLimit,
+} from './alipay';
 
 /**
  * 自助开通与购买（/mcp/pricing、/mcp/me/*），以及管理端的订单/点数/看板（/mcp/admin/* 的计费部分）。
@@ -43,10 +49,16 @@ function parse(body: Buffer): any {
   }
 }
 
-export function pricing(now = new Date(), alipay = false) {
+export function pricing(
+  now = new Date(),
+  alipay = false,
+  alipayMaxCents = 0
+) {
   const phase = currentPhase(now);
   return {
     payChannels: alipay ? ['alipay', 'wechat_qr'] : ['wechat_qr'],
+    // 支付宝单笔限额（元）；null＝不限或未开通支付宝。超过的商品前端只给微信扫码。
+    alipayMaxYuan: alipay && alipayMaxCents > 0 ? alipayMaxCents / 100 : null,
     currency: 'CNY',
     phase,
     // 免费那一天（10-31）过去后不再在时间线上展示
@@ -100,8 +112,14 @@ function paidVia(handledBy?: string | null): 'alipay' | 'manual' | 'auto' {
 
 const PAYABLE = ['pending', 'self_reported'];
 
+/** 超过支付宝单笔限额的订单（如年卡）不给支付宝链接，只能微信扫码。 */
+function alipayOverLimit(rt: McpRuntime, o: any): boolean {
+  return !!rt.alipay && !withinAlipayLimit(rt.alipay, Number(o.amount_cents));
+}
+
 function alipayUrlOf(rt: McpRuntime, o: any): string | null {
   if (!rt.alipay || !PAYABLE.includes(o.status)) return null;
+  if (alipayOverLimit(rt, o)) return null;
   const sku = findSku(o.sku);
   return pagePayUrl(rt.alipay, {
     orderNo: o.order_no,
@@ -187,7 +205,7 @@ export async function handleSelfServe(
   if (path === '/mcp/pricing' && method === 'GET')
     return send(res, 200, {
       success: true,
-      data: pricing(now, !!rt.alipay),
+      data: pricing(now, !!rt.alipay, rt.alipay?.maxCents || 0),
     });
 
   const userId = await rt.userIdOf(req.headers as any);
@@ -356,7 +374,14 @@ export async function handleSelfServe(
         return send(res, 400, {
           success: false,
           data: orderView(o),
-          message: '订单已处理，无需再付款',
+          message:
+            PAYABLE.includes(o.status) && alipayOverLimit(rt, o)
+              ? `该笔 ¥${(Number(o.amount_cents) / 100).toFixed(
+                  2
+                )} 超过支付宝单笔限额 ¥${(rt.alipay!.maxCents / 100).toFixed(
+                  0
+                )}，请改用微信扫码`
+              : '订单已处理，无需再付款',
         });
       return send(res, 200, { success: true, data: { alipayUrl: url } });
     }

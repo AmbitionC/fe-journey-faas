@@ -334,6 +334,63 @@ describe('MCP 支付宝网页收款', () => {
     assert.strictEqual(biz.out_trade_no, 'MJTEST1');
   });
 
+  it('超过单笔限额的订单不给支付宝链接，取链接接口说明改走微信', async () => {
+    assert.strictEqual(cfg.maxCents, 5000);
+    assert.strictEqual(
+      loadAlipayConfig({
+        ALIPAY_APP_ID: '2021000000000001',
+        ALIPAY_PRIVATE_KEY: app.priv8,
+        ALIPAY_PUBLIC_KEY: ali.pub,
+        ALIPAY_MAX_CENTS: '0',
+      })!.maxCents,
+      0
+    );
+    assert.strictEqual(pricing(new Date(), true, 5000).alipayMaxYuan, 50);
+    assert.strictEqual(pricing(new Date(), true, 0).alipayMaxYuan, null);
+    assert.strictEqual(pricing(new Date(), false, 5000).alipayMaxYuan, null);
+
+    const orders: Record<string, any> = {
+      MJY: {
+        order_no: 'MJY',
+        user_id: 'u1',
+        sku: 'member_year',
+        amount_cents: 11950,
+        status: 'pending',
+      },
+      MJM: {
+        order_no: 'MJM',
+        user_id: 'u1',
+        sku: 'member_month',
+        amount_cents: 1450,
+        status: 'pending',
+      },
+    };
+    const { rt } = fakeRuntime(orders);
+    rt.userIdOf = async () => 'u1';
+    const call = async (orderNo: string) => {
+      const res = fakeRes();
+      await handleSelfServe(
+        { headers: {} } as any,
+        res,
+        new URL('http://x/mcp/me/orders/alipay'),
+        rt,
+        Buffer.from(JSON.stringify({ orderNo })),
+        'POST'
+      );
+      return { status: res.statusCode, body: JSON.parse(res.body) };
+    };
+    const year = await call('MJY');
+    assert.strictEqual(year.status, 400);
+    assert.match(year.body.message, /超过支付宝单笔限额 ¥50/);
+    assert.match(year.body.message, /微信/);
+    const month = await call('MJM');
+    assert.strictEqual(month.status, 200);
+    assert.ok(month.body.data.alipayUrl.includes('alipay.trade.page.pay'));
+    // 提额后把限额调成 0（不限），年卡也能走支付宝
+    rt.alipay = { ...cfg, maxCents: 0 };
+    assert.strictEqual((await call('MJY')).status, 200);
+  });
+
   it('付完跳回时主动查单发货，只认自己的订单', async () => {
     const orders: Record<string, any> = {
       MJ4: {

@@ -35,7 +35,15 @@ export interface AlipayConfig {
   gateway: string;
   notifyUrl: string;
   returnUrl: string;
+  /**
+   * 单笔限额（分）。个人「AI 网页应用收款」签约默认每笔 ≤¥50、每天 ≤¥1000，
+   * 超额的订单（如年卡 ¥119.5）支付宝收银台会直接拒付——所以超限的订单不给支付宝链接、
+   * 只走微信扫码。提额审核通过后把环境变量 ALIPAY_MAX_CENTS 调大（0＝不限）即可。
+   */
+  maxCents: number;
 }
+
+export const DEFAULT_ALIPAY_MAX_CENTS = 5000;
 
 function pem(body: string, label: string): string {
   const b = body.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
@@ -54,6 +62,21 @@ export function loadPrivateKey(raw: string): KeyObject {
   }
 }
 
+function parseMaxCents(raw?: string): number {
+  const v = (raw || '').trim();
+  if (!v) return DEFAULT_ALIPAY_MAX_CENTS;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : DEFAULT_ALIPAY_MAX_CENTS;
+}
+
+/** 该金额能否走支付宝（受单笔限额约束；maxCents=0 表示不限）。 */
+export function withinAlipayLimit(
+  cfg: Pick<AlipayConfig, 'maxCents'>,
+  amountCents: number
+): boolean {
+  return cfg.maxCents <= 0 || amountCents <= cfg.maxCents;
+}
+
 export function loadAlipayConfig(
   env: Record<string, string | undefined> = process.env
 ): AlipayConfig | null {
@@ -70,6 +93,7 @@ export function loadAlipayConfig(
     returnUrl:
       (env.ALIPAY_RETURN_URL || '').trim() ||
       'https://www.agent-journey.cn/developer',
+    maxCents: parseMaxCents(env.ALIPAY_MAX_CENTS),
   };
 }
 
