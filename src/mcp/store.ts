@@ -112,6 +112,22 @@ export class McpStore {
             'ALTER TABLE mcp_api_key ADD COLUMN user_id VARCHAR(64) NULL, ADD KEY idx_mcp_key_user (user_id)'
           );
         }
+        // 第三版（埋点）：调用日志补「实扣点数」与「客户端」两列
+        const logCols = await this.q(
+          "SELECT COLUMN_NAME c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mcp_call_log'"
+        );
+        const logNames = new Set(
+          (logCols || []).map((r: any) =>
+            String(r.c ?? r.COLUMN_NAME).toLowerCase()
+          )
+        );
+        const adds: string[] = [];
+        if (!logNames.has('cost'))
+          adds.push('ADD COLUMN cost INT NOT NULL DEFAULT 0');
+        if (!logNames.has('client'))
+          adds.push('ADD COLUMN client VARCHAR(64) NULL');
+        if (adds.length)
+          await this.q(`ALTER TABLE mcp_call_log ${adds.join(', ')}`);
       })().catch(e => {
         this.schemaReady = null; // 允许下次重试
         throw e;
@@ -249,10 +265,14 @@ export class McpStore {
     ok: boolean;
     latencyMs: number;
     error?: string;
+    /** 本次实扣点数（免费期、管理员 Key、失败退点后为 0） */
+    cost?: number;
+    /** 客户端标识（X-Journey-Client 或 User-Agent 首段） */
+    client?: string | null;
   }) {
     await this.ensureSchema();
     await this.q(
-      'INSERT INTO mcp_call_log (key_id, product, tool, ok, latency_ms, error) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO mcp_call_log (key_id, product, tool, ok, latency_ms, error, cost, client) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         p.keyId,
         p.product,
@@ -260,6 +280,8 @@ export class McpStore {
         p.ok ? 1 : 0,
         Math.round(p.latencyMs),
         p.error ? p.error.slice(0, 300) : null,
+        Math.max(0, Math.round(p.cost || 0)),
+        p.client ? p.client.slice(0, 64) : null,
       ]
     );
     await this.q('UPDATE mcp_api_key SET last_used_at = NOW() WHERE id = ?', [

@@ -25,6 +25,7 @@ import {
   handleAlipayNotify,
 } from './selfServe';
 import { AlipayConfig, loadAlipayConfig } from './alipay';
+import { Analytics, clientOf, sanitizeWebBatch, track } from './analytics';
 
 /**
  * MCP 的 HTTP 适配层（server.js 在 Midway 之外直接分流 /mcp/* 到这里）。
@@ -36,6 +37,7 @@ import { AlipayConfig, loadAlipayConfig } from './alipay';
  * - /mcp/me/*         自助后台：开通、Key、下单、余额与流水（平台用户登录态）
  * - /mcp/admin/*      管理端：发 Key / 吊销 / 用量 / 订单确认 / 加点 / 经营看板（平台 admin 登录态）
  * - POST /mcp/pay/alipay/notify  支付宝异步通知（验签后自动发货，无登录态）
+ * - POST /mcp/track   两个 Skill 页的浏览/交互埋点（匿名可报，登录态可选）
  *
  * 为什么绕开 Midway：MCP 客户端要求精确的状态码语义（202 / 405 / 401），
  * 且 /invest/* 的鉴权中间件要求平台 admin，与 API Key 鉴权是两套体系，单独一路最干净。
@@ -57,6 +59,8 @@ export interface McpRuntime {
   now?: () => Date;
   /** 支付宝网页收款配置；未配置为 null，只走微信收款码 */
   alipay?: AlipayConfig | null;
+  /** 埋点（mcp_event）；未装配时所有埋点静默跳过 */
+  analytics?: Analytics | null;
 }
 
 const SPECS: Record<Product, ServerSpec<any>> = {
@@ -115,6 +119,8 @@ export async function handleMcpHttp(
     return handleAlipayNotify(res, rt, body, method);
   if (url.pathname.startsWith('/mcp/admin/'))
     return handleAdmin(req, res, url, rt, body, method);
+  if (url.pathname.replace(/\/+$/, '') === '/mcp/track')
+    return handleTrack(req, res, rt, body, method);
   if (url.pathname === '/mcp/pricing' || url.pathname.startsWith('/mcp/me'))
     return handleSelfServe(req, res, url, rt, body, method);
 
@@ -139,9 +145,17 @@ export async function handleMcpHttp(
   if (body.length > MAX_BODY)
     return sendJson(res, 413, rpcErr(RpcError.INVALID_REQUEST, '请求体过大'));
 
+  const client = clientOf(req.headers as any);
+  const via = /^plugin\//.test(client || '') ? 'plugin' : 'mcp';
   const key = extractKey(req.headers as any);
-  if (!key)
+  if (!key) {
+    await track(rt, {
+      event: 'auth_failed',
+      product,
+      props: { reason: 'missing', via, client },
+    });
     return sendJson(res, 401, rpcErr(RpcError.INVALID_REQUEST, KEY_HELP));
+  }
   let row: ApiKeyRow | null;
   try {
     row = await rt.store.findActive(key);
@@ -152,9 +166,22 @@ export async function handleMcpHttp(
       rpcErr(RpcError.INTERNAL, '鉴权服务暂不可用，请稍后重试')
     );
   }
-  if (!row)
+  if (!row) {
+    await track(rt, {
+      event: 'auth_failed',
+      product,
+      props: { reason: 'invalid', via, client },
+    });
     return sendJson(res, 401, rpcErr(RpcError.INVALID_REQUEST, KEY_HELP));
+  }
   if (!scopeAllows(row.scope as KeyScope, product)) {
+    await track(rt, {
+      event: 'auth_failed',
+      product,
+      userId: row.user_id || null,
+      keyId: Number(row.id),
+      props: { reason: 'scope', via, client },
+    });
     return sendJson(
       res,
       403,
@@ -178,9 +205,29 @@ export async function handleMcpHttp(
     id,
     result: { content: [{ type: 'text', text }], isError: true },
   });
+  const evBase = {
+    product,
+    userId,
+    keyId: Number(keyRow.id),
+  };
   const one = async (msg: any) => {
     let charged = 0;
     let chargedTool = '';
+    if (msg && msg.method === 'initialize' && msg.id != null) {
+      // 客户端连上＝装好了：记客户端名与版本（无状态模式下只有握手带 clientInfo）
+      const ci = msg.params?.clientInfo || {};
+      await track(rt, {
+        ...evBase,
+        event: 'mcp_initialize',
+        props: {
+          clientName: String(ci.name || '').slice(0, 64) || null,
+          clientVersion: String(ci.version || '').slice(0, 32) || null,
+          protocolVersion: msg.params?.protocolVersion || null,
+          via,
+          client,
+        },
+      });
+    }
     if (
       msg &&
       msg.method === 'tools/call' &&
@@ -189,9 +236,11 @@ export async function handleMcpHttp(
     ) {
       // 自助 Key：按档位定每日上限 + 按次扣点；管理员手发的 Key 不扣点
       let limit: number | undefined;
+      let tier: string | null = null;
       if (userId) {
         try {
           const acct = await rt.billing.getAccount(userId);
+          tier = effectiveTier(acct);
           limit = TIERS[effectiveTier(acct)].dailyLimit;
         } catch {
           return toolError(msg.id, '计费服务暂不可用，请稍后重试');
@@ -200,6 +249,11 @@ export async function handleMcpHttp(
       const q = await rt.store.countCall(keyRow, new Date(), limit);
       const free = currentPhase(rt.now ? rt.now() : new Date()).id === 'free';
       if (q.over) {
+        await track(rt, {
+          ...evBase,
+          event: 'quota_exceeded',
+          props: { tool: msg.params?.name || null, limit: q.limit, tier },
+        });
         return toolError(
           msg.id,
           `今日调用已达上限（${q.limit} 次），北京时间零点重置。` +
@@ -222,6 +276,17 @@ export async function handleMcpHttp(
               .getAccount(userId)
               .then(a => a?.points ?? 0)
               .catch(() => 0);
+            await track(rt, {
+              ...evBase,
+              event: 'credit_exhausted',
+              props: {
+                tool: name,
+                cost,
+                balance,
+                tier,
+                phase: currentPhase(rt.now ? rt.now() : new Date()).id,
+              },
+            });
             return toolError(
               msg.id,
               creditExhaustedMessage(
@@ -244,6 +309,9 @@ export async function handleMcpHttp(
         ok: rec.ok,
         latencyMs: rec.latencyMs,
         error: rec.error,
+        // 失败会退点，所以只有成功调用记实扣
+        cost: rec.ok ? charged : 0,
+        client,
       })
     );
     // 工具失败（参数错、上游报错）不收费
@@ -275,6 +343,43 @@ export async function handleMcpHttp(
     return;
   }
   return sendJson(res, 200, out);
+}
+
+/**
+ * POST /mcp/track：两个 Skill 页的浏览与交互埋点。
+ * 匿名可报（anonId 由前端 localStorage 生成）；带登录 token 时同时记 userId，把访客和账户串起来。
+ * 只收白名单事件，非法项静默丢弃；永远回 204，不让埋点影响页面。
+ */
+async function handleTrack(
+  req: IncomingMessage,
+  res: ServerResponse,
+  rt: McpRuntime,
+  body: Buffer,
+  method: string
+) {
+  if (method !== 'POST') {
+    res.setHeader('Allow', 'POST, OPTIONS');
+    return sendJson(res, 405, { success: false });
+  }
+  if (body.length > 64 * 1024 || !rt.analytics) {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+  let data: any = null;
+  try {
+    data = JSON.parse(body.toString('utf8') || '{}');
+  } catch {
+    data = null;
+  }
+  if (data) {
+    const userId = await rt
+      .userIdOf(req.headers as any)
+      .catch(() => null as string | null);
+    await rt.analytics.trackMany(sanitizeWebBatch(data, userId)).catch(() => 0);
+  }
+  res.statusCode = 204;
+  res.end();
 }
 
 async function handleAdmin(
@@ -345,6 +450,18 @@ async function handleAdmin(
       req
     );
     if (billingOut) return sendJson(res, billingOut.status, billingOut.body);
+    if (path === '/mcp/admin/analytics' && method === 'GET') {
+      if (!rt.analytics)
+        return sendJson(res, 503, { success: false, message: '埋点未启用' });
+      const p = url.searchParams.get('product');
+      return sendJson(res, 200, {
+        success: true,
+        data: await rt.analytics.dashboard(
+          Number(url.searchParams.get('days') || 30),
+          p === 'agent' || p === 'invest' ? p : null
+        ),
+      });
+    }
     if (path === '/mcp/admin/usage' && method === 'GET') {
       const days = Number(url.searchParams.get('days') || 7);
       return sendJson(res, 200, {
@@ -401,6 +518,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
   const insight = await appCtx.getAsync(InvestInsightService);
 
   const billing = new BillingStore((sql, params) => ds.query(sql, params));
+  const analytics = new Analytics((sql, params) => ds.query(sql, params));
 
   const usageOf = (row: ApiKeyRow) => async () => {
     const base = {
@@ -444,6 +562,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
   return {
     store,
     billing,
+    analytics,
     autoFulfill: process.env.MCP_ORDER_AUTO_FULFILL === '1',
     alipay: (() => {
       try {
