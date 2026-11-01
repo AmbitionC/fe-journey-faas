@@ -59,7 +59,7 @@ export class MaterialsHTTPService {
       purchasable: phase.id !== 'free',
     }));
     const message = freeClaim
-      ? `公测期登录即可领取全部 PDF；${phase.next?.from ? phase.next.from.replace(/^\d{4}-/, '').replace('-', ' 月 ') + ' 日' : '公测结束'}起随会员开售，早期用户半价。`
+      ? '公测期登录即可领取全部 PDF；12 月 1 日起仅会员可下载，现在开通会员享早期用户半价。'
       : '开通会员即可下载全部 PDF；已购 ¥9.9 资料的用户继续可下载。';
     return {
       success: true,

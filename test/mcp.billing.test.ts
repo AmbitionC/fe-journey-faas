@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { BillingStore, findSku, findSellableSku, effectiveTier, toolCost, SKUS, phasePrice, currentPhase, PAY_TEST_SKU } from '../src/mcp/billing';
+import { BillingStore, findSku, findSellableSku, effectiveTier, toolCost, SKUS, phasePrice, currentPhase, PAY_TEST_SKU, TRIAL_POINTS } from '../src/mcp/billing';
 import { McpStore } from '../src/mcp/store';
 
 /**
@@ -48,26 +48,26 @@ describe('MCP 计费（真 MySQL）', function () {
     const r2 = await b.activate('u1');
     assert.strictEqual(r1.created, true);
     assert.strictEqual(r2.created, false);
-    assert.strictEqual((await b.getAccount('u1'))!.points, 100);
+    assert.strictEqual((await b.getAccount('u1'))!.points, TRIAL_POINTS);
     assert.strictEqual(effectiveTier(await b.getAccount('u1')), 'free');
   });
 
   it('扣点原子：余额不足不扣、返回 null；退点恢复', async () => {
     const b = new BillingStore(q);
     await b.activate('u2');
-    assert.strictEqual(await b.charge('u2', 60, 'x'), 40);
-    assert.strictEqual(await b.charge('u2', 60, 'x'), null);
-    assert.strictEqual((await b.getAccount('u2'))!.points, 40);
-    await b.refund('u2', 60, 'x');
-    assert.strictEqual((await b.getAccount('u2'))!.points, 100);
+    assert.strictEqual(await b.charge('u2', 30, 'x'), 20);
+    assert.strictEqual(await b.charge('u2', 30, 'x'), null);
+    assert.strictEqual((await b.getAccount('u2'))!.points, 20);
+    await b.refund('u2', 30, 'x');
+    assert.strictEqual((await b.getAccount('u2'))!.points, TRIAL_POINTS);
   });
 
   it('并发扣点不会扣成负数', async () => {
     const b = new BillingStore(q);
     await b.activate('u3');
-    const results = await Promise.all(Array.from({ length: 8 }, () => b.charge('u3', 30, 'x')));
+    const results = await Promise.all(Array.from({ length: 8 }, () => b.charge('u3', 15, 'x')));
     assert.strictEqual(results.filter(r => r !== null).length, 3);
-    assert.strictEqual((await b.getAccount('u3'))!.points, 10);
+    assert.strictEqual((await b.getAccount('u3'))!.points, 5);
   });
 
   it('订单：复用未完成单 → 自报 → 确认发货 → 重复确认不重复发点', async () => {
@@ -145,11 +145,11 @@ describe('MCP 计费（真 MySQL）', function () {
     const s = await b.stats(30);
     assert.ok(s.revenue.windowCents >= phasePrice(pack, 'half'));
     assert.ok(s.users.total >= 1);
-    // 失败退点要从热门工具的点数里扣掉（u2 扣 60 后退回 60）
+    // 失败退点要从热门工具的点数里扣掉（u2 扣 30 后退回 30）
     const x = s.topTools.find((t: any) => t.tool === 'x');
     assert.ok(Number(x.failed) >= 1);
     const charged = await q("SELECT SUM(-delta) n FROM mcp_points_ledger WHERE reason = 'call' AND ref = 'x'");
-    assert.strictEqual(Number(x.points), Number(charged[0].n) - 60);
+    assert.strictEqual(Number(x.points), Number(charged[0].n) - 30);
   });
 
   it('支付宝测试单：不在售、发货不加点不记流水、不计入营收', async () => {
@@ -216,8 +216,11 @@ describe('MCP 计价表', () => {
       assert.strictEqual(phasePrice(s, 'half'), Math.round(s.listCents / 2));
       assert.strictEqual(phasePrice(s, 'full'), s.listCents);
     }
-    assert.strictEqual(currentPhase(new Date('2026-11-30T23:59:59+08:00')).id, 'free');
+    // 2026-11-01 起取消免费（送体验点、用完充值），半价从 12-01 提前到 11-01
+    assert.strictEqual(currentPhase(new Date('2026-10-31T23:59:59+08:00')).id, 'free');
+    assert.strictEqual(currentPhase(new Date('2026-11-01T00:00:00+08:00')).id, 'half');
     assert.strictEqual(currentPhase(new Date('2026-12-01T00:00:00+08:00')).id, 'half');
+    assert.strictEqual(TRIAL_POINTS, 50);
     assert.strictEqual(currentPhase(new Date('2027-06-01T00:00:00+08:00')).next, null);
     assert.strictEqual(toolCost('methodology_get'), 0);
     assert.strictEqual(toolCost('unknown_tool'), 1);
