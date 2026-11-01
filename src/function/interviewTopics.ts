@@ -50,11 +50,15 @@ export class InterviewTopicsHTTPService {
   @Inject()
   questionIndex: InterviewQuestionIndexService;
 
-  private async currentUserId(): Promise<string> {
+  private async currentUser(): Promise<{ userId: string; admin: boolean }> {
     const info = await resolveUserInfo(this.ctx, this.redisService);
-    return info?.userId && !String(info.userId).startsWith('guest:')
-      ? String(info.userId)
-      : '';
+    return {
+      userId:
+        info?.userId && !String(info.userId).startsWith('guest:')
+          ? String(info.userId)
+          : '',
+      admin: info?.role === 'admin',
+    };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -67,11 +71,14 @@ export class InterviewTopicsHTTPService {
   @NoAuth()
   async topics(@Body(ALL) body: { keys?: unknown; limit?: number }) {
     const keys = sanitizeKeys(body?.keys);
-    const userId = await this.currentUserId();
-    const unlocked = userId
-      ? (await this.entitlementService.check(userId, 'interview_topics_full'))
-          .allowed
-      : false;
+    const { userId, admin } = await this.currentUser();
+    // 管理员（后台的小红书图卡生成器）看完整榜单与原题
+    const unlocked =
+      admin ||
+      (userId
+        ? (await this.entitlementService.check(userId, 'interview_topics_full'))
+            .allowed
+        : false);
     const { index, knowledge } = await this.questionIndex.load();
     const result = aggregateTopics(index, {
       keys,
@@ -108,7 +115,7 @@ export class InterviewTopicsHTTPService {
   ) {
     const keys = sanitizeKeys(body?.keys);
     const title = sanitizeLabel(body?.title);
-    const userId = await this.currentUserId();
+    const { userId } = await this.currentUser();
     if (!userId) return { success: true, data: { needsLogin: true } };
 
     const member = (
