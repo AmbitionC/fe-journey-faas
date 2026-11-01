@@ -8,23 +8,17 @@ import {
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
-import { InjectEntityModel } from '@midwayjs/typeorm';
-import { Repository } from 'typeorm';
 import { NoAuth } from '../decorator/noAuth';
 import { resolveUserInfo } from '../common/admin.guard';
 import { EntitlementService } from '../service/entitlement';
-import { ArticleService } from '../service/article';
-import { ArticleContentEntity } from '../entity/articleContent';
-import { navIndex } from '../mcp/tools/agent';
+import { InterviewQuestionIndexService } from '../service/interview/questionIndex';
 import {
   aggregateTopics,
-  ArticleQuestions,
-  buildQuestionIndex,
   buildSheet,
   decideSheetQuota,
   FREE_TOPIC_LIMIT,
-  leafKeysUnder,
   sanitizeKeys,
+  sanitizeLabel,
   sheetSignature,
 } from '../common/interviewTopics';
 
@@ -36,22 +30,6 @@ const SHEET_QUOTA_TTL = 40 * 24 * 60 * 60;
 function beijingMonth(now = Date.now()): string {
   return new Date(now + 8 * 60 * 60 * 1000).toISOString().slice(0, 7);
 }
-
-function sanitizeTitle(raw: unknown): string {
-  return typeof raw === 'string'
-    ? raw.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 60)
-    : '';
-}
-
-/** 进程内缓存：题目索引按目录版本失效，最长 10 分钟。 */
-const INDEX_TTL_MS = 10 * 60 * 1000;
-let cached: {
-  version: string;
-  at: number;
-  index: ArticleQuestions[];
-  knowledge: Map<string, { title: string; path: string }>;
-  careerKeys: Set<string>;
-} | null = null;
 
 /**
  * 网站「高频考点榜」：在用户当前筛出来的那批面经里，按考点统计出现篇数并附原题。
@@ -70,41 +48,7 @@ export class InterviewTopicsHTTPService {
   entitlementService: EntitlementService;
 
   @Inject()
-  articleService: ArticleService;
-
-  @InjectEntityModel(ArticleContentEntity)
-  contentModel: Repository<ArticleContentEntity>;
-
-  private async loadIndex() {
-    const [interview, knowledge] = await Promise.all([
-      this.articleService.getNavList('interview'),
-      this.articleService
-        .getNavList('knowledge')
-        .catch(() => ({ navData: [], version: 0 })),
-    ]);
-    const version = `${interview.version}:${knowledge.version}`;
-    if (
-      cached &&
-      cached.version === version &&
-      Date.now() - cached.at < INDEX_TTL_MS
-    )
-      return cached;
-    const rows = await this.contentModel.find({
-      where: { module: 'interview' },
-      select: ['articleKey', 'content'],
-    });
-    const contents = new Map<string, string>(
-      rows.map(r => [r.articleKey, r.content || ''])
-    );
-    cached = {
-      version,
-      at: Date.now(),
-      index: buildQuestionIndex(interview.navData || [], contents),
-      knowledge: navIndex(knowledge.navData || []),
-      careerKeys: leafKeysUnder(knowledge.navData || [], 'career'),
-    };
-    return cached;
-  }
+  questionIndex: InterviewQuestionIndexService;
 
   private async currentUserId(): Promise<string> {
     const info = await resolveUserInfo(this.ctx, this.redisService);
@@ -128,7 +72,7 @@ export class InterviewTopicsHTTPService {
       ? (await this.entitlementService.check(userId, 'interview_topics_full'))
           .allowed
       : false;
-    const { index, knowledge } = await this.loadIndex();
+    const { index, knowledge } = await this.questionIndex.load();
     const result = aggregateTopics(index, {
       keys,
       knowledgeTitles: knowledge,
@@ -163,14 +107,14 @@ export class InterviewTopicsHTTPService {
     @Body(ALL) body: { keys?: unknown; title?: unknown; confirm?: boolean }
   ) {
     const keys = sanitizeKeys(body?.keys);
-    const title = sanitizeTitle(body?.title);
+    const title = sanitizeLabel(body?.title);
     const userId = await this.currentUserId();
     if (!userId) return { success: true, data: { needsLogin: true } };
 
     const member = (
       await this.entitlementService.check(userId, 'interview_sheet')
     ).allowed;
-    const { index, knowledge, careerKeys } = await this.loadIndex();
+    const { index, knowledge, careerKeys } = await this.questionIndex.load();
     const sheet = buildSheet(index, {
       keys,
       knowledgeTitles: knowledge,

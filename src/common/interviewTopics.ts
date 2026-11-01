@@ -353,6 +353,13 @@ export function pickExamples<T extends { company: string }>(
 }
 
 /** 请求体里的 keys：只收字符串、去重、截断。 */
+/** 用户传来的题单名 / 面试目标（如「字节跳动 · Agent 开发」）：去控制字符与尖括号，限长。 */
+export function sanitizeLabel(raw: unknown, maxLen = 60): string {
+  return typeof raw === 'string'
+    ? raw.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, maxLen)
+    : '';
+}
+
 export function sanitizeKeys(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const out = new Set<string>();

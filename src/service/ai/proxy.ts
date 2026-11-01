@@ -15,6 +15,7 @@ import {
   buildCoachTipMessages,
   buildWeeklyReportMessages,
   buildInterviewMessages,
+  buildCompanyInterviewMessages,
   buildQuizReviewMessages,
   QuizReviewParams,
   HintParams,
@@ -24,6 +25,7 @@ import {
   CoachTipParams,
   WeeklyReportParams,
   InterviewParams,
+  CompanyInterviewParams,
 } from './prompts';
 
 export type AiTask =
@@ -326,6 +328,12 @@ export class AiProxyService {
   async interview(p: InterviewParams, userId: string): Promise<string> {
     const { system, user } = buildInterviewMessages(p);
     return this.complete(system, user, userId, 'interview', 1024);
+  }
+
+  /** 按目标公司 / 岗位模拟面试：题目来自那批真实面经；整体点评较长，放宽输出长度。 */
+  async companyInterview(p: CompanyInterviewParams, userId: string): Promise<string> {
+    const { system, user } = buildCompanyInterviewMessages(p);
+    return this.complete(system, user, userId, 'interview', p.finish ? 1600 : 1024);
   }
 
   /** 算法分层提示（服务端拼装提示词，不剧透）。 */
