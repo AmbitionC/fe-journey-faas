@@ -16,6 +16,8 @@ import {
   currentPhase,
   effectiveTier,
   toolCost,
+  creditExhaustedMessage,
+  RECHARGE_URL,
 } from './billing';
 import {
   handleSelfServe,
@@ -205,7 +207,7 @@ export async function handleMcpHttp(
         );
       }
       const name = msg.params?.name;
-      // 公测免费期不扣点；用量照常进调用日志（看板「用量」按日志统计）
+      // 按次扣点（2026-10-31 公测免费那一天除外）；点数用完返回带充值链接的错误。用量照常进调用日志
       if (userId && !free && spec.tools.some(t => t.name === name)) {
         const cost = toolCost(name);
         if (cost > 0) {
@@ -216,9 +218,17 @@ export async function handleMcpHttp(
             return toolError(msg.id, '计费服务暂不可用，请稍后重试');
           }
           if (left === null) {
+            const balance = await rt.billing
+              .getAccount(userId)
+              .then(a => a?.points ?? 0)
+              .catch(() => 0);
             return toolError(
               msg.id,
-              `Journey 点不足（本次需要 ${cost} 点）。请到 https://www.agent-journey.cn/developer 购买会员或加油包。`
+              creditExhaustedMessage(
+                cost,
+                balance,
+                rt.now ? rt.now() : new Date()
+              )
             );
           }
           charged = cost;
@@ -414,6 +424,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       points: acct?.points ?? 0,
       dailyLimit: TIERS[tier].dailyLimit,
       manage: 'https://www.agent-journey.cn/developer',
+      recharge: RECHARGE_URL,
     };
   };
 

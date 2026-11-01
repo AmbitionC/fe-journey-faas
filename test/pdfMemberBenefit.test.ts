@@ -40,13 +40,15 @@ describe('知识点 PDF 并入会员权益', () => {
     assert.ok(!/收款码|我已支付|单次购买/.test(JSON.stringify(r)));
     assert.ok(!/https?:\/\//.test(JSON.stringify(r)));
   });
-  it('公测免费期：商品接口标 freeClaim，会员卡不可购买', async () => {
+  it('公测期（至 11-30）：商品接口标 freeClaim；Skill 已开始收费，会员卡半价可购买', async () => {
     const r = (await controller({ now: FREE_PHASE }).product()).data;
-    assert.strictEqual(r.membership.phase.id, 'free');
+    assert.strictEqual(r.membership.phase.id, 'half');
     assert.strictEqual(r.membership.freeClaim, true);
-    assert.ok(r.membership.plans.every((p: any) => p.purchasable === false && p.price === 0));
-    assert.ok(r.message.includes('公测期'));
+    assert.ok(r.membership.plans.every((p: any) => p.purchasable === true && p.price > 0));
+    assert.ok(r.message.includes('公测期') && r.message.includes('12 月 1 日'));
     assert.strictEqual(pdfFreeClaimActive(FREE_PHASE), true);
+    assert.strictEqual(pdfFreeClaimActive(new Date('2026-11-30T23:59:59+08:00')), true);
+    assert.strictEqual(pdfFreeClaimActive(new Date('2026-12-01T00:00:00+08:00')), false);
     assert.strictEqual(pdfFreeClaimActive(PAID_PHASE), false);
   });
   it('会员（含 Skill 会员）可领，basis=member', async () => {

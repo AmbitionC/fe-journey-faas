@@ -5,14 +5,15 @@ import { QueryFn } from './store';
  * Journey 点计费：账户余额、会员档位、按次扣点、订单。
  *
  * 定价参照可灵（月卡/年卡 + 点数 + 加油包）。SKU 只写原价 listCents，实际售价由收费阶段决定
- * （owner 2026-10-31 定三阶段，见 PRICING_PHASES）：首月免费看数据 → 半价（页面展示原价）→ 正式价。
+ * （见 PRICING_PHASES）：2026-11-01 起送体验点、用完充值，早期用户半价（页面展示原价）→ 正式价。
  *
  * 规则（刻意从简）：
  * - 1 点 ≈ ¥0.1 的计价单位，Agent / Invest 两个产品共用一个余额。
  * - 会员按月发点：开通时立刻发第一个月，之后每满一个月懒发放（用户下次调用/打开后台时补发），
  *   年卡同理按月发 12 次。点数不过期（实验阶段从宽）。
  * - 加油包一次性加点，与会员无关。
- * - 新用户首次开通送体验点。
+ * - 新用户首次开通送少量体验点（TRIAL_POINTS），用完必须充值（会员或加油包）——
+ *   owner 2026-11-01：不能完全免费，否则验证不了商业价值。
  * - 所有时间比较都在 SQL 里用 NOW() 做，避免 FC 实例时区与库时区不一致。
  */
 
@@ -38,7 +39,15 @@ export const TIERS: Record<Tier, TierSpec> = {
 /** 会员每月发放点数 */
 export const MEMBER_MONTHLY_POINTS = 400;
 
-export const TRIAL_POINTS = 100;
+/**
+ * 新用户开通赠送的体验点（owner 2026-11-01 改：取消「公测免费不扣点」，改为送少量点、用完充值）。
+ * 50 点约够跑通 5~6 次核心场景（一次「搜知识点 + 读两篇 + 查面经」≈ 8 点，
+ * 一次「行情快照 + 恐慌 + 乖离率 + 宏观」≈ 7 点）。2026-11-01 前开通的老账户已拿到 100 点，不追回。
+ */
+export const TRIAL_POINTS = 50;
+
+/** 点数用完时引导用户去的充值页（Skill 报错信息、/mcp/pricing、account_usage 都用这一个） */
+export const RECHARGE_URL = 'https://www.agent-journey.cn/developer#pricing';
 
 export interface Sku {
   sku: string;
@@ -111,10 +120,11 @@ export interface PricingPhase {
 }
 
 /**
- * 收费三阶段（owner 2026-10-31）：
- * 1. 首月免费：调用不扣点、不开放购买，重点看有没有人用（看板「用量」）；
- * 2. 半价：原价五折，页面同时展示原价；
- * 3. 正式价：按原价。日期等免费期数据出来后由 owner 定，填进 from 即可。
+ * 收费阶段（owner 2026-10-31 定三阶段，2026-11-01 改）：
+ * 1. 公测免费（2026-10-31 一天）：调用不扣点、不开放购买。2026-11-01 owner 改主意——完全免费验证不了
+ *    商业价值，改为新用户送 TRIAL_POINTS 体验点、用完必须充值，免费阶段就此结束（条目保留作历史）；
+ * 2. 半价：原价五折，页面同时展示原价。原计划 12-01 起，随免费期取消提前到 11-01；
+ * 3. 正式价：按原价。日期等数据出来后由 owner 定，填进 from 即可。
  */
 export const PRICING_PHASES: PricingPhase[] = [
   {
@@ -125,9 +135,9 @@ export const PRICING_PHASES: PricingPhase[] = [
   },
   {
     id: 'half',
-    name: '半价',
-    from: '2026-12-01',
-    note: '早期用户半价：按原价五折，已购会员在有效期内不受后续调价影响。',
+    name: '早期用户半价',
+    from: '2026-11-01',
+    note: `新用户开通即送 ${TRIAL_POINTS} 点体验额度，用完后开通会员或购买加油包继续使用；早期用户半价，已购会员在有效期内不受后续调价影响。`,
   },
   {
     id: 'full',
@@ -202,6 +212,38 @@ export const PAY_TEST_SKU: Sku = {
   listCents: 1,
   desc: '仅管理员可下，用于验证支付宝收款，不发点',
 };
+
+/**
+ * 点数用完时给 Agent 看的报错文案：说清还差多少、去哪充、最便宜的两个选项多少钱（按当前阶段价）。
+ * Agent 会把这段原样转述给用户，所以要人话、带链接、不带内部字段名。
+ */
+export function creditExhaustedMessage(
+  cost: number,
+  balance: number,
+  now = new Date()
+): string {
+  const phase = currentPhase(now);
+  const yuan = (c: number) =>
+    `¥${(c / 100).toFixed(c % 100 ? (c % 10 ? 2 : 1) : 0)}`;
+  const opt = (id: string, label: (s: Sku, p: string) => string) => {
+    const s = SKUS.find(x => x.sku === id);
+    if (!s) return '';
+    const p = phasePrice(s, phase.id);
+    const was = p < s.listCents ? `（原价 ${yuan(s.listCents)}）` : '';
+    return label(s, yuan(p) + was);
+  };
+  const options = [
+    opt('member_month', (s, p) => `会员月卡 ${p}，每月 ${s.points} 点`),
+    opt('pack_100', (s, p) => `加油包 ${s.points} 点 ${p}`),
+  ]
+    .filter(Boolean)
+    .join('；');
+  return (
+    `Journey 点数不足：本次调用需要 ${cost} 点，账户剩余 ${balance} 点（体验额度已用完）。` +
+    `请到 ${RECHARGE_URL} 充值后继续使用：${options}。` +
+    '充值到账后直接重试即可，Key 不用换。'
+  );
+}
 
 /** 在售商品（下单只认这些） */
 export function findSellableSku(sku: string): Sku | undefined {

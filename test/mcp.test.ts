@@ -384,7 +384,9 @@ function fakeBilling(points = 10, tier: any = 'free') {
 }
 
 const HALF = () => new Date('2026-12-15T12:00:00+08:00');
-const FREE = () => new Date('2026-11-10T12:00:00+08:00');
+// 公测免费只剩 2026-10-31 那一天（owner 2026-11-01 改为送体验点、用完充值）
+const FREE = () => new Date('2026-10-31T12:00:00+08:00');
+const NOV = () => new Date('2026-11-10T12:00:00+08:00');
 
 describe('MCP HTTP 适配', () => {
   const ROW: ApiKeyRow = {
@@ -512,7 +514,22 @@ describe('MCP HTTP 适配', () => {
       const { rt, billing } = userRt(1);
       const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       assert.strictEqual(r.json.result.isError, true);
-      assert.ok(/点不足/.test(r.json.result.content[0].text));
+      assert.ok(/点数不足/.test(r.json.result.content[0].text));
+      assert.strictEqual(billing.state.points, 1);
+    });
+
+    it('11 月起不再免费：体验点用完即拒绝，报错带余额、充值链接与当前价', async () => {
+      const { rt, billing } = userRt(3, NOV);
+      const ok = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      assert.ok(!ok.json.result.isError);
+      assert.strictEqual(billing.state.points, 1);
+      const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      assert.strictEqual(r.json.result.isError, true);
+      const text = r.json.result.content[0].text;
+      assert.ok(text.includes('需要 2 点') && text.includes('剩余 1 点'), text);
+      assert.ok(text.includes('https://www.agent-journey.cn/developer#pricing'), text);
+      assert.ok(text.includes('会员月卡 ¥14.5（原价 ¥29）') && text.includes('加油包 100 点 ¥5（原价 ¥10）'), text);
+      assert.ok(!/免费/.test(text), text);
       assert.strictEqual(billing.state.points, 1);
     });
 
@@ -526,7 +543,7 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(billing.state.points, 10);
     });
 
-    it('公测免费期不扣点、调用照常记日志', async () => {
+    it('2026-10-31 公测免费那一天不扣点、调用照常记日志', async () => {
       const { rt, billing } = userRt(0, FREE);
       const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       assert.ok(!r.json.result.isError);
@@ -557,27 +574,37 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual((await run(rt, { path: '/mcp/me', method: 'GET' })).status, 401);
     });
 
-    it('价目按阶段：免费期价格 0 且不可购买，半价期为原价五折并带原价', async () => {
+    it('价目按阶段：10-31 免费那天价格 0 且不可购买；11-01 起半价可购买并带原价与体验点', async () => {
       const free = await run(fakeRuntime({ now: FREE }).rt, { path: '/mcp/pricing', method: 'GET' });
       assert.strictEqual(free.json.data.phase.id, 'free');
-      assert.strictEqual(free.json.data.phase.next.from, '2026-12-01');
+      assert.strictEqual(free.json.data.phase.next.from, '2026-11-01');
       assert.strictEqual(free.json.data.chargeCalls, false);
       const sm = free.json.data.skus.find((x: any) => x.sku === 'member_month');
       assert.deepStrictEqual([sm.price, sm.listPrice, sm.halfPrice, sm.purchasable], [0, 29, 14.5, false]);
       // 只有体验与会员两档，不再分入门 / Pro
       assert.deepStrictEqual(free.json.data.tiers.map((t: any) => t.id), ['free', 'member']);
       assert.ok(free.json.data.skus.filter((x: any) => x.kind === 'plan').every((x: any) => x.tier === 'member'));
-      const half = await run(fakeRuntime({ now: HALF }).rt, { path: '/mcp/pricing', method: 'GET' });
-      assert.strictEqual(half.json.data.phase.id, 'half');
-      const hm = half.json.data.skus.find((x: any) => x.sku === 'member_month');
-      assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [14.5, 29, true]);
+      for (const now of [NOV, HALF]) {
+        const half = await run(fakeRuntime({ now }).rt, { path: '/mcp/pricing', method: 'GET' });
+        assert.strictEqual(half.json.data.phase.id, 'half');
+        assert.strictEqual(half.json.data.chargeCalls, true);
+        assert.deepStrictEqual(half.json.data.phases.map((p: any) => p.id), ['half', 'full']);
+        assert.strictEqual(half.json.data.trialPoints, 50);
+        assert.strictEqual(half.json.data.rechargeUrl, 'https://www.agent-journey.cn/developer#pricing');
+        assert.ok(!/免费/.test(half.json.data.promo));
+        const hm = half.json.data.skus.find((x: any) => x.sku === 'member_month');
+        assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [14.5, 29, true]);
+      }
     });
 
-    it('免费期下单返回 400 并说明何时开始收费', async () => {
+    it('免费那天下单返回 400 并说明何时开始收费；11 月起可下单', async () => {
       const { rt } = fakeRuntime({ userIdOf: async () => 'u1', now: FREE });
       const r = await run(rt, { path: '/mcp/me/orders', body: { sku: 'member_month' } });
       assert.strictEqual(r.status, 400);
-      assert.ok(/免费期/.test(r.json.message) && r.json.message.includes('2026-12-01'));
+      assert.ok(/免费期/.test(r.json.message) && r.json.message.includes('2026-11-01'));
+      const nov = await run(fakeRuntime({ userIdOf: async () => 'u1', now: NOV }).rt, { path: '/mcp/me/orders', body: { sku: 'member_month' } });
+      assert.strictEqual(nov.status, 200);
+      assert.strictEqual(nov.json.data.amount, 14.5);
     });
 
     it('下单返回收款码与备注码，金额为半价；未知商品 400', async () => {

@@ -4,6 +4,7 @@ import {
   SKUS,
   TIERS,
   TRIAL_POINTS,
+  RECHARGE_URL,
   currentPhase,
   phasePrice,
   PRICING_PHASES,
@@ -48,10 +49,13 @@ export function pricing(now = new Date(), alipay = false) {
     payChannels: alipay ? ['alipay', 'wechat_qr'] : ['wechat_qr'],
     currency: 'CNY',
     phase,
-    phases: PRICING_PHASES,
+    // 免费那一天（10-31）过去后不再在时间线上展示
+    phases: PRICING_PHASES.filter(p => p.id !== 'free' || phase.id === 'free'),
     promo: phase.note,
     unit: '1 点 ≈ ¥0.1，Agent 与 Invest 两个服务共用余额',
     trialPoints: TRIAL_POINTS,
+    trialNote: `新用户开通即送 ${TRIAL_POINTS} 点体验额度，用完需开通会员或购买加油包`,
+    rechargeUrl: RECHARGE_URL,
     tiers: Object.entries(TIERS).map(([id, t]) => ({ id, ...t })),
     skus: SKUS.map(s => ({
       sku: s.sku,
@@ -60,7 +64,7 @@ export function pricing(now = new Date(), alipay = false) {
       tier: s.tier || null,
       months: s.months || null,
       points: s.points,
-      // 当前阶段的售价；免费期为 0 且不开放购买（purchasable=false）
+      // 当前阶段的售价（只有 2026-10-31 公测免费那一天为 0 且不开放购买）
       price: phasePrice(s, phase.id) / 100,
       listPrice: s.listCents / 100,
       halfPrice: phasePrice(s, 'half') / 100,
