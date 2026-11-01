@@ -168,7 +168,7 @@ describe('资料核实统计 SQL 回归（本地内存数据）', function () {
     c.syncSecret = 'fixture-export-only';
     c.ctx = { headers: { 'x-sync-secret': 'fixture-export-only' } } as any;
     const stub: any = {};
-    for (const name of ['overview', 'funnel', 'pathFunnel', 'channels', 'daily', 'signupAudit', 'aiUsage', 'selfReportedOrders', 'manuallyVerifiedPdfOrders', 'unverifiedSelfReportedPdfOrders', 'legacyPaidPdfOrders', 'topPaths', 'landingSources', 'serviceModalOpens', 'skillSummary']) {
+    for (const name of ['overview', 'funnel', 'pathFunnel', 'channels', 'daily', 'signupAudit', 'aiUsage', 'selfReportedOrders', 'manuallyVerifiedPdfOrders', 'unverifiedSelfReportedPdfOrders', 'legacyPaidPdfOrders', 'topPaths', 'landingSources', 'serviceModalOpens', 'skillSummary', 'eventBreakdown']) {
       stub[name] = async () => ({ name });
     }
     c.growthService = stub;
@@ -182,5 +182,6 @@ describe('资料核实统计 SQL 回归（本地内存数据）', function () {
     assert.strictEqual(data.landingSources.name, 'landingSources');
     assert.strictEqual(data.serviceModalOpens.name, 'serviceModalOpens');
     assert.strictEqual(data.skill.name, 'skillSummary');
+    assert.strictEqual(data.eventBreakdown.name, 'eventBreakdown');
   });
 });

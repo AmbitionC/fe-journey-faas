@@ -105,6 +105,27 @@ export function countSignupSites(
 }
 
 /**
+ * 需要按属性拆开看的埋点（2026-11-01）。events 只给总数，而有些问题只有拆开才答得上：
+ * 白屏是发版后旧分包失效（stale）还是网络（network）；提示卡是不是分包错误；Skill 入口是从哪个位置点进来的。
+ * 只拆这里列出的（事件, 属性），值也只放行短标识长相（见 propValueLabel）——props 来自免登录的 /event/track。
+ */
+export const EVENT_PROP_BREAKDOWN: [string, string][] = [
+  ['chunk_reload', 'kind'],
+  ['app_error_card', 'chunk'],
+  ['app_error_card', 'kind'],
+  ['home_cta_click', 'cta'],
+  ['home_cta_click', 'placement'],
+  ['skill_entry_click', 'placement'],
+];
+
+/** 属性值的展示名：缺失为「(无)」，短标识（字母数字下划线连字符，≤32）原样，其余一律「(其他)」。 */
+export function propValueLabel(raw?: string | null): string {
+  if (raw == null || raw === '' || raw === 'null') return '(无)';
+  const v = String(raw);
+  return /^[A-Za-z0-9_-]{1,32}$/.test(v) && !/\d{7,}/.test(v) ? v : '(其他)';
+}
+
+/**
  * 增长复盘系统（数据口径见 front-end-journey 仓库 docs/growth-review-playbook.md）。
  * 漏斗四层：访问(uv) → 注册 → 破冰付费(pdf/书) → 高价付费(会员/咨询)。
  * 站内数据实时聚合（量级小无需预算表）；站外数据走 growth_stat 手动录入。
@@ -679,6 +700,40 @@ export class GrowthService {
     } catch {
       return { days, list: [], error: 'query_failed' };
     }
+  }
+
+  /** 按属性拆分的埋点计数（拆哪些见 EVENT_PROP_BREAKDOWN）。人数按 userId 去重（游客为 guest:ip）。 */
+  async eventBreakdown(days = 7, exclude?: string[]) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
+    const list = await Promise.all(
+      EVENT_PROP_BREAKDOWN.map(async ([event, prop]) => {
+        try {
+          const valExpr = `JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.${prop}'))`;
+          const qb = this.eventLogModel
+            .createQueryBuilder('e')
+            .select(valExpr, 'value')
+            .addSelect('COUNT(*)', 'count')
+            .addSelect('COUNT(DISTINCT e.userId)', 'users')
+            .where('e.event = :event', { event })
+            .andWhere('e.createTime >= :since', { since })
+            .groupBy(valExpr);
+          if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+          const merged = new Map<string, { value: string; count: number; users: number }>();
+          for (const r of await qb.getRawMany()) {
+            const value = propValueLabel(r.value);
+            const m = merged.get(value) || { value, count: 0, users: 0 };
+            m.count += Number(r.count || 0);
+            m.users += Number(r.users || 0);
+            merged.set(value, m);
+          }
+          return { event, prop, values: [...merged.values()].sort((a, b) => b.count - a.count) };
+        } catch {
+          return { event, prop, values: [], error: 'query_failed' };
+        }
+      })
+    );
+    return { days, list };
   }
 
   /** Skill / MCP 开发者服务的经营汇总（口径见 ./skillSummary）。 */
