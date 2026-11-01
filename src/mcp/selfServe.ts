@@ -22,6 +22,7 @@ import {
   verifyNotify,
   withinAlipayLimit,
 } from './alipay';
+import { track } from './analytics';
 
 /**
  * 自助开通与购买（/mcp/pricing、/mcp/me/*），以及管理端的订单/点数/看板（/mcp/admin/* 的计费部分）。
@@ -49,11 +50,7 @@ function parse(body: Buffer): any {
   }
 }
 
-export function pricing(
-  now = new Date(),
-  alipay = false,
-  alipayMaxCents = 0
-) {
+export function pricing(now = new Date(), alipay = false, alipayMaxCents = 0) {
   const phase = currentPhase(now);
   return {
     payChannels: alipay ? ['alipay', 'wechat_qr'] : ['wechat_qr'],
@@ -117,6 +114,48 @@ function alipayOverLimit(rt: McpRuntime, o: any): boolean {
   return !!rt.alipay && !withinAlipayLimit(rt.alipay, Number(o.amount_cents));
 }
 
+/**
+ * 发货的唯一入口（支付宝通知、跳回查单、管理员确认、自报即发都走这里），
+ * 真正发货（'ok'）时记 order_paid，重复确认不重复记。
+ */
+async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
+  const r = await rt.billing.fulfill(orderNo, actor);
+  if (r === 'ok') {
+    const o = await rt.billing.getOrder(orderNo).catch(() => null);
+    await track(rt, {
+      event: 'order_paid',
+      userId: o?.user_id || null,
+      props: {
+        orderNo,
+        sku: o?.sku || null,
+        amountCents: o ? Number(o.amount_cents) : null,
+        channel: paidVia(actor),
+      },
+    });
+  }
+  return r;
+}
+
+/** 开通：只在真正新建账户时记 account_activated + trial_granted。 */
+async function trackActivation(
+  rt: McpRuntime,
+  userId: string,
+  created: boolean,
+  via: 'activate' | 'order'
+) {
+  if (!created) return;
+  await track(rt, {
+    event: 'account_activated',
+    userId,
+    props: { created, via },
+  });
+  await track(rt, {
+    event: 'trial_granted',
+    userId,
+    props: { points: TRIAL_POINTS },
+  });
+}
+
 function alipayUrlOf(rt: McpRuntime, o: any): string | null {
   if (!rt.alipay || !PAYABLE.includes(o.status)) return null;
   if (alipayOverLimit(rt, o)) return null;
@@ -141,7 +180,7 @@ async function syncAlipay(rt: McpRuntime, o: any) {
       console.error('[mcp] 支付宝查单金额不符', o.order_no, r.total_amount);
     return { paid: false, reason: c.reason };
   }
-  await rt.billing.fulfill(o.order_no, `alipay:${c.tradeNo}`);
+  await fulfillTracked(rt, o.order_no, `alipay:${c.tradeNo}`);
   return { paid: true, reason: 'ok' };
 }
 
@@ -174,7 +213,7 @@ export async function handleAlipayNotify(
     const o = await rt.billing.getOrder(String(params.out_trade_no || ''));
     const c = checkPaid(rt.alipay, params, o);
     if (c.ok) {
-      const r = await rt.billing.fulfill(o.order_no, `alipay:${c.tradeNo}`);
+      const r = await fulfillTracked(rt, o.order_no, `alipay:${c.tradeNo}`);
       if (r === 'already' && o.status === 'rejected')
         console.error('[mcp] 已驳回订单收到支付宝付款，需人工退款', o.order_no);
     } else if (
@@ -262,6 +301,7 @@ export async function handleSelfServe(
 
     if (path === '/mcp/me/activate' && method === 'POST') {
       const { created } = await rt.billing.activate(userId);
+      await trackActivation(rt, userId, created, 'activate');
       return send(res, 200, {
         success: true,
         data: { created, trialPoints: created ? TRIAL_POINTS : 0 },
@@ -295,6 +335,11 @@ export async function handleSelfServe(
         dailyLimit: TIERS[tier].dailyLimit,
         userId,
       });
+      await track(rt, {
+        event: 'key_created',
+        userId,
+        props: { tier, activeKeys: n + 1 },
+      });
       return send(res, 200, {
         success: true,
         data: { key: created.key, prefix: created.prefix },
@@ -304,6 +349,12 @@ export async function handleSelfServe(
 
     if (path === '/mcp/me/keys/revoke' && method === 'POST') {
       const ok = await rt.store.revokeOwn(Number(data.id), userId);
+      if (ok)
+        await track(rt, {
+          event: 'key_revoked',
+          userId,
+          props: { keyId: Number(data.id) },
+        });
       return send(res, ok ? 200 : 404, {
         success: ok,
         message: ok ? '已吊销' : 'Key 不存在',
@@ -322,14 +373,34 @@ export async function handleSelfServe(
             ? `公测免费期内调用不扣点，无需购买。${phase.next.from} 起${phase.next.name}。`
             : '公测免费期内调用不扣点，无需购买。',
         });
-      await rt.billing.activate(userId); // 下单即视为开通
+      const act = await rt.billing.activate(userId); // 下单即视为开通
+      await trackActivation(rt, userId, !!act?.created, 'order');
       const amount = phasePrice(sku, phase.id);
       const o = await rt.billing.createOrder(userId, sku, amount);
+      await track(rt, {
+        event: 'order_created',
+        userId,
+        props: {
+          orderNo: o.order_no,
+          sku: sku.sku,
+          amountCents: Number(o.amount_cents),
+          listCents: sku.listCents,
+          phase: phase.id,
+          reused: !!o.reused,
+        },
+      });
+      const payUrl = alipayUrlOf(rt, o);
+      if (payUrl)
+        await track(rt, {
+          event: 'pay_link_issued',
+          userId,
+          props: { orderNo: o.order_no, channel: 'alipay' },
+        });
       return send(res, 200, {
         success: true,
         data: {
           ...orderView({ ...o, created_at: o.created_at || null }),
-          alipayUrl: alipayUrlOf(rt, o),
+          alipayUrl: payUrl,
           qr: PAY_QR,
           howToPay: `微信扫码支付 ¥${(Number(o.amount_cents) / 100).toFixed(
             2
@@ -351,7 +422,12 @@ export async function handleSelfServe(
           message: '订单状态已更新过',
         });
       }
-      if (rt.autoFulfill) await rt.billing.fulfill(orderNo, 'auto');
+      await track(rt, {
+        event: 'order_reported',
+        userId,
+        props: { orderNo, channel: 'wechat_qr' },
+      });
+      if (rt.autoFulfill) await fulfillTracked(rt, orderNo, 'auto');
       const o = await rt.billing.getOrder(orderNo);
       return send(res, 200, {
         success: true,
@@ -383,6 +459,11 @@ export async function handleSelfServe(
                 )}，请改用微信扫码`
               : '订单已处理，无需再付款',
         });
+      await track(rt, {
+        event: 'pay_link_issued',
+        userId,
+        props: { orderNo: o.order_no, sku: o.sku, channel: 'alipay' },
+      });
       return send(res, 200, { success: true, data: { alipayUrl: url } });
     }
 
@@ -477,7 +558,8 @@ export async function handleBillingAdmin(
     };
   }
   if (path === '/mcp/admin/orders/confirm' && method === 'POST') {
-    const r = await rt.billing.fulfill(
+    const r = await fulfillTracked(
+      rt,
       String(data.orderNo || ''),
       await actor()
     );
@@ -497,6 +579,11 @@ export async function handleBillingAdmin(
       await actor(),
       data.note
     );
+    if (ok)
+      await track(rt, {
+        event: 'order_rejected',
+        props: { orderNo: String(data.orderNo || '') },
+      });
     return {
       status: ok ? 200 : 404,
       body: { success: ok, message: ok ? '已驳回' : '订单不存在或已处理' },
