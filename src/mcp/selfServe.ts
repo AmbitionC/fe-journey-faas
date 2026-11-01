@@ -4,11 +4,10 @@ import {
   SKUS,
   TIERS,
   TRIAL_POINTS,
-  RECHARGE_URL,
   currentPhase,
   phasePrice,
   PRICING_PHASES,
-  TOOL_COST,
+  toolCostFor,
   effectiveTier,
   findSku,
   findSellableSku,
@@ -23,6 +22,8 @@ import {
   withinAlipayLimit,
 } from './alipay';
 import { track } from './analytics';
+import type { Product } from './store';
+import { isProduct, siteOf } from './sites';
 
 /**
  * 自助开通与购买（/mcp/pricing、/mcp/me/*），以及管理端的订单/点数/看板（/mcp/admin/* 的计费部分）。
@@ -50,7 +51,16 @@ function parse(body: Buffer): any {
   }
 }
 
-export function pricing(now = new Date(), alipay = false, alipayMaxCents = 0) {
+/**
+ * 公开价目。传 product 时只下发该产品的工具价目与它自己站点的充值链接——
+ * 两个站各自只讲自己（owner 2026-11-01）；不传时与旧行为一致（全部工具、Agent 站链接）。
+ */
+export function pricing(
+  now = new Date(),
+  alipay = false,
+  alipayMaxCents = 0,
+  product: Product | null = null
+) {
   const phase = currentPhase(now);
   return {
     payChannels: alipay ? ['alipay', 'wechat_qr'] : ['wechat_qr'],
@@ -61,10 +71,12 @@ export function pricing(now = new Date(), alipay = false, alipayMaxCents = 0) {
     // 免费那一天（10-31）过去后不再在时间线上展示
     phases: PRICING_PHASES.filter(p => p.id !== 'free' || phase.id === 'free'),
     promo: phase.note,
-    unit: '1 点 ≈ ¥0.1，Agent 与 Invest 两个服务共用余额',
+    // 文案不提另一个产品：余额共用是实现细节，不是卖点
+    unit: '1 点 ≈ ¥0.1，按调用扣点，失败自动退点',
     trialPoints: TRIAL_POINTS,
     trialNote: `新用户开通即送 ${TRIAL_POINTS} 点体验额度，用完需开通会员或购买加油包`,
-    rechargeUrl: RECHARGE_URL,
+    product,
+    rechargeUrl: siteOf(product).recharge,
     tiers: Object.entries(TIERS).map(([id, t]) => ({ id, ...t })),
     skus: SKUS.map(s => ({
       sku: s.sku,
@@ -80,7 +92,7 @@ export function pricing(now = new Date(), alipay = false, alipayMaxCents = 0) {
       purchasable: phase.id !== 'free',
       desc: s.desc,
     })),
-    toolCost: TOOL_COST,
+    toolCost: toolCostFor(product),
     defaultToolCost: 1,
     chargeCalls: phase.id !== 'free',
   };
@@ -156,14 +168,21 @@ async function trackActivation(
   });
 }
 
-function alipayUrlOf(rt: McpRuntime, o: any): string | null {
+/** 下单 / 取链接时前端带的来源站点，只认两个产品，其余按 Agent Journey。 */
+function siteParam(data: any): Product {
+  return isProduct(data?.site) ? data.site : 'agent';
+}
+
+function alipayUrlOf(rt: McpRuntime, o: any, site: Product = 'agent'): string | null {
   if (!rt.alipay || !PAYABLE.includes(o.status)) return null;
   if (alipayOverLimit(rt, o)) return null;
   const sku = findSku(o.sku);
   return pagePayUrl(rt.alipay, {
     orderNo: o.order_no,
     amountCents: Number(o.amount_cents),
-    subject: `Journey 开发者服务 · ${sku?.name || o.sku}`,
+    subject: `${siteOf(site).name} 会员与点数 · ${sku?.name || o.sku}`,
+    // 付完回到下单的那个站，不再一律回 Agent Journey
+    returnUrl: siteOf(site).payReturn,
   });
 }
 
@@ -241,11 +260,18 @@ export async function handleSelfServe(
 ) {
   const path = url.pathname.replace(/\/+$/, '');
   const now = rt.now ? rt.now() : new Date();
-  if (path === '/mcp/pricing' && method === 'GET')
+  if (path === '/mcp/pricing' && method === 'GET') {
+    const p = url.searchParams.get('product');
     return send(res, 200, {
       success: true,
-      data: pricing(now, !!rt.alipay, rt.alipay?.maxCents || 0),
+      data: pricing(
+        now,
+        !!rt.alipay,
+        rt.alipay?.maxCents || 0,
+        isProduct(p) ? p : null
+      ),
     });
+  }
 
   const userId = await rt.userIdOf(req.headers as any);
   if (!userId) return send(res, 401, { success: false, message: '请先登录' });
@@ -377,6 +403,7 @@ export async function handleSelfServe(
       const act = await rt.billing.activate(userId); // 下单即视为开通
       await trackActivation(rt, userId, !!act?.created, 'order');
       const amount = phasePrice(sku, phase.id);
+      const site = siteParam(data);
       const o = await rt.billing.createOrder(userId, sku, amount);
       await track(rt, {
         event: 'order_created',
@@ -388,9 +415,10 @@ export async function handleSelfServe(
           listCents: sku.listCents,
           phase: phase.id,
           reused: !!o.reused,
+          site,
         },
       });
-      const payUrl = alipayUrlOf(rt, o);
+      const payUrl = alipayUrlOf(rt, o, site);
       if (payUrl)
         await track(rt, {
           event: 'pay_link_issued',
@@ -446,7 +474,7 @@ export async function handleSelfServe(
       const o = await rt.billing.getOrder(String(data.orderNo || ''));
       if (!o || o.user_id !== userId)
         return send(res, 404, { success: false, message: '订单不存在' });
-      const url = alipayUrlOf(rt, o);
+      const url = alipayUrlOf(rt, o, siteParam(data));
       if (!url)
         return send(res, 400, {
           success: false,
