@@ -10,6 +10,7 @@ import { GrowthStatEntity } from '../../entity/growthStat';
 import { GrowthReviewEntity } from '../../entity/growthReview';
 import { buildPdfSalesReport, pdfSalesWindow } from './pdfSales';
 import { InvestDbService } from '../invest/db';
+import { skillSummary } from './skillSummary';
 
 /** 高价 SKU 的订单类型（order.type）；破冰 SKU = pdf + 书籍订单 */
 const HIGH_VALUE_ORDER_TYPES = ['member', 'consult'];
@@ -678,6 +679,15 @@ export class GrowthService {
     } catch {
       return { days, list: [], error: 'query_failed' };
     }
+  }
+
+  /** Skill / MCP 开发者服务的经营汇总（口径见 ./skillSummary）。 */
+  async skillSummary(days = 7, exclude?: string[]) {
+    return skillSummary(
+      (sql, params) => this.eventLogModel.manager.query(sql, params),
+      days,
+      this.excludedUserIds(exclude)
+    );
   }
 
   /**

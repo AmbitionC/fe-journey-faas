@@ -86,6 +86,7 @@ export class GrowthHTTPService {
       topPaths,
       landingSources,
       serviceModalOpens,
+      skill,
     ] = await Promise.all([
         this.metricsService.overview(excludeUsers).catch(() => null),
         this.growthService.overview(excludeUsers).catch(() => null),
@@ -107,6 +108,7 @@ export class GrowthHTTPService {
         this.growthService.topPaths(days, excludeUsers).catch(() => null),
         this.growthService.landingSources(days, excludeUsers).catch(() => null),
         this.growthService.serviceModalOpens(days, excludeUsers).catch(() => null),
+        this.growthService.skillSummary(days, excludeUsers).catch(() => null),
       ]);
     return {
       success: true,
@@ -130,6 +132,7 @@ export class GrowthHTTPService {
         topPaths,
         landingSources,
         serviceModalOpens,
+        skill,
       },
     };
   }
