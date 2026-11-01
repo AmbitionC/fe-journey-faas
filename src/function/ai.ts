@@ -22,6 +22,16 @@ import { EntitlementService } from '../service/entitlement';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
 import { auxModuleFor, auxBucketFor } from '../common/aiPurpose';
+import { InterviewQuestionIndexService } from '../service/interview/questionIndex';
+import { sanitizeKeys, sanitizeLabel } from '../common/interviewTopics';
+import {
+  normalizeSeed,
+  pickInterviewPlan,
+  planExhausted,
+  planSources,
+  splitEndMark,
+} from '../common/mockInterviewPlan';
+import { INTERVIEW_END_MARK } from '../service/ai/prompts';
 import {
   isMembershipFree,
   hasValidMemberColumn,
@@ -88,6 +98,12 @@ class AIInterviewDTO {
   topic: string;
   history?: { role: 'interviewer' | 'candidate'; content: string }[];
   mode?: 'ask' | 'evaluate';
+  /** 按目标公司 / 岗位面试：那批面经的 key（前端按筛选算好）；有值时题目从这些面经里抽 */
+  keys?: string[];
+  /** 目标名，如「字节跳动 · Agent 开发」 */
+  label?: string;
+  /** 一场面试的随机种子（开始时生成，之后每轮原样带上，服务端据此重算同一份题） */
+  seed?: number;
 }
 
 class AIConversationDTO {
@@ -126,6 +142,9 @@ export class AiHTTPService {
 
   @Inject()
   entitlementService: EntitlementService;
+
+  @Inject()
+  questionIndex: InterviewQuestionIndexService;
 
   @Config('ai')
   aiConfig: { rateLimit: { freeUserPerDay: number } };
@@ -599,6 +618,11 @@ export class AiHTTPService {
       return { success: true, data: { paywall: true, message: '开通会员解锁 AI 模拟面试' } };
     }
     await this.aiProxyService.checkRateLimit(userId, isMember);
+    const keys = sanitizeKeys(body.keys);
+    if (keys.length) {
+      const company = await this.companyInterview(body, keys, userId);
+      if (company) return { success: true, data: company };
+    }
     const reply = await this.aiProxyService.interview(
       {
         topic: body.topic || '前端综合',
@@ -608,5 +632,44 @@ export class AiHTTPService {
       userId
     );
     return { success: true, data: { reply } };
+  }
+
+  /**
+   * 按目标公司 / 岗位模拟面试：从用户选定的那批真实面经里按 seed 抽 5 道题，
+   * 每轮都重算同一份题（接口无状态），题问完后让面试官整体点评收尾。
+   * 这批面经里抽不出题时返回 null，退回按方向出题。
+   */
+  private async companyInterview(
+    body: AIInterviewDTO,
+    keys: string[],
+    userId: string
+  ) {
+    const { index, knowledge, careerKeys } = await this.questionIndex.load();
+    const { articlesAnalyzed, questions } = pickInterviewPlan(index, {
+      keys,
+      knowledgeTitles: knowledge,
+      skipKeys: careerKeys,
+      seed: normalizeSeed(body.seed),
+    });
+    if (!questions.length) return null;
+    const all = Array.isArray(body.history) ? body.history : [];
+    const history = all.slice(-40);
+    const raw = await this.aiProxyService.companyInterview(
+      {
+        label: sanitizeLabel(body.label) || '目标公司',
+        articlesAnalyzed,
+        plan: questions,
+        history,
+        finish: planExhausted(all, questions.length),
+      },
+      userId
+    );
+    const { reply, finished } = splitEndMark(raw, INTERVIEW_END_MARK);
+    return {
+      reply,
+      finished,
+      articlesAnalyzed,
+      plan: planSources(questions),
+    };
   }
 }

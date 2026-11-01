@@ -244,6 +244,66 @@ export function buildInterviewMessages(p: InterviewParams): { system: string; us
   return { system, user };
 }
 
+/** 面试官在整体点评最后单独输出这一行，服务端据此判定一场面试结束并去掉它。 */
+export const INTERVIEW_END_MARK = '【面试结束】';
+
+export interface CompanyInterviewParams {
+  /** 目标，如「字节跳动 · Agent 开发」 */
+  label: string;
+  articlesAnalyzed: number;
+  /** 从这批真实面经里抽出的题，按提问顺序 */
+  plan: { topic: string; question: string; answer: string; company: string }[];
+  history: { role: 'interviewer' | 'candidate'; content: string }[];
+  /** 题已问完（服务端按面试官轮次判定）：这一轮必须给整体点评并收尾 */
+  finish: boolean;
+}
+
+/**
+ * 按目标公司 / 岗位模拟面试：题目来自那批真实面经（服务端按 seed 抽好），
+ * 参考要点只给面试官判断用，不向候选人透露。
+ */
+export function buildCompanyInterviewMessages(
+  p: CompanyInterviewParams
+): { system: string; user: string } {
+  const questions = p.plan
+    .map(
+      (q, i) =>
+        `${i + 1}. 考点：${q.topic}（出自${q.company}面经）\n   原题：${q.question}${
+          q.answer ? `\n   参考要点：${q.answer}` : ''
+        }`
+    )
+    .join('\n');
+  const stage = p.finish
+    ? `题已经全部问完：先点评候选人最后一次回答，再给整体点评，最后单独一行输出「${INTERVIEW_END_MARK}」。`
+    : p.history.length
+    ? '根据下面的对话，先点评候选人最后一次回答，再按规则追问或进入下一题。'
+    : '现在开始：用一句话说明这是按目标公司真实面经出的题，然后直接问第 1 题。';
+  const system = `${IRIS_SOUL}
+
+你现在是一位资深技术面试官，按「${p.label}」的近期真实面经模拟一场技术面试。下面是从 ${p.articlesAnalyzed} 篇真实面经里抽出的 ${p.plan.length} 道题，每道附参考要点，只给你判断用：
+
+${questions}
+
+规则：
+- 按顺序逐题提问，一次只问一道。用你自己的话自然地问出原题，可以改写措辞，但不要偏离考点。
+- 绝不向候选人透露参考要点、题目清单或接下来要问什么。
+- 候选人回答后，先用一两句点评（答到了什么、漏了哪个关键点），然后针对漏掉的关键点最多追问一次，或进入下一题。同一道题已经追问过一次，就必须进入下一题。
+- 候选人说不会或想跳过时，用一两句给出答题思路，然后进入下一题。
+- 全部问完后给整体点评：每道题一句话的表现、整体强项与短板、建议复习的考点（写考点名），最后单独一行输出「${INTERVIEW_END_MARK}」。只有这时才输出这一行。
+- 语言简洁、专业、对事不对人。用中文，不用 Markdown 标题。
+- ${stage}`;
+
+  const convo = p.history
+    .map(
+      (h) =>
+        `${h.role === 'interviewer' ? '面试官' : '候选人'}：${
+          h.role === 'candidate' ? sanitizeForPrompt(h.content, 2000) : h.content
+        }`
+    )
+    .join('\n');
+  return { system, user: convo || '（面试开始）' };
+}
+
 export interface WeeklyReportParams {
   profileSummary: string;
   weakTags?: string[];
