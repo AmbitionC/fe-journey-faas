@@ -323,19 +323,21 @@ resources:
           triggerType: timer
           qualifier: LATEST
           triggerConfig:
-            # 北京 10/11/13/14/15 点（UTC 2/3/5/6/7）盘中恐慌(近似)全市场快照；
-            # 任务内含交易时段/交易日守卫，非时段毫秒退出；日频收盘值不受影响。
-            cronExpression: '0 0 2,3,5,6,7 ? * MON-FRI'
+            # 每 30 分钟（北京 09:00-15:59 整点与半点）盘中恐慌(近似)全市场快照；
+            # 任务内含交易时段/交易日守卫（09:30-11:30 / 13:00-15:00，一天 10 个快照），
+            # 非时段毫秒退出；日频收盘值不受影响。2026-11-01 owner：小时级→30 分钟级。
+            cronExpression: '0 0/30 1-7 ? * MON-FRI'
             enable: true
             payload: 'fear_intraday'
         - triggerName: fear-panic-watch
           triggerType: timer
           qualifier: LATEST
           triggerConfig:
-            # 每 5 分钟（北京 09:00-15:59）恐慌密控哨兵：job 内先轻量查当日 fear_intraday，
-            # 仅当曾 ≥75 且最新 ≥70（密控态）才全市场加密重算、把小时级抬到 5 分钟级；
-            # 常态一次 SELECT 即毫秒退出（同 plan_watchdog 哨兵，空转成本可忽略）。纯监测不下单。
-            cronExpression: '0 0/5 1-7 ? * MON-FRI'
+            # 每 1 分钟（北京 09:00-15:59）恐慌密控哨兵：job 内先轻量查当日 fear_intraday，
+            # 仅当曾 ≥75（极度恐慌）且最新 ≥70（密控态）才全市场加密重算、把 30 分钟级抬到
+            # 1 分钟级；常态一次 SELECT 即毫秒退出（同 plan_watchdog 哨兵，空转成本可忽略）。
+            # 纯监测不下单。2026-11-01 owner：5 分钟→1 分钟（恐慌满格 100 另有特别提醒）。
+            cronExpression: '0 * 1-7 ? * MON-FRI'
             enable: true
             payload: 'fear_panic_watch'
         - triggerName: weekly-rebuild-review
