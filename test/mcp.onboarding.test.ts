@@ -46,3 +46,44 @@ describe('MCP 新用户引导', () => {
     assert.ok(lowBalanceNotice(9, 2)!.includes('agent-journey.cn/developer?from=credit_low'));
   });
 });
+
+describe('MCP 站点表（两个产品各自独立）', () => {
+  const { payReturnUrl, rechargeLink, siteOf } = require('../src/mcp/sites');
+
+  it('付款回跳只认白名单路径，不认的回该站默认页（防开放跳转）', () => {
+    assert.strictEqual(
+      payReturnUrl('agent', '/membership'),
+      'https://www.agent-journey.cn/membership'
+    );
+    assert.strictEqual(
+      payReturnUrl('agent', '/membership?x=1#pricing'),
+      'https://www.agent-journey.cn/membership'
+    );
+    assert.strictEqual(payReturnUrl('agent', '/evil'), 'https://www.agent-journey.cn/developer');
+    assert.strictEqual(
+      payReturnUrl('agent', 'https://evil.example/membership'),
+      'https://www.agent-journey.cn/developer'
+    );
+    assert.strictEqual(payReturnUrl('agent'), 'https://www.agent-journey.cn/developer');
+    // Invest 站没有会员页，带了也回 /skills
+    assert.strictEqual(
+      payReturnUrl('invest', '/membership'),
+      'https://invest-journey.vercel.app/skills'
+    );
+    assert.strictEqual(payReturnUrl('invest'), 'https://invest-journey.vercel.app/skills');
+    // 未知产品按 Agent Journey
+    assert.strictEqual(payReturnUrl(undefined, '/membership'), 'https://www.agent-journey.cn/membership');
+  });
+
+  it('充值链接按产品带来源参数', () => {
+    assert.strictEqual(
+      rechargeLink('credit_low', 'invest'),
+      'https://invest-journey.vercel.app/skills?from=credit_low#pricing'
+    );
+    assert.strictEqual(
+      rechargeLink('credit_exhausted', 'agent'),
+      'https://www.agent-journey.cn/developer?from=credit_exhausted#pricing'
+    );
+    assert.strictEqual(siteOf('nope').name, 'Agent Journey');
+  });
+});

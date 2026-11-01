@@ -17,22 +17,45 @@ export interface Site {
   manage: string;
   /** 价格区锚点：点数不足 / 余额提醒里的充值链接 */
   recharge: string;
-  /** 支付宝付款完成后的回跳页（页面会读 out_trade_no 主动查单） */
+  /** 支付宝付款完成后的默认回跳页（页面会读 out_trade_no 主动查单） */
   payReturn: string;
+  /** 允许前端指定的回跳页路径白名单（如 Agent Journey 的会员页）；不在表里的一律回默认页 */
+  payReturnPaths: string[];
 }
 
-const site = (name: string, origin: string, path: string): Site => ({
+const site = (
+  name: string,
+  origin: string,
+  path: string,
+  extraReturnPaths: string[] = []
+): Site => ({
   name,
   origin,
   manage: `${origin}${path}`,
   recharge: `${origin}${path}#pricing`,
   payReturn: `${origin}${path}`,
+  payReturnPaths: [path, ...extraReturnPaths],
 });
 
 export const SITES: Record<Product, Site> = {
-  agent: site('Agent Journey', 'https://www.agent-journey.cn', '/developer'),
+  agent: site('Agent Journey', 'https://www.agent-journey.cn', '/developer', [
+    '/membership',
+  ]),
   invest: site('Invest Journey', 'https://invest-journey.vercel.app', '/skills'),
 };
+
+/**
+ * 付款回跳地址：站点 + 可选页面路径。路径只认白名单（防开放跳转），不认就回该站默认页。
+ * Agent Journey 的会员页下单，付完要回会员页而不是开发者页。
+ */
+export function payReturnUrl(
+  product?: Product | string | null,
+  returnPath?: unknown
+): string {
+  const s = siteOf(product);
+  const p = typeof returnPath === 'string' ? returnPath.split(/[?#]/)[0] : '';
+  return s.payReturnPaths.includes(p) && p ? `${s.origin}${p}` : s.payReturn;
+}
 
 export function isProduct(x: unknown): x is Product {
   return x === 'agent' || x === 'invest';

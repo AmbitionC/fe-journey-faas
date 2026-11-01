@@ -23,7 +23,7 @@ import {
 } from './alipay';
 import { track } from './analytics';
 import type { Product } from './store';
-import { isProduct, siteOf } from './sites';
+import { isProduct, payReturnUrl, siteOf } from './sites';
 
 /**
  * 自助开通与购买（/mcp/pricing、/mcp/me/*），以及管理端的订单/点数/看板（/mcp/admin/* 的计费部分）。
@@ -173,7 +173,12 @@ function siteParam(data: any): Product {
   return isProduct(data?.site) ? data.site : 'agent';
 }
 
-function alipayUrlOf(rt: McpRuntime, o: any, site: Product = 'agent'): string | null {
+function alipayUrlOf(
+  rt: McpRuntime,
+  o: any,
+  site: Product = 'agent',
+  returnPath?: unknown
+): string | null {
   if (!rt.alipay || !PAYABLE.includes(o.status)) return null;
   if (alipayOverLimit(rt, o)) return null;
   const sku = findSku(o.sku);
@@ -181,8 +186,8 @@ function alipayUrlOf(rt: McpRuntime, o: any, site: Product = 'agent'): string | 
     orderNo: o.order_no,
     amountCents: Number(o.amount_cents),
     subject: `${siteOf(site).name} 会员与点数 · ${sku?.name || o.sku}`,
-    // 付完回到下单的那个站，不再一律回 Agent Journey
-    returnUrl: siteOf(site).payReturn,
+    // 付完回到下单的那个站、那一页（白名单内），不再一律回 Agent Journey 的开发者页
+    returnUrl: payReturnUrl(site, returnPath),
   });
 }
 
@@ -418,7 +423,7 @@ export async function handleSelfServe(
           site,
         },
       });
-      const payUrl = alipayUrlOf(rt, o, site);
+      const payUrl = alipayUrlOf(rt, o, site, data.returnPath);
       if (payUrl)
         await track(rt, {
           event: 'pay_link_issued',
@@ -474,7 +479,7 @@ export async function handleSelfServe(
       const o = await rt.billing.getOrder(String(data.orderNo || ''));
       if (!o || o.user_id !== userId)
         return send(res, 404, { success: false, message: '订单不存在' });
-      const url = alipayUrlOf(rt, o, siteParam(data));
+      const url = alipayUrlOf(rt, o, siteParam(data), data.returnPath);
       if (!url)
         return send(res, 400, {
           success: false,
