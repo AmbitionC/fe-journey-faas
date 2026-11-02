@@ -1,3 +1,9 @@
+import {
+  AGENT_STACK,
+  isAgentStackTerm,
+  joinRolePhrases,
+  roleGroupOf,
+} from '../../common/interviewRoles';
 import { ToolDef, ToolError, ServerSpec } from '../protocol';
 import { ONBOARDING_INSTRUCTIONS } from '../onboarding';
 
@@ -61,16 +67,33 @@ export function slimTree(nodes: any[], depth = 0, maxDepth = 6): any[] {
 }
 
 /** 导航树索引：articleKey → 正式标题与目录路径（正文库里的 title 多为空或取错，一律以导航树为准）。 */
-export function navIndex(
-  navData: any[]
-): Map<string, { title: string; path: string }> {
-  const out = new Map<string, { title: string; path: string }>();
+export interface NavEntry {
+  title: string;
+  path: string;
+  /** 岗位归类用（见 common/interviewRoles） */
+  role?: string;
+  roleCategory?: string;
+  roleGroup?: string;
+}
+
+export function navIndex(navData: any[]): Map<string, NavEntry> {
+  const out = new Map<string, NavEntry>();
   const walk = (nodes: any[], path: string[]) => {
     if (!Array.isArray(nodes)) return;
     for (const n of nodes) {
       const label = n.label || n.key || '';
       if (n.isLeaf === true)
-        out.set(n.key, { title: label, path: path.join(' / ') });
+        out.set(n.key, {
+          title: label,
+          path: path.join(' / '),
+          ...(typeof n.role === 'string' ? { role: n.role } : {}),
+          ...(typeof n.roleCategory === 'string'
+            ? { roleCategory: n.roleCategory }
+            : {}),
+          ...(typeof n.roleGroup === 'string'
+            ? { roleGroup: n.roleGroup }
+            : {}),
+        });
       else if (Array.isArray(n.children)) walk(n.children, [...path, label]);
     }
   };
@@ -111,10 +134,9 @@ export function cleanSnippet(s?: string): string | undefined {
 
 /** 「字节全栈最喜欢问什么」里只有公司和岗位有用。 */
 const TOPIC_NOISE =
-  /最喜欢|喜欢|经常|常常|常见|高频|考点|面试题|面试|面经|岗位|职位|方向|问题|哪些|什么|会问|爱问|常问|问/g;
+  /最喜欢|最常问|最常考|最爱问|喜欢|经常|常常|常见|常考|高频|考点|面试题|面试|面经|岗位|职位|方向|问题|哪些|什么|会问|爱问|常问|问/g;
 export function topicTerms(keyword: string): string[] {
-  return cleanQuery(keyword)
-    .replace(TOPIC_NOISE, ' ')
+  return joinRolePhrases(cleanQuery(keyword).replace(TOPIC_NOISE, ' '))
     .split(/\s+/)
     .map(x => x.trim())
     .filter(Boolean);
@@ -135,9 +157,11 @@ const KNOWN_COMPANIES =
 /**
  * 按导航树标题 + 公司部门路径筛面经：每个词都要出现。
  * 「字节全栈」这类连写的词按已知公司名前缀切一刀再匹配（标题里有「字节 AI 全栈」这种写法）。
+ * 岗位词「Agent 全栈研发」（及 Agent 开发 / AI 应用开发 / AI 全栈 / 全栈）按网站同一套岗位分类匹配，
+ * 不要求标题里一字不差。
  */
 export function matchInterviews(
-  nav: Map<string, { title: string; path: string }>,
+  nav: Map<string, NavEntry>,
   terms: string[]
 ): string[] {
   const split: string[] = [];
@@ -154,7 +178,9 @@ export function matchInterviews(
   return [...nav.entries()]
     .filter(([, v]) => {
       const hay = `${v.title} ${v.path}`.toLowerCase();
-      return split.every(t => hay.includes(t));
+      return split.every(t =>
+        isAgentStackTerm(t) ? roleGroupOf(v) === AGENT_STACK : hay.includes(t)
+      );
     })
     .map(([k]) => k);
 }
@@ -221,7 +247,7 @@ export function fuseHits(
 }
 
 async function navMaps(d: AgentDeps, modules: string[]) {
-  const maps: Record<string, Map<string, { title: string; path: string }>> = {};
+  const maps: Record<string, Map<string, NavEntry>> = {};
   await Promise.all(
     modules.map(async m => {
       try {
@@ -471,13 +497,14 @@ export const agentTools: ToolDef<AgentDeps>[] = [
     description:
       '按公司 / 部门 / 岗位统计站内面经里最常被问的考点，一次返回考点排行（出现在几篇面经里）和原题示例。' +
       '用户问「某公司某岗位最喜欢问什么」「高频考点」「重点准备什么」时直接调它，不必逐篇 interview_get。' +
-      'keyword 写公司和岗位，用空格分开，如「字节 全栈」「美团 前端」「字节 飞书」。',
+      'keyword 写公司和岗位，用空格分开，如「字节 Agent 全栈研发」「美团 后端」「字节 飞书」。' +
+      '「Agent 全栈研发」涵盖 Agent 开发、AI 应用开发、AI 全栈，写其中任何一个或单写「全栈」都按这一类统计。',
     inputSchema: {
       type: 'object',
       properties: {
         keyword: {
           type: 'string',
-          description: '公司、部门、岗位，空格分开，如「字节 全栈」',
+          description: '公司、部门、岗位，空格分开，如「字节 Agent 全栈研发」',
         },
         topN: {
           type: 'integer',
