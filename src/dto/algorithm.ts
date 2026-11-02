@@ -16,7 +16,8 @@ export class ProblemListQueryDTO {
   @Rule(RuleType.number().integer().min(1).default(1).optional())
   page?: number;
 
-  @Rule(RuleType.number().integer().min(1).max(50).default(20).optional())
+  // 题库不到百道，练习中心一页拿全（上一题/下一题沿当前筛选结果走，不能只看前 50）
+  @Rule(RuleType.number().integer().min(1).max(200).default(20).optional())
   pageSize?: number;
 
   @Rule(
