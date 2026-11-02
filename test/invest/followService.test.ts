@@ -201,10 +201,19 @@ describe('invest/follow.ts — 跟车服务层', () => {
     const ok = await withRows.s.saveProfile('u1', null, { leg: '沪深300', principal: 60000, start_date: '20261001', confirm_reset: true });
     assert.strictEqual(ok.reset, true);
     assert.ok(withRows.db.execs.some((e) => e.sql.startsWith('DELETE FROM user_follow_exec')));
+    // 重开账本时资金进出流水一并清掉（旧本金下的流水不能算进新账本）
+    assert.ok(withRows.db.execs.some((e) => e.sql.startsWith('DELETE FROM user_follow_cashflow')));
     // 起步日会被抬到今天（不回溯）
     assert.ok(ok.start_date >= '20261102');
     const p = await withRows.s.saveProfile('u1', null, { leg: '沪深300', action: 'pause' });
     assert.strictEqual(p.status, 'paused');
+    const rm = await withRows.s.saveProfile('u1', null, { leg: '沪深300', action: 'remove' });
+    assert.strictEqual(rm.reset, true);
+    assert.strictEqual(
+      withRows.db.execs.filter((e) => e.sql.startsWith('DELETE FROM user_follow_cashflow')).length,
+      2,
+      '移除指数也要删掉它的资金流水'
+    );
     // 佣金：范围校验；只改佣金不重开账本
     await assert.rejects(
       () => withRows.s.saveProfile('u1', null, { leg: '沪深300', principal: 60000, start_date: '20261001', fee_rate: 0.01 }),

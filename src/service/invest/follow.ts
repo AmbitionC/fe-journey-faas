@@ -600,6 +600,10 @@ export class InvestFollowService {
         [userId, leg]
       );
       await this.db.exec(
+        'DELETE FROM user_follow_cashflow WHERE user_id = ? AND leg = ?',
+        [userId, leg]
+      );
+      await this.db.exec(
         'DELETE FROM user_follow_profile WHERE user_id = ? AND leg = ?',
         [userId, leg]
       );
@@ -676,6 +680,11 @@ export class InvestFollowService {
             throw new Error('修改本金或起步日会重新开始记账，请确认');
           await this.db.exec(
             'DELETE FROM user_follow_exec WHERE user_id = ? AND leg = ?',
+            [userId, leg]
+          );
+          // 资金进出流水跟着账本一起归零：它们是旧本金/旧起步日下的事实，留着会算进新账本
+          await this.db.exec(
+            'DELETE FROM user_follow_cashflow WHERE user_id = ? AND leg = ?',
             [userId, leg]
           );
           reset = true;
