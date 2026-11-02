@@ -234,6 +234,13 @@ export class Judge0ClientService {
     return this.judge0Config.apiUrl.includes('rapidapi.com');
   }
 
+  /** 判题服务是否可用（RapidAPI 需要 Key；自建地址视为可用） */
+  isConfigured() {
+    if (!this.isRapidApi) return true;
+    const key = this.judge0Config?.apiKey;
+    return !!key && key !== 'YOUR_RAPIDAPI_KEY';
+  }
+
   private validateJudge0Config() {
     if (this.isRapidApi) {
       if (

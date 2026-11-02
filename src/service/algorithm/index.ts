@@ -9,6 +9,12 @@ import { AlgorithmSubmissionEntity } from '../../entity/algorithm/submission';
 import { AlgorithmCodeDraftEntity } from '../../entity/algorithm/codeDraft';
 import { AlgorithmProblemFlagEntity } from '../../entity/algorithm/problemFlag';
 import { Judge0ClientService } from './judge0Client';
+import {
+  CLIENT_JUDGE_UNSUPPORTED_MESSAGE,
+  ClientCaseResult,
+  gradeClientResults,
+  supportsClientJudge,
+} from '../../common/algorithmClientJudge';
 import { InterviewQuestionIndexService } from '../interview/questionIndex';
 import { R } from '../../common/base.error.utils';
 import {
@@ -252,6 +258,15 @@ export class AlgorithmService {
 
     if (!sampleCases.length) throw R.error('该题目没有示例用例');
 
+    // 判题服务没接上：JS/TS 由浏览器本地运行，其他语言如实告知
+    if (!this.judge0ClientService.isConfigured()) {
+      throw R.error(
+        supportsClientJudge(language)
+          ? '请刷新页面后重试（JavaScript / TypeScript 在浏览器内运行）'
+          : CLIENT_JUDGE_UNSUPPORTED_MESSAGE
+      );
+    }
+
     const judgeResult = await this.judge0ClientService.runTestCases(
       code,
       language,
@@ -300,8 +315,9 @@ export class AlgorithmService {
     language: string;
     code: string;
     userId: string;
+    clientResults?: ClientCaseResult[];
   }) {
-    const { problemId, language, code, userId } = params;
+    const { problemId, language, code, userId, clientResults } = params;
 
     const problem = await this.problemModel.findOneBy({
       id: String(problemId),
@@ -315,24 +331,49 @@ export class AlgorithmService {
 
     if (!allCases.length) throw R.error('该题目没有测试用例');
 
-    const judgeResult = await this.judge0ClientService.runTestCases(
-      code,
-      language,
-      allCases.map(tc => ({
-        input: tc.input,
-        expectedOutput: tc.expectedOutput,
-      }))
-    );
+    const cases = allCases.map(tc => ({
+      input: tc.input,
+      expectedOutput: tc.expectedOutput,
+    }));
 
+    let judgeResult: {
+      results: any[];
+      allPassed: boolean;
+      totalRuntime: number;
+      maxMemory: number;
+    };
     let status = 'accepted';
-    if (!judgeResult.allPassed) {
-      const failedResult = judgeResult.results.find(r => !r.passed);
-      if (failedResult?.error) {
-        status = failedResult.error.includes('compilation')
-          ? 'compile_error'
-          : 'runtime_error';
-      } else {
-        status = 'wrong_answer';
+
+    if (this.judge0ClientService.isConfigured()) {
+      judgeResult = await this.judge0ClientService.runTestCases(
+        code,
+        language,
+        cases
+      );
+      if (!judgeResult.allPassed) {
+        const failedResult = judgeResult.results.find(r => !r.passed);
+        if (failedResult?.error) {
+          status = failedResult.error.includes('compilation')
+            ? 'compile_error'
+            : 'runtime_error';
+        } else {
+          status = 'wrong_answer';
+        }
+      }
+    } else {
+      // 判题服务没接上：JS/TS 先把全部用例发给浏览器跑，回传输出后由这里对照期望输出判
+      if (!supportsClientJudge(language)) {
+        throw R.error(CLIENT_JUDGE_UNSUPPORTED_MESSAGE);
+      }
+      if (!clientResults) {
+        return { needClientJudge: true, cases };
+      }
+      try {
+        const graded = gradeClientResults(cases, clientResults);
+        judgeResult = graded;
+        status = graded.status;
+      } catch (e) {
+        throw R.error((e as Error).message);
       }
     }
 
