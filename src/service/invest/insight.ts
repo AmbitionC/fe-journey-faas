@@ -1,5 +1,5 @@
 import { Provide, Inject } from '@midwayjs/core';
-import { InvestDbService } from './db';
+import { InvestDbService, LATEST_STOCK_DATE_SQL } from './db';
 import { beijingDay } from '../../common/signupSite';
 import { alertChannels, normalizeSecCode } from '../../common/secCode';
 import { buildDatasetBody, DatasetBody } from '../../common/datasetBody';
@@ -342,7 +342,7 @@ export class InvestInsightService {
       }
     };
     const [market, plan, snapshot, alert, review, advisor, fear, shadowN] = await Promise.all([
-      one('SELECT MAX(trade_date) v FROM stock_daily'),
+      one(LATEST_STOCK_DATE_SQL),
       one('SELECT MAX(plan_date) v FROM action_plan'),
       one('SELECT MAX(snapshot_date) v FROM holding_snapshot'),
       one('SELECT MAX(alert_date) v FROM watch_alert'),

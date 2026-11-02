@@ -9,6 +9,15 @@ import { DataSource, QueryRunner } from 'typeorm';
  * 请求才建连；失败清空缓存允许下次重试，且只影响当次请求。
  * mysql2 已开 decimalNumbers，DECIMAL 直接是 number。
  */
+/**
+ * 个股日线最新交易日。stock_daily 主键是 (code, trade_date)，裸 `MAX(trade_date)` 要扫全表
+ * （几百万行），线上实测 >6s 撞查询超时：标的池整页「invest 查询超时」、健康检查 6s。
+ * 改为在几只几乎不停牌的权重股上按主键取最大日期，毫秒级；只要其中任意一只当日有行情即准确。
+ */
+export const LATEST_STOCK_DATE_SQL =
+  "SELECT MAX(trade_date) d FROM stock_daily WHERE code IN " +
+  "('600519.SH','601318.SH','600036.SH','000001.SZ','000333.SZ','300750.SZ')";
+
 @Provide()
 @Scope(ScopeEnum.Singleton)
 export class InvestDbService {
