@@ -20,6 +20,9 @@ class FakeDb {
     if (sql.includes('MAX(signal_date) d FROM broad_signal')) return [{ d: d.sigDate }];
     if (sql.includes('FROM broad_signal WHERE signal_date')) return d.today || [];
     if (sql.includes('FROM broad_signal WHERE exec_date <')) return (d.hist || []).filter((r: any) => r.exec_date < params[0]);
+    if (sql.includes("WHERE side = 'buy' AND engine_fired = 1")) {
+      return (d.hist || []).filter((r: any) => r.side === 'buy' && r.engine_fired).sort((a: any, b: any) => (a.signal_date < b.signal_date ? 1 : -1));
+    }
     if (sql.includes('FROM broad_signal ORDER BY')) return d.hist || [];
     if (sql.includes('FROM trade_calendar')) return (d.cal || []).map((c: string) => ({ cal_date: c }));
     if (sql.includes('FROM broad_strategy_stats')) return d.stats || [];
@@ -92,6 +95,22 @@ describe('invest/follow.ts — 跟车服务层', () => {
     // 10-30 是周五（下一交易日 11-02 跨周）、也是月末（下一交易日跨月）
     assert.deepStrictEqual(r.market.next_check, { week_end: '20261030', month_end: '20261030' });
     assert.strictEqual(r.market.legs[0].leg, '沪深300');
+  });
+
+  it('market.last_buy：每腿取最近一次真触发的买入信号，非会员也可见', async () => {
+    const hist = [
+      { leg: '沪深300', kind: 'anchor_buy', signal_date: '20240105', exec_date: '20240108', side: 'buy', engine_fired: 1 },
+      { leg: '沪深300', kind: 'panic_buy', signal_date: '20250407', exec_date: '20250408', side: 'buy', engine_fired: 1 },
+      { leg: '沪深300', kind: 'sell', signal_date: '20250430', exec_date: '20250506', side: 'sell', engine_fired: 1 },
+      { leg: '红利', kind: 'sell', signal_date: '20250929', exec_date: '20250930', side: 'sell', engine_fired: 0 },
+    ];
+    const { s } = svc({ ...market, hist });
+    const r = await s.overview('u1', false, null);
+    const lb = (r.market as any).last_buy;
+    assert.strictEqual(lb['沪深300'].signal_date, '20250407');
+    assert.strictEqual(lb['沪深300'].kind, 'panic_buy');
+    assert.strictEqual(lb['沪深300'].kind_cn, '恐慌抢买');
+    assert.strictEqual(lb['红利'], undefined, '未真触发的卖出不算');
   });
 
   it('会员：同日两条买入按顺序串联换算；净值与基准分开汇总；已记账的不再出现在待执行', async () => {

@@ -115,6 +115,27 @@ export class InvestFollowService {
     } catch {
       today = [];
     }
+    // 每腿最近一次「真触发」的买入信号：同一轮恐慌只买一次、阶梯档位不重发，加入在它之后的人不会再收到这一笔
+    const lastBuy: Record<string, any> = {};
+    try {
+      const rows = await this.db.q(
+        "SELECT leg, kind, signal_date, exec_date FROM broad_signal WHERE side = 'buy' AND engine_fired = 1 " +
+          'ORDER BY signal_date DESC LIMIT 400'
+      );
+      for (const r of rows) {
+        const leg = String(r.leg);
+        if (!lastBuy[leg]) {
+          lastBuy[leg] = {
+            signal_date: String(r.signal_date),
+            exec_date: r.exec_date == null ? null : String(r.exec_date),
+            kind: String(r.kind),
+            kind_cn: KIND_CN[String(r.kind)] || String(r.kind),
+          };
+        }
+      }
+    } catch {
+      /* 无表时不显示 */
+    }
     const base = sigDate || date;
     let openDays: string[] = [];
     try {
@@ -158,6 +179,7 @@ export class InvestFollowService {
       next_check: { week_end: check.weekEnd, month_end: check.monthEnd },
       legs,
       today: today.map((r: any) => this.sigOut(r)),
+      last_buy: lastBuy,
       stats: await this.strategyStats(),
     };
   }
