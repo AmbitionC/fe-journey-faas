@@ -12,6 +12,9 @@ import { RedisService } from '@midwayjs/redis';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiProxyService, ChatMessage, ChatContext, AiTask } from '../service/ai/proxy';
+import { IrisCreditService, IrisCharge, irisErrorCode } from '../service/ai/irisCredit';
+import { IrisReportService, parseReportJson, sharedView } from '../service/ai/irisReport';
+import { irisCost } from '../mcp/billing';
 import { CoachAgentService } from '../service/ai/coachAgent';
 import { AiHistoryService } from '../service/ai/history';
 import { RetrieveService } from '../service/ai/retrieve';
@@ -21,6 +24,7 @@ import { isEntitled } from '../common/entitlement';
 import { EntitlementService } from '../service/entitlement';
 import { UserEntity } from '../entity/user';
 import { NoAuth } from '../decorator/noAuth';
+import { R } from '../common/base.error.utils';
 import { auxModuleFor, auxBucketFor } from '../common/aiPurpose';
 import { InterviewQuestionIndexService } from '../service/interview/questionIndex';
 import { sanitizeKeys, sanitizeLabel } from '../common/interviewTopics';
@@ -31,7 +35,7 @@ import {
   planSources,
   splitEndMark,
 } from '../common/mockInterviewPlan';
-import { INTERVIEW_END_MARK } from '../service/ai/prompts';
+import { INTERVIEW_END_MARK, buildInterviewReportMessages } from '../service/ai/prompts';
 import {
   isMembershipFree,
   hasValidMemberColumn,
@@ -42,7 +46,10 @@ class AIChatDTO {
   messages: ChatMessage[];
   context: ChatContext;
   conversationId?: number;
-  /** 深度思考开关（默认开启；DeepSeek V4 经 thinking 参数返回思考链） */
+  /**
+   * 深度思考开关。2026-11-02 起**默认关闭**（显式 true 才开）：思考按 irisCost('think') 扣点，
+   * 普通问答按 'chat'；DeepSeek 经 thinking 参数返回思考链。
+   */
   deepThink?: boolean;
   /** 结构化任务（算法提示/点评）：存在时提示词由服务端拼装 */
   task?: AiTask;
@@ -106,6 +113,16 @@ class AIInterviewDTO {
   seed?: number;
 }
 
+class AIInterviewReportDTO {
+  /** 面试目标名（公司面试模式）或方向（按方向面试） */
+  label?: string;
+  topic?: string;
+  history: { role: 'interviewer' | 'candidate'; content: string }[];
+  /** 公司面试模式下带上，服务端按同一 seed 重算题单给报告对照 */
+  keys?: string[];
+  seed?: number;
+}
+
 class AIConversationDTO {
   action: 'list' | 'messages' | 'rename' | 'delete';
   conversationId?: number;
@@ -145,6 +162,12 @@ export class AiHTTPService {
 
   @Inject()
   questionIndex: InterviewQuestionIndexService;
+
+  @Inject()
+  irisCredit: IrisCreditService;
+
+  @Inject()
+  irisReport: IrisReportService;
 
   @Config('ai')
   aiConfig: { rateLimit: { freeUserPerDay: number } };
@@ -204,6 +227,20 @@ export class AiHTTPService {
     return { userId: `guest:${ip}`, isMember: !!isMembershipFree(this.membershipConfig) };
   }
 
+  /**
+   * 计点包裹：上游失败或一字未出 → 退点。点数是用户花钱买的，失败不退会被当成吞钱。
+   */
+  private async charged<T>(charge: IrisCharge, run: () => Promise<T>, isEmpty?: (r: T) => boolean): Promise<T> {
+    try {
+      const r = await run();
+      if (isEmpty && isEmpty(r)) await charge.refund();
+      return r;
+    } catch (e) {
+      await charge.refund();
+      throw e;
+    }
+  }
+
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: 'AI 问答配额查询',
     functionName: 'aiQuota',
@@ -214,8 +251,8 @@ export class AiHTTPService {
   @NoAuth()
   async aiQuota() {
     const { userId, isMember } = await this.resolveUser();
-    const quota = await this.aiProxyService.getQuota(userId, isMember);
-    return { success: true, data: { ...quota, isMember } };
+    const quota = await this.irisCredit.quota(userId, isMember);
+    return { success: true, data: quota };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -229,7 +266,7 @@ export class AiHTTPService {
   async aiChat(@Body(ALL) body: AIChatDTO) {
     if (!Array.isArray(body.messages)) body.messages = [];
     const { userId, isMember } = await this.resolveUser();
-    await this.aiProxyService.checkRateLimit(userId, isMember);
+    const charge = await this.irisCredit.begin(userId, isMember, body.deepThink === true ? 'think' : 'chat');
 
     // RAG：召回站内资料注入上下文（PRD-02 F1-1/F1-2）
     let citations: { title: string; articleKey: string; module: string }[] = [];
@@ -258,10 +295,10 @@ export class AiHTTPService {
       /* 检索失败不影响回答 */
     }
 
-    const content = await this.aiProxyService.forward(
-      body.messages,
-      body.context,
-      userId
+    const content = await this.charged(
+      charge,
+      () => this.aiProxyService.forward(body.messages, body.context, userId),
+      (c) => !c
     );
 
     // 持久化为会话历史（尽力而为，失败不影响回答）
@@ -379,6 +416,9 @@ export class AiHTTPService {
     (this.ctx as any).respond = false;
 
     const res = this.ctx.res;
+    const deepThink = body.deepThink === true;
+    let charge: IrisCharge | null = null;
+    let produced = false;
 
     try {
       // 限流放在流内：超限时以 SSE error 帧返回，前端可识别 RATE_LIMIT。
@@ -386,7 +426,13 @@ export class AiHTTPService {
       // 但仍然烧钱，所以照样有上限。
       // 判定收在 common/aiPurpose，与 server.js 的 handleStream 共用同一份
       // （线上这条路由实际走 server.js，见该文件顶部注释）。
-      await this.aiProxyService.checkRateLimit(userId, isMember, auxBucketFor(body.purpose));
+      // 辅助调用不扣点、走独立限流桶；用户自己的提问按 chat/think 计点（见 IrisCreditService）。
+      const auxBucket = auxBucketFor(body.purpose);
+      if (auxBucket) {
+        await this.aiProxyService.checkRateLimit(userId, isMember, auxBucket);
+      } else {
+        charge = await this.irisCredit.begin(userId, isMember, deepThink ? 'think' : 'chat');
+      }
       const auxModule = auxModuleFor(body.purpose);
       if (auxModule) {
         body.context = { ...(body.context || {}), module: auxModule };
@@ -409,6 +455,7 @@ export class AiHTTPService {
             res.write(`data: ${JSON.stringify({ status: frame.status })}\n\n`);
           }
           if (frame.content) {
+            produced = true;
             res.write(`data: ${JSON.stringify({ content: frame.content })}\n\n`);
           }
           if (frame.citations) {
@@ -424,28 +471,26 @@ export class AiHTTPService {
         }
       } else {
         const gen = body.task
-          ? this.aiProxyService.forwardTaskStream(body.task, userId, body.deepThink !== false)
-          : this.aiProxyService.forwardStream(
-              body.messages,
-              body.context,
-              userId,
-              body.deepThink !== false
-            );
+          ? this.aiProxyService.forwardTaskStream(body.task, userId, deepThink)
+          : this.aiProxyService.forwardStream(body.messages, body.context, userId, deepThink);
 
         for await (const chunk of gen) {
           if (chunk && chunk.reasoning) {
             res.write(`data: ${JSON.stringify({ reasoning: chunk.reasoning })}\n\n`);
           }
           if (chunk && chunk.content) {
+            produced = true;
             res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
           }
         }
       }
     } catch (err: any) {
+      if (charge) await charge.refund();
       res.write(
-        `data: ${JSON.stringify({ error: err?.message || 'AI 请求失败' })}\n\n`
+        `data: ${JSON.stringify({ error: err?.message || 'AI 请求失败', code: irisErrorCode(err?.message) })}\n\n`
       );
     } finally {
+      if (charge && !produced) await charge.refund();
       res.write('data: [DONE]\n\n');
       res.end();
     }
@@ -461,8 +506,8 @@ export class AiHTTPService {
   @NoAuth()
   async aiHint(@Body(ALL) body: AIHintDTO) {
     const { userId, isMember } = await this.resolveUser();
-    await this.aiProxyService.checkRateLimit(userId, isMember);
-    const content = await this.aiProxyService.hint(body, userId);
+    const charge = await this.irisCredit.begin(userId, isMember, 'chat');
+    const content = await this.charged(charge, () => this.aiProxyService.hint(body, userId), (c) => !c);
     return { success: true, data: { content } };
   }
 
@@ -476,8 +521,8 @@ export class AiHTTPService {
   @NoAuth()
   async aiReview(@Body(ALL) body: AIReviewDTO) {
     const { userId, isMember } = await this.resolveUser();
-    await this.aiProxyService.checkRateLimit(userId, isMember);
-    const content = await this.aiProxyService.review(body, userId);
+    const charge = await this.irisCredit.begin(userId, isMember, 'chat');
+    const content = await this.charged(charge, () => this.aiProxyService.review(body, userId), (c) => !c);
     return { success: true, data: { content } };
   }
 
@@ -507,7 +552,7 @@ export class AiHTTPService {
   @NoAuth()
   async aiQuizGrade(@Body(ALL) body: AIQuizGradeDTO) {
     const { userId, isMember } = await this.resolveUser();
-    await this.aiProxyService.checkRateLimit(userId, isMember);
+    const charge = await this.irisCredit.begin(userId, isMember, 'chat');
     const member = isEntitled('personalized_feedback', { isMember });
 
     let candidates: { title: string; articleKey: string }[] = [];
@@ -525,9 +570,11 @@ export class AiHTTPService {
         profileSummary = await this.articleService.getProfileSummary(userId, body.module);
       }
     }
-    const data = await this.aiProxyService.gradeSubmission(
-      { items: body.items || [], member, profileSummary, candidates },
-      userId
+    const data = await this.charged(charge, () =>
+      this.aiProxyService.gradeSubmission(
+        { items: body.items || [], member, profileSummary, candidates },
+        userId
+      )
     );
     return { success: true, data };
   }
@@ -588,17 +635,22 @@ export class AiHTTPService {
     const { userId, isMember } = await this.resolveUser();
     // 游客不生成（无学习数据）；登录用户占用 AI 配额
     if (!userId || userId.startsWith('guest:')) return { success: true, data: { report: '' } };
-    await this.aiProxyService.checkRateLimit(userId, isMember);
+    const charge = await this.irisCredit.begin(userId, isMember, 'chat');
     const profile = await this.articleService.getLearnerProfile(userId, body.module);
     const summary = await this.articleService.getProfileSummary(userId, body.module);
-    const report = await this.aiProxyService.weeklyReport(
-      {
-        profileSummary: summary,
-        weakTags: (profile?.weakTags || []).map((w) => w.tag),
-        reviewDueCount: profile?.reviewDue?.length || 0,
-        streak: profile?.streak || 0,
-      },
-      userId
+    const report = await this.charged(
+      charge,
+      () =>
+        this.aiProxyService.weeklyReport(
+          {
+            profileSummary: summary,
+            weakTags: (profile?.weakTags || []).map((w) => w.tag),
+            reviewDueCount: profile?.reviewDue?.length || 0,
+            streak: profile?.streak || 0,
+          },
+          userId
+        ),
+      (r) => !r
     );
     return { success: true, data: { report } };
   }
@@ -617,21 +669,132 @@ export class AiHTTPService {
     if (!isEntitled('mock_interview', { isMember })) {
       return { success: true, data: { paywall: true, message: '开通会员解锁 AI 模拟面试' } };
     }
-    await this.aiProxyService.checkRateLimit(userId, isMember);
+    // 每轮按 irisCost('interview') 计点（会员专享模式，IrisCreditService 内再校验一次会员）
+    const charge = await this.irisCredit.begin(userId, isMember, 'interview');
+    return this.charged(charge, async () => {
+      const keys = sanitizeKeys(body.keys);
+      if (keys.length) {
+        const company = await this.companyInterview(body, keys, userId);
+        if (company) return { success: true, data: company };
+      }
+      const reply = await this.aiProxyService.interview(
+        {
+          topic: body.topic || '前端综合',
+          history: body.history || [],
+          mode: body.mode || (body.history?.length ? 'evaluate' : 'ask'),
+        },
+        userId
+      );
+      if (!reply) await charge.refund();
+      return { success: true, data: { reply } };
+    });
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: 'AI 模拟面试复盘报告（会员，按 report 计点）',
+    functionName: 'aiInterviewReport',
+    name: 'aiInterviewReport',
+    path: '/api/ai/interview/report',
+    method: 'post',
+  })
+  @NoAuth()
+  async aiInterviewReport(@Body(ALL) body: AIInterviewReportDTO) {
+    const { userId, isMember } = await this.resolveUser();
+    if (userId.startsWith('guest:')) throw R.unauthorizedError('请先登录');
+    if (!isEntitled('mock_interview', { isMember })) {
+      return { success: true, data: { paywall: true, message: '开通会员解锁面试复盘报告' } };
+    }
+    const history = (Array.isArray(body.history) ? body.history : [])
+      .filter((h) => h && (h.role === 'interviewer' || h.role === 'candidate') && typeof h.content === 'string')
+      .slice(-60);
+    const answered = history.filter((h) => h.role === 'candidate' && h.content.trim()).length;
+    if (answered < 1) throw R.error('至少回答一道题之后才能生成复盘报告');
+
+    let plan: { topic: string; question: string }[] | undefined;
     const keys = sanitizeKeys(body.keys);
     if (keys.length) {
-      const company = await this.companyInterview(body, keys, userId);
-      if (company) return { success: true, data: company };
+      try {
+        const { index, knowledge, careerKeys } = await this.questionIndex.load();
+        const picked = pickInterviewPlan(index, {
+          keys,
+          knowledgeTitles: knowledge,
+          skipKeys: careerKeys,
+          seed: normalizeSeed(body.seed),
+        });
+        plan = picked.questions.map((q) => ({ topic: q.topic, question: q.question }));
+      } catch {
+        plan = undefined;
+      }
     }
-    const reply = await this.aiProxyService.interview(
-      {
-        topic: body.topic || '前端综合',
-        history: body.history || [],
-        mode: body.mode || (body.history?.length ? 'evaluate' : 'ask'),
+    const label = sanitizeLabel(body.label) || body.topic || '前端综合';
+    const charge = await this.irisCredit.begin(userId, isMember, 'report');
+    const { system, user } = buildInterviewReportMessages({ label, history, plan });
+    const result = await this.charged(charge, async () => {
+      const { content } = await this.aiProxyService.completeWith(system, user, {
+        userId,
+        module: 'interview_report',
+        model: this.aiProxyService.reportModel(),
+        json: true,
+        maxTokens: 4096,
+      });
+      return parseReportJson(content);
+    });
+    const questionCount = plan?.length || history.filter((h) => h.role === 'interviewer').length;
+    const code = await this.irisReport.save({
+      userId,
+      label,
+      topic: body.topic || null,
+      questionCount,
+      report: result,
+      transcript: JSON.stringify(history),
+      model: this.aiProxyService.reportModel(),
+    });
+    return {
+      success: true,
+      data: { code, report: result, label, questionCount, cost: irisCost('report') },
+    };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '复盘报告分享页数据（公开，不含原题）',
+    functionName: 'aiInterviewReportShared',
+    name: 'aiInterviewReportShared',
+    path: '/api/ai/interview/report/shared',
+    method: 'get',
+  })
+  @NoAuth()
+  async aiInterviewReportShared() {
+    const code = String((this.ctx.query as any)?.code || '');
+    const row = await this.irisReport.byCode(code);
+    if (!row) return { success: false, message: '报告不存在或已删除' };
+    let report;
+    try {
+      report = JSON.parse(row.report);
+    } catch {
+      return { success: false, message: '报告数据损坏' };
+    }
+    const { userId } = await this.resolveUser();
+    const owner = userId === row.user_id;
+    let inviteCode: string | null = null;
+    let inviterName: string | null = null;
+    try {
+      const u = await this.userModel.findOneBy({ phoneNumber: row.user_id });
+      inviteCode = u?.inviteCode || null;
+      inviterName = u?.nickName || null;
+    } catch {
+      /* 没有邀请码就不出 CTA */
+    }
+    return {
+      success: true,
+      data: {
+        ...sharedView(row, report),
+        owner,
+        // 本人看到完整报告；他人只有画像
+        full: owner ? report : null,
+        inviteCode,
+        inviterName,
       },
-      userId
-    );
-    return { success: true, data: { reply } };
+    };
   }
 
   /**

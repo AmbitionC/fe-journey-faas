@@ -61,6 +61,9 @@ export const SERVER_EVENTS = [
   'order_reported',
   'order_paid',
   'order_rejected',
+  // 邀请拉新（2026-11-02）：referral_signup { inviter, status: 'rewarded'|'held', reason } / referral_member { invitee, points, orderNo }
+  'referral_signup',
+  'referral_member',
 ] as const;
 
 /**

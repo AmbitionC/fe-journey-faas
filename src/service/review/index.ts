@@ -114,7 +114,7 @@ export class ReviewService {
         report: parsed.report,
         repoSnapshot,
         makeupArticles: parsed.makeupArticles || null,
-        reviewerModel: process.env.LLM_MODEL || 'deepseek-v4-flash',
+        reviewerModel: process.env.LLM_MODEL || 'deepseek-flash',
         humanChecked: false,
         shareCode: verdict === 'pass' ? genShareCode() : null,
       })

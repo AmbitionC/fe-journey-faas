@@ -24,6 +24,9 @@ let redisService;
 let articleService;
 let retrieveService;
 let mcpRuntimePromise = null;
+let irisCreditService = null;
+let entitlementService = null;
+let irisErrorCode = () => null;
 
 // MCP（/mcp/agent、/mcp/invest、/mcp/admin/*）：API Key 鉴权的对外数据服务，
 // 不走 Midway（状态码语义与鉴权体系都不同），实现见 src/mcp/http.ts。
@@ -118,7 +121,17 @@ async function resolveUser(req) {
       const infoStr = await redisService.get(`token:${token}`);
       if (infoStr) {
         const info = JSON.parse(infoStr);
-        if (info && info.userId) return { userId: info.userId, isMember: false };
+        if (info && info.userId) {
+          // 会员态决定 Iris 的每日上限与会员专享模式（与 src/function/ai.ts 的 getIsMember 同源：
+          // 权益记录 / Skill 会员账户 / 限免期，都在 EntitlementService.isMember 里）
+          let isMember = false;
+          try {
+            isMember = !!(entitlementService && (await entitlementService.isMember(info.userId)));
+          } catch (e) {
+            isMember = false;
+          }
+          return { userId: info.userId, isMember };
+        }
       }
     } catch (e) {
       /* ignore */
@@ -174,8 +187,8 @@ async function handleStream(req, res) {
     /* 持久化失败不影响回答 */
   }
 
-  // 深度思考：默认开启（前端开关；缺省也视为开）
-  const deepThink = body.deepThink !== false;
+  // 深度思考：2026-11-02 起默认关闭（显式 true 才开；思考按 think 计点、普通按 chat）
+  const deepThink = body.deepThink === true;
 
   // 结构化任务（算法提示/点评）：提示词服务端拼装，走 forwardTaskStream（PRD-02 F1-3）
   const task = body.task && body.task.kind ? body.task : null;
@@ -210,8 +223,16 @@ async function handleStream(req, res) {
   if (auxModule) context.module = auxModule;
 
   let full = '';
+  // 计点（IrisCreditService）：辅助调用不扣点只限流；用户提问按 chat / think 扣点；
+  // 上游失败或一字未出退点。错误帧带 code（RATE_LIMIT / CREDIT_EXHAUSTED / MEMBER_ONLY），前端按 code 分流。
+  let charge = null;
   try {
-    await aiProxyService.checkRateLimit(userId, isMember, auxBucketFor(body.purpose));
+    const auxBucket = auxBucketFor(body.purpose);
+    if (auxBucket || !irisCreditService) {
+      await aiProxyService.checkRateLimit(userId, isMember, auxBucket);
+    } else {
+      charge = await irisCreditService.begin(userId, isMember, deepThink ? 'think' : 'chat');
+    }
     const gen = task
       ? aiProxyService.forwardTaskStream(task, userId, deepThink)
       : aiProxyService.forwardStream(messages, context, userId, deepThink);
@@ -225,10 +246,16 @@ async function handleStream(req, res) {
       }
     }
   } catch (err) {
+    if (charge) await charge.refund().catch(() => {});
+    charge = null;
     res.write(
-      `data: ${JSON.stringify({ error: (err && err.message) || 'AI 请求失败' })}\n\n`
+      `data: ${JSON.stringify({
+        error: (err && err.message) || 'AI 请求失败',
+        code: irisErrorCode(err && err.message),
+      })}\n\n`
     );
   } finally {
+    if (charge && !full) await charge.refund().catch(() => {});
     // 落库助手回复 + 回传 conversationId
     if (conv && full) {
       try {
@@ -310,6 +337,19 @@ async function bootstrap() {
   articleService = await appCtx.getAsync(ArticleService);
   const { RetrieveService } = require('./dist/service/ai/retrieve');
   retrieveService = await appCtx.getAsync(RetrieveService);
+  try {
+    const irisCredit = require('./dist/service/ai/irisCredit');
+    irisCreditService = await appCtx.getAsync(irisCredit.IrisCreditService);
+    irisErrorCode = irisCredit.irisErrorCode;
+  } catch (e) {
+    console.error('[server] IrisCreditService unavailable, falling back to rate limit', e && e.message);
+  }
+  try {
+    const { EntitlementService } = require('./dist/service/entitlement');
+    entitlementService = await appCtx.getAsync(EntitlementService);
+  } catch (e) {
+    console.error('[server] EntitlementService unavailable', e && e.message);
+  }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -319,9 +359,10 @@ async function bootstrap() {
       setCors(req, res);
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       const { userId, isMember } = await resolveUser(req);
-      // 共用限流：游客按 IP 限额（与 SSE 链路一致）；超限直接 429
+      // 共用计点：与 SSE 链路一致（游客每日免费次 / 登录用户按 chat 扣点）；拒绝直接 429
       try {
-        await aiProxyService.checkRateLimit(userId, isMember);
+        if (irisCreditService) await irisCreditService.begin(userId, isMember, 'chat');
+        else await aiProxyService.checkRateLimit(userId, isMember);
       } catch (e) {
         res.statusCode = 429;
         res.setHeader('Content-Type', 'application/json');

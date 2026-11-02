@@ -10,6 +10,7 @@ import { UserDTO } from '../../dto/user';
 import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
 import { AiProxyService } from '../ai/proxy';
+import { IrisCreditService } from '../ai/irisCredit';
 import { EntitlementService } from '../entitlement';
 import {
   isMembershipFree,
@@ -33,6 +34,9 @@ export class UserService {
 
   @Inject()
   aiProxyService: AiProxyService;
+
+  @Inject()
+  irisCredit: IrisCreditService;
 
   @Inject()
   entitlementService: EntitlementService;
@@ -94,7 +98,7 @@ export class UserService {
       // Skill 会员（owner 2026-10-31 定的唯一会员档）同样是网站会员：存量列无效时拿它的到期日当 memberDate
       const skillExpiry = freeForAll || columnMember ? null : await this.skillMembershipExpiry(userId);
       const isMember = freeForAll || columnMember || !!skillExpiry;
-      const quota = await this.aiProxyService.getQuota(userId, isMember);
+      const quota = await this.irisCredit.quota(userId, isMember).catch(() => null);
       const vo = userInfo.toVO();
       return {
         success: true,

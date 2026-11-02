@@ -16,6 +16,7 @@ import { EntitlementService } from '../service/entitlement';
 import { InvestDbService } from '../service/invest/db';
 import { R } from '../common/base.error.utils';
 import { recordSignupSource } from '../common/signupSite';
+import { ReferralService } from '../service/referral';
 
 @Provide()
 export class UserHTTPService {
@@ -36,6 +37,9 @@ export class UserHTTPService {
 
   @Inject()
   investDb: InvestDbService;
+
+  @Inject()
+  referralService: ReferralService;
 
   /**
    * 解析当前登录用户 userId（手机号）。优先级：
@@ -74,9 +78,34 @@ export class UserHTTPService {
     const result = await this.captchaService.checkCaptcha(captchaId, captcha);
     if (!result) throw R.error('验证码错误');
     await this.guardSignupRate();
+    // 客户端传来的邀请码在建号前取出：toEntity 会把 DTO 原样落库，而 inviteCode 列是**自己的**邀请码
+    const invitedBy = String(data.inviteCode || '').trim();
+    delete (data as any).inviteCode;
     const res = await this.userService.createUser(data);
     await this.recordSignupSite(data.phoneNumber);
+    if (invitedBy && res?.success) {
+      const referral = await this.referralService.recordSignup(data.phoneNumber, invitedBy, this.clientIp());
+      if (referral && res.data) res.data.referral = referral;
+    }
     return res;
+  }
+
+  private clientIp(): string {
+    return this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() || this.ctx.ip || '';
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '我的邀请成绩（邀请码、已邀请人数、已得点数、本月计奖进度）',
+    functionName: 'userReferral',
+    name: 'userReferral',
+    path: '/user/referral',
+    method: 'get',
+  })
+  async userReferral(): Promise<any> {
+    const uid = await this.resolveUserId();
+    if (!uid) throw R.unauthorizedError('未登录或登录已过期');
+    const data = await this.referralService.stats(uid);
+    return { success: true, data };
   }
 
   /** 记下注册来源站点（invest / agent …，按 Origin 判，见 common/signupSite）。 */
