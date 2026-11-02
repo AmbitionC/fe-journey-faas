@@ -4,6 +4,7 @@ import {
   buildProblemLists,
   buildRecommendations,
   computeStreak,
+  describeInterviewRefs,
   findSimilar,
   matchInterviewRefs,
   normalizeTitle,
@@ -150,7 +151,26 @@ describe('algorithmPractice', () => {
     assert.strictEqual(recs[1].slug, 'lcof-03');
     assert.ok(recs[1].reason.includes('数组'));
     assert.strictEqual(recs[2].slug, 'reverse');
-    assert.ok(recs[2].reason.includes('2 篇面经'));
+    assert.strictEqual(recs[2].reason, '字节跳动 2 篇面经问过，还没做');
+  });
+
+  it('describeInterviewRefs 一家一篇不说「等」，多家只点前两家', () => {
+    const one = { count: 1, companies: [{ name: '百度', count: 1 }], examples: [] };
+    assert.strictEqual(describeInterviewRefs(one), '百度的面经问过');
+    const many = {
+      count: 3,
+      companies: [
+        { name: '字节跳动', count: 1 },
+        { name: '腾讯', count: 1 },
+        { name: '百度', count: 1 },
+      ],
+      examples: [],
+    };
+    assert.strictEqual(describeInterviewRefs(many), '字节跳动、腾讯等 3 篇面经问过');
+    assert.strictEqual(
+      describeInterviewRefs({ count: 2, companies: [], examples: [] }),
+      '2 篇面经问过'
+    );
   });
 
   it('buildRecommendations 访客 / 新用户也有推荐：面经高频 + 顺序', () => {

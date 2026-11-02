@@ -369,6 +369,18 @@ export interface Recommendation {
  * 2. 最近通过的那道题所属标签里下一道没做的——趁热巩固；
  * 3. 面经里出现最多、还没做的——离面试最近。
  */
+/** 「百度的面经问过」「字节、腾讯等 3 篇面经问过」——给推荐理由与提示行用的一句话 */
+export function describeInterviewRefs(r: InterviewRefs): string {
+  const names = r.companies.map(c => c.name).filter(Boolean);
+  if (names.length === 0) return `${r.count} 篇面经问过`;
+  if (names.length === 1) {
+    return r.count === 1
+      ? `${names[0]}的面经问过`
+      : `${names[0]} ${r.count} 篇面经问过`;
+  }
+  return `${names.slice(0, 2).join('、')}等 ${r.count} 篇面经问过`;
+}
+
 export function buildRecommendations(opts: {
   problems: ProblemLite[];
   statusMap: Record<string, ProblemStatus>;
@@ -438,8 +450,7 @@ export function buildRecommendations(opts: {
     )[0];
   if (hot) {
     const r = opts.refs.get(hot.slug)!;
-    const who = r.companies[0]?.name ? `${r.companies[0].name}等` : '';
-    push(hot, `${who}${r.count} 篇面经问过，还没做`, 'interview');
+    push(hot, `${describeInterviewRefs(r)}，还没做`, 'interview');
   }
 
   for (const p of ordered) {
