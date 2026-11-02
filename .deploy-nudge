@@ -1,2 +1,2 @@
-20261101-151653
-# 2026-11-01 接入预警邮件发信凭据（DM_SMTP_USER/DM_SMTP_PASS/ALERT_SELFTEST_TO）后重新部署
+20261102-085324
+# 2026-11-02 跟车接口（/invest/follow*）上线，同批打包 invest-model master 的 broad_signal / 自动记账 / 会员专投邮件

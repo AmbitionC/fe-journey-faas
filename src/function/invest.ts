@@ -11,6 +11,8 @@ import { Context } from '@midwayjs/faas';
 import { InvestOverviewService } from '../service/invest/overview';
 import { InvestPlanService } from '../service/invest/plan';
 import { InvestInsightService } from '../service/invest/insight';
+import { InvestFollowService } from '../service/invest/follow';
+import { EntitlementService } from '../service/entitlement';
 import { acceptsGzip } from '../common/datasetBody';
 
 /**
@@ -31,6 +33,26 @@ export class InvestHTTPService {
 
   @Inject()
   insightService: InvestInsightService;
+
+  @Inject()
+  followService: InvestFollowService;
+
+  @Inject()
+  entitlementService: EntitlementService;
+
+  /** 会员判定（跟车/操作提醒的付费边界）：admin 视为会员；其余走权益网关（单一会员档）。 */
+  private async memberState(): Promise<{ uid: string; isMember: boolean; until: Date | null }> {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    if (!uid) return { uid, isMember: false, until: null };
+    if (this.ctx?.userInfo?.role === 'admin') return { uid, isMember: true, until: null };
+    try {
+      const isMember = await this.entitlementService.isMember(uid);
+      const until = isMember ? await this.entitlementService.currentExpiry(uid) : null;
+      return { uid, isMember, until };
+    } catch {
+      return { uid, isMember: false, until: null };
+    }
+  }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '驾驶舱总览',
@@ -286,7 +308,8 @@ export class InvestHTTPService {
     method: 'get',
   })
   async alertFeed(@Query('limit') limit?: number) {
-    return { success: true, data: await this.insightService.alertFeed(limit) };
+    const { isMember } = await this.memberState();
+    return { success: true, data: await this.insightService.alertFeed(limit, isMember) };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -369,6 +392,68 @@ export class InvestHTTPService {
     const uid = String(this.ctx?.userInfo?.userId || '');
     if (!uid) return { success: false, message: '未登录' };
     return { success: true, data: await this.insightService.myLedgerDelete(uid, body?.id) };
+  }
+
+  // ── 跟车（2026-11-02）：登录可读市场级与自己的档案；档案写入会员专属 ──
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '跟车页总览：四腿位置、今日信号、我的档案/换算/基准 vs 实际（会员）',
+    functionName: 'investFollow',
+    name: 'investFollow',
+    path: '/invest/follow',
+    method: 'get',
+  })
+  async follow() {
+    const { uid, isMember, until } = await this.memberState();
+    if (!uid) return { success: false, message: '未登录' };
+    return { success: true, data: await this.followService.overview(uid, isMember, until) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '跟车档案：本金/起步日/暂停/恢复/移除（会员专属，只写自己的）',
+    functionName: 'investFollowProfile',
+    name: 'investFollowProfile',
+    path: '/invest/follow/profile',
+    method: 'post',
+  })
+  async followProfile(@Body(ALL) body: any) {
+    const { uid, isMember, until } = await this.memberState();
+    if (!uid) return { success: false, message: '未登录' };
+    if (!isMember) return { success: false, code: 'MEMBER_ONLY', message: '开启跟车是会员权益' };
+    try {
+      return { success: true, data: await this.followService.saveProfile(uid, until, body) };
+    } catch (e: any) {
+      return { success: false, message: e?.message || '保存失败' };
+    }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '跟车记账行修改：按提醒做了 / 没做 / 实际份额价格（只改自己的）',
+    functionName: 'investFollowExec',
+    name: 'investFollowExec',
+    path: '/invest/follow/exec',
+    method: 'post',
+  })
+  async followExec(@Body(ALL) body: any) {
+    const { uid } = await this.memberState();
+    if (!uid) return { success: false, message: '未登录' };
+    try {
+      return { success: true, data: await this.followService.updateExec(uid, body) };
+    } catch (e: any) {
+      return { success: false, message: e?.message || '保存失败' };
+    }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '跟车信号流：会员全量；非会员只看 30 天前的历史',
+    functionName: 'investFollowSignals',
+    name: 'investFollowSignals',
+    path: '/invest/follow/signals',
+    method: 'get',
+  })
+  async followSignals(@Query('limit') limit?: number) {
+    const { uid, isMember } = await this.memberState();
+    if (!uid) return { success: false, message: '未登录' };
+    return { success: true, data: await this.followService.signals(isMember, limit) };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
