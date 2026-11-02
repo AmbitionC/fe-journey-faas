@@ -73,6 +73,25 @@ export class SubmitCodeDTO {
 
   @Rule(RuleType.string().max(50).optional())
   userId?: string;
+
+  // 判题服务未接上时，浏览器跑完全部用例后回传的结果（服务端会重新对照期望输出判）
+  @Rule(
+    RuleType.array()
+      .items(
+        RuleType.object({
+          actualOutput: RuleType.string().allow('').max(10000).optional(),
+          runtime: RuleType.number().min(0).optional(),
+          error: RuleType.string().allow('', null).max(5000).optional(),
+        })
+      )
+      .max(500)
+      .optional()
+  )
+  clientResults?: Array<{
+    actualOutput?: string;
+    runtime?: number;
+    error?: string | null;
+  }>;
 }
 
 export class SubmissionListQueryDTO {
