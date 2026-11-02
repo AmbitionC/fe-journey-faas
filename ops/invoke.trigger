@@ -1,2 +1,2 @@
-alert_selftest
-# 2026-11-01 推送自检：阿里云邮件推送凭据已配（DM_SMTP_USER/DM_SMTP_PASS/ALERT_SELFTEST_TO），预期邮件 ok、微信 unconfigured
+daily_update_plan
+# 2026-11-02 补跑：17:00 班次因财务同比极端值入库失败（invest-model #295 已修），指数日线停在 10-30
