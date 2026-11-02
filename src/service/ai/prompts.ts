@@ -41,26 +41,67 @@ ${p.code ? `\n用户当前代码(${p.language || ''})：\n${p.code}` : ''}
   return { system, user };
 }
 
+export interface ReviewFailingCase {
+  input: string;
+  expectedOutput: string;
+  actualOutput?: string | null;
+  error?: string | null;
+}
+
 export interface ReviewParams {
   title: string;
   code: string;
   language?: string;
   resultSummary?: string;
+  /**
+   * 点评焦点（练习中心 2026-11）：
+   * - bug：用例没过 / 报错，先定位错在哪、为什么，不要泛泛点评；
+   * - optimize：已通过，讲更优解的方向与复杂度差距；
+   * - 缺省：综合点评。
+   */
+  focus?: 'bug' | 'optimize';
+  /** 第一条没过的用例，给「找错因」用 */
+  failingCase?: ReviewFailingCase;
 }
 
+const REVIEW_FOCUS_RULES: Record<NonNullable<ReviewParams['focus']>, string> = {
+  bug: `- 用户的代码没有通过用例。先用一两句话指出**最可能的错因**（逻辑分支、边界、越界、类型、输入解析），再说明为什么这个用例会暴露它。
+- 不要重写整份代码；最多给出改动点所在的那一两行示意。
+- 不要同时列一堆无关的可读性建议，先把错修对。`,
+  optimize: `- 用户的代码已经通过全部用例。重点讲：当前解法的时间/空间复杂度、是否存在更优解、更优解的**核心观察**是什么。
+- 更优解只讲思路与复杂度差距，不直接贴完整代码，让用户自己写一遍。
+- 如果当前已是最优，直接说明，并补一两个面试追问（变体 / 边界）。`,
+};
+
 export function buildReviewPrompt(p: ReviewParams): { system: string; user: string } {
+  const focusRule = p.focus ? REVIEW_FOCUS_RULES[p.focus] : '';
   const system = `${IRIS_SOUL}
 
 你正在对用户提交的算法代码做点评。要求：
 - 从正确性、时间/空间复杂度、边界与潜在 bug、可读性、优化方向几个角度点评。
 - 优化方向只点方向，不要直接贴出最优解完整代码；如需少量代码示意，必须使用用户代码所用的编程语言，绝不切换到其他语言。
-- 简洁、诚实，用中文，Markdown 排版。`;
+- 简洁、诚实，用中文，Markdown 排版。${focusRule ? `\n${focusRule}` : ''}`;
+  const failing = p.failingCase
+    ? `未通过的用例：
+输入：${p.failingCase.input}
+预期输出：${p.failingCase.expectedOutput}
+实际输出：${p.failingCase.actualOutput || '(无输出)'}${
+        p.failingCase.error ? `\n错误信息：${p.failingCase.error}` : ''
+      }
+`
+    : '';
+  const ask =
+    p.focus === 'bug'
+      ? '请帮我找出错在哪里。'
+      : p.focus === 'optimize'
+        ? '请讲讲这份代码还能怎么更优。'
+        : '请给出点评。';
   const user = `题目：${p.title}
 用户所选编程语言：${p.language || '未指定'}
-${p.resultSummary ? `判题结果：${p.resultSummary}\n` : ''}用户代码(${p.language || ''})：
+${p.resultSummary ? `判题结果：${p.resultSummary}\n` : ''}${failing}用户代码(${p.language || ''})：
 ${p.code}
 
-请给出点评。`;
+${ask}`;
   return { system, user };
 }
 

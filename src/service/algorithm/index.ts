@@ -9,7 +9,24 @@ import { AlgorithmSubmissionEntity } from '../../entity/algorithm/submission';
 import { AlgorithmCodeDraftEntity } from '../../entity/algorithm/codeDraft';
 import { AlgorithmProblemFlagEntity } from '../../entity/algorithm/problemFlag';
 import { Judge0ClientService } from './judge0Client';
+import { InterviewQuestionIndexService } from '../interview/questionIndex';
 import { R } from '../../common/base.error.utils';
+import {
+  buildActivity,
+  buildProblemLists,
+  buildRecommendations,
+  computeStreak,
+  findSimilar,
+  matchInterviewRefs,
+  toDayKey,
+  InterviewRefs,
+  ProblemLite,
+  ProblemListMeta,
+} from '../../common/algorithmPractice';
+
+/** 面经引用匹配结果按面经索引版本缓存在进程内（索引本身 10 分钟失效）。 */
+let refsCache: { version: string; map: Map<string, InterviewRefs> } | null =
+  null;
 
 @Provide()
 export class AlgorithmService {
@@ -36,6 +53,71 @@ export class AlgorithmService {
 
   @Inject()
   judge0ClientService: Judge0ClientService;
+
+  @Inject()
+  questionIndex: InterviewQuestionIndexService;
+
+  // ========== 题库快照 / 面经引用 ==========
+
+  /** 全部已发布题目 + 标签（三条小查询，题库不到百道，不做分页）。 */
+  async loadProblemsLite(): Promise<ProblemLite[]> {
+    const rows = await this.problemModel.find({
+      where: { status: 'published' },
+      select: ['id', 'slug', 'title', 'difficulty', 'orderNum', 'listSlugs'],
+      order: { orderNum: 'ASC', id: 'ASC' },
+    });
+    const tagsMap = await this.loadTagsMap(rows.map(p => p.id));
+    return rows.map(p => ({
+      id: String(p.id),
+      slug: p.slug,
+      title: p.title,
+      difficulty: p.difficulty,
+      orderNum: p.orderNum,
+      tags: tagsMap[p.id] || [],
+      listSlugs: p.listSlugs,
+    }));
+  }
+
+  private async loadTagsMap(problemIds: Array<string | number>) {
+    const tagsMap: Record<string, { id: string; name: string }[]> = {};
+    if (!problemIds.length) return tagsMap;
+    const relations = await this.problemTagModel.find({
+      where: { problemId: In(problemIds.map(Number)) },
+    });
+    const tagIds = [...new Set(relations.map(r => r.tagId))];
+    const tags = tagIds.length
+      ? await this.tagModel.find({ where: { id: In(tagIds.map(String)) } })
+      : [];
+    const tagMap = Object.fromEntries(tags.map(t => [t.id, t]));
+    for (const r of relations) {
+      if (!tagsMap[r.problemId]) tagsMap[r.problemId] = [];
+      if (tagMap[r.tagId])
+        tagsMap[r.problemId].push({
+          id: String(tagMap[r.tagId].id),
+          name: tagMap[r.tagId].name,
+        });
+    }
+    return tagsMap;
+  }
+
+  /**
+   * 题目 slug → 面经引用。面经索引取不到（本地无内容表等）时返回空表，不影响题库功能。
+   */
+  async getInterviewRefsMap(
+    problems?: ProblemLite[]
+  ): Promise<Map<string, InterviewRefs>> {
+    try {
+      const index = await this.questionIndex.load();
+      if (refsCache && refsCache.version === index.version)
+        return refsCache.map;
+      const list = problems || (await this.loadProblemsLite());
+      const map = matchInterviewRefs(list, index.index);
+      refsCache = { version: index.version, map };
+      return map;
+    } catch {
+      return refsCache?.map || new Map();
+    }
+  }
 
   // ========== 用户端 ==========
 
@@ -75,22 +157,8 @@ export class AlgorithmService {
       .take(pageSize)
       .getMany();
 
-    const problemIds = list.map(p => p.id);
-    const tagsMap: Record<string, any[]> = {};
-    if (problemIds.length) {
-      const relations = await this.problemTagModel.find({
-        where: { problemId: In(problemIds.map(Number)) },
-      });
-      const tagIds = [...new Set(relations.map(r => r.tagId))];
-      const tags = tagIds.length
-        ? await this.tagModel.find({ where: { id: In(tagIds.map(String)) } })
-        : [];
-      const tagMap = Object.fromEntries(tags.map(t => [t.id, t]));
-      for (const r of relations) {
-        if (!tagsMap[r.problemId]) tagsMap[r.problemId] = [];
-        if (tagMap[r.tagId]) tagsMap[r.problemId].push(tagMap[r.tagId]);
-      }
-    }
+    const tagsMap = await this.loadTagsMap(list.map(p => p.id));
+    const refs = await this.getInterviewRefsMap();
 
     return {
       list: list.map(p => ({
@@ -102,6 +170,8 @@ export class AlgorithmService {
         acceptCount: p.acceptCount,
         submitCount: p.submitCount,
         tags: tagsMap[p.id] || [],
+        interviewCount: refs.get(p.slug)?.count || 0,
+        listSlugs: Array.isArray(p.listSlugs) ? p.listSlugs : [],
       })),
       total,
       page,
@@ -126,6 +196,25 @@ export class AlgorithmService {
       ? await this.tagModel.find({ where: { id: In(tagIds.map(String)) } })
       : [];
 
+    // 面经引用与相似题：任一步失败都不影响题目本身的加载
+    let interviewRefs: InterviewRefs | null = null;
+    let similar: Array<{ slug: string; title: string; difficulty: string }> =
+      [];
+    try {
+      const all = await this.loadProblemsLite();
+      const refs = await this.getInterviewRefsMap(all);
+      interviewRefs = refs.get(problem.slug) || null;
+      const me = all.find(p => p.slug === problem.slug);
+      if (me)
+        similar = findSimilar(me, all).map(p => ({
+          slug: p.slug,
+          title: p.title,
+          difficulty: p.difficulty,
+        }));
+    } catch {
+      /* 练习中心的附加信息，失败静默 */
+    }
+
     return {
       ...problem,
       sampleCases: sampleCases.map(tc => ({
@@ -134,6 +223,8 @@ export class AlgorithmService {
       })),
       tags,
       relatedArticles: problem.relatedArticles || [],
+      interviewRefs,
+      similar,
     };
   }
 
@@ -402,32 +493,156 @@ export class AlgorithmService {
 
   // ========== 题单 ==========
 
-  async getProblemLists(): Promise<{ slug: string; title: string; problemSlugs: string[] }[]> {
-    const LIST_META: Record<string, string> = {
-      'campus-hot': '校招高频',
-      'by-topic': '按知识点',
-      agent: 'Agent 专项',
-    };
+  /**
+   * 题单：面经高频 / 校招高频 / 剑指 Offer / 知识点专题（自动）+ 后台人工题单。
+   * 此前三个固定题单从没填过 listSlugs、线上全是 0 题，改为自动生成兜底。
+   */
+  async getProblemLists(): Promise<ProblemListMeta[]> {
+    const problems = await this.loadProblemsLite();
+    const refs = await this.getInterviewRefsMap(problems);
+    return buildProblemLists(problems, refs);
+  }
 
-    const problems = await this.problemModel.find({
-      where: { status: 'published' },
-      select: ['slug', 'listSlugs'],
-    });
+  // ========== 练习中心概览 ==========
 
-    const grouped: Record<string, string[]> = {};
-    for (const p of problems) {
-      const slugs: string[] = Array.isArray(p.listSlugs) ? p.listSlugs : [];
-      for (const ls of slugs) {
-        if (!grouped[ls]) grouped[ls] = [];
-        grouped[ls].push(p.slug);
-      }
+  /**
+   * 练习中心首页一次拿齐：进度、连续天数、近 12 周活跃、最近练习、今日推荐、题单进度。
+   * 未登录也能看（全部个人数据为空，推荐退化为「顺序往下练 + 面经高频」）。
+   */
+  async getOverview(userId: string | null) {
+    const problems = await this.loadProblemsLite();
+    const refs = await this.getInterviewRefsMap(problems);
+    const lists = buildProblemLists(problems, refs);
+    const byId = new Map(problems.map(p => [p.id, p]));
+    const today = toDayKey(new Date());
+
+    const totals = { total: problems.length, easy: 0, medium: 0, hard: 0 };
+    for (const p of problems)
+      if (p.difficulty in totals) (totals as any)[p.difficulty] += 1;
+
+    let statusMap: Record<string, 'accepted' | 'attempted'> = {};
+    let flags: Record<string, 'favorite' | 'redo'> = {};
+    let submissions: AlgorithmSubmissionEntity[] = [];
+    if (userId) {
+      [statusMap, flags] = await Promise.all([
+        this.getUserProblemStatuses(userId),
+        this.getUserFlags(userId),
+      ]);
+      submissions = await this.submissionModel.find({
+        where: { userId },
+        select: ['problemId', 'status', 'type', 'createTime'],
+        order: { createTime: 'DESC' },
+        take: 2000,
+      });
     }
 
-    return Object.entries(LIST_META).map(([slug, title]) => ({
-      slug,
-      title,
-      problemSlugs: grouped[slug] || [],
+    const solved = { total: 0, easy: 0, medium: 0, hard: 0 };
+    let attempted = 0;
+    for (const [pid, st] of Object.entries(statusMap)) {
+      const p = byId.get(String(pid));
+      if (!p) continue;
+      if (st === 'accepted') {
+        solved.total += 1;
+        if (p.difficulty in solved) (solved as any)[p.difficulty] += 1;
+      } else attempted += 1;
+    }
+
+    const submits = submissions.filter(s => s.type === 'submit');
+    const dayKeys = new Set(submits.map(s => toDayKey(s.createTime)));
+    const streak = computeStreak(dayKeys, today);
+    const activity = buildActivity(
+      submits.map(s => ({
+        createTime: s.createTime || new Date(),
+        status: s.status,
+      })),
+      today
+    );
+
+    // 最近练过的题（去重，按最近一次提交时间）
+    const recent: Array<{
+      slug: string;
+      title: string;
+      difficulty: string;
+      status: string;
+      at: Date;
+    }> = [];
+    const seen = new Set<number>();
+    for (const sub of submissions) {
+      if (seen.has(sub.problemId)) continue;
+      const p = byId.get(String(sub.problemId));
+      if (!p) continue;
+      seen.add(sub.problemId);
+      recent.push({
+        slug: p.slug,
+        title: p.title,
+        difficulty: p.difficulty,
+        status: statusMap[p.id] || 'attempted',
+        at: sub.createTime,
+      });
+      if (recent.length >= 5) break;
+    }
+
+    const lastAccepted = submits.find(s => s.status === 'accepted');
+    const recommendations = buildRecommendations({
+      problems,
+      statusMap,
+      flags,
+      refs,
+      lastAcceptedSlug: lastAccepted
+        ? byId.get(String(lastAccepted.problemId))?.slug
+        : null,
+    }).map(r => {
+      const p = problems.find(x => x.slug === r.slug)!;
+      return {
+        ...r,
+        title: p.title,
+        difficulty: p.difficulty,
+        tags: p.tags.map(t => t.name).slice(0, 3),
+        interviewCount: refs.get(p.slug)?.count || 0,
+      };
+    });
+
+    const bySlug = new Map(problems.map(p => [p.slug, p]));
+    const listsWithProgress = lists.map(l => ({
+      slug: l.slug,
+      title: l.title,
+      description: l.description,
+      kind: l.kind,
+      count: l.problemSlugs.length,
+      solved: l.problemSlugs.filter(sl => {
+        const p = bySlug.get(sl);
+        return p && statusMap[p.id] === 'accepted';
+      }).length,
     }));
+
+    // 弱项：有提交但没过的题所属标签（去重，按题数降序，最多 4 个）
+    const weak = new Map<string, number>();
+    for (const [pid, st] of Object.entries(statusMap)) {
+      if (st !== 'attempted') continue;
+      for (const t of byId.get(String(pid))?.tags || []) {
+        if (t.name === '剑指 Offer') continue;
+        weak.set(t.name, (weak.get(t.name) || 0) + 1);
+      }
+    }
+    const weakTags = [...weak.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name, count]) => ({ name, count }));
+
+    return {
+      loggedIn: !!userId,
+      totals,
+      solved,
+      attempted,
+      streak,
+      activity,
+      recent,
+      recommendations,
+      lists: listsWithProgress,
+      weakTags,
+      interviewHotCount:
+        lists.find(l => l.slug === 'interview-hot')?.problemSlugs.length || 0,
+    };
   }
 
   // ========== 管理端 ==========
@@ -443,6 +658,7 @@ export class AlgorithmService {
     orderNum?: number;
     status?: string;
     tagIds?: number[];
+    listSlugs?: string[] | null;
   }) {
     const { tagIds, ...data } = params;
 
@@ -525,7 +741,11 @@ export class AlgorithmService {
 
   // ========== 收藏 / 标记重做 ==========
 
-  async toggleFlag(userId: string, slug: string, flag: 'favorite' | 'redo' | null) {
+  async toggleFlag(
+    userId: string,
+    slug: string,
+    flag: 'favorite' | 'redo' | null
+  ) {
     const existing = await this.problemFlagModel.findOneBy({ userId, slug });
     if (flag === null) {
       if (existing) await this.problemFlagModel.remove(existing);
@@ -544,7 +764,9 @@ export class AlgorithmService {
     return { slug, flag };
   }
 
-  async getUserFlags(userId: string): Promise<Record<string, 'favorite' | 'redo'>> {
+  async getUserFlags(
+    userId: string
+  ): Promise<Record<string, 'favorite' | 'redo'>> {
     const rows = await this.problemFlagModel.find({ where: { userId } });
     const map: Record<string, 'favorite' | 'redo'> = {};
     for (const row of rows) {
