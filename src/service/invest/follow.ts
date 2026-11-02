@@ -9,6 +9,7 @@ import {
   LEG_ORDER,
   advise,
   combineCurves,
+  tradeFee,
   execStats,
   navSeries,
   nextCheckDates,
@@ -32,6 +33,50 @@ export class InvestFollowService {
 
   static readonly MIN_PRINCIPAL = 1000;
   static readonly MAX_PRINCIPAL = 1e9;
+  /** 用户未填佣金时的默认档（行业默认万3、最低 5 元；与 invest-model 费后统计同假设）。 */
+  static readonly DEFAULT_FEE_RATE = 0.0003;
+  static readonly DEFAULT_MIN_FEE = 5;
+  static readonly MAX_FEE_RATE = 0.003;
+  static readonly MAX_MIN_FEE = 50;
+
+  /** 四腿「费前 / 费后」对照与具体标的信息（broad_strategy_stats，Python 每日写；无表返回 []）。 */
+  async strategyStats() {
+    try {
+      const rows = await this.db.q(
+        'SELECT leg, principal, etf, start, as_of, cum, cum_published, cum_net, bh_cum, fees, nb, ns, ' +
+          'fee_rate, min_fee, expense, instrument FROM broad_strategy_stats ORDER BY leg, principal'
+      );
+      return rows.map((r: any) => {
+        let instrument: any = null;
+        try {
+          instrument = r.instrument ? JSON.parse(String(r.instrument)) : null;
+        } catch {
+          instrument = null;
+        }
+        return {
+          leg: String(r.leg),
+          principal: Number(r.principal),
+          etf: r.etf == null ? null : String(r.etf),
+          start: r.start == null ? null : String(r.start),
+          as_of: r.as_of == null ? null : String(r.as_of),
+          cum: r.cum == null ? null : Number(r.cum),
+          cum_published:
+            r.cum_published == null ? null : Number(r.cum_published),
+          cum_net: r.cum_net == null ? null : Number(r.cum_net),
+          bh_cum: r.bh_cum == null ? null : Number(r.bh_cum),
+          fees: r.fees == null ? null : Number(r.fees),
+          nb: r.nb == null ? null : Number(r.nb),
+          ns: r.ns == null ? null : Number(r.ns),
+          fee_rate: r.fee_rate == null ? null : Number(r.fee_rate),
+          min_fee: r.min_fee == null ? null : Number(r.min_fee),
+          expense: r.expense == null ? null : Number(r.expense),
+          instrument,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
 
   /** 市场级：决策日、四腿位置、当日信号、执行日、下一个检查日。登录即可读。 */
   async market() {
@@ -113,6 +158,7 @@ export class InvestFollowService {
       next_check: { week_end: check.weekEnd, month_end: check.monthEnd },
       legs,
       today: today.map((r: any) => this.sigOut(r)),
+      stats: await this.strategyStats(),
     };
   }
 
@@ -169,7 +215,8 @@ export class InvestFollowService {
     let prof: any[] = [];
     try {
       prof = await this.db.q(
-        'SELECT leg, principal, start_date, status, member_until, updated_at FROM user_follow_profile WHERE user_id = ?',
+        'SELECT leg, principal, start_date, status, fee_rate, min_fee, member_until, updated_at ' +
+          'FROM user_follow_profile WHERE user_id = ?',
         [userId]
       );
     } catch {
@@ -191,7 +238,7 @@ export class InvestFollowService {
       try {
         execAll = await this.db.q(
           'SELECT id, leg, signal_date, kind, exec_date, etf, side, frac, price, bench_shares, bench_amount, ' +
-            'shares, amount, status, note, updated_at FROM user_follow_exec WHERE user_id = ? ' +
+            'bench_fee, shares, amount, fee, status, note, updated_at FROM user_follow_exec WHERE user_id = ? ' +
             'ORDER BY exec_date, signal_date, id',
           [userId]
         );
@@ -222,6 +269,14 @@ export class InvestFollowService {
       const principal = Number(p.principal) || 0;
       const startDate = String(p.start_date || '');
       const status = String(p.status || 'active');
+      const feeRate =
+        p.fee_rate == null
+          ? InvestFollowService.DEFAULT_FEE_RATE
+          : Number(p.fee_rate);
+      const minFee =
+        p.min_fee == null
+          ? InvestFollowService.DEFAULT_MIN_FEE
+          : Number(p.min_fee);
       const rows = execAll.filter(r => String(r.leg) === leg);
       const actual = stateFromRows(principal, rows, false);
       const bench = stateFromRows(principal, rows, true);
@@ -281,7 +336,9 @@ export class InvestFollowService {
           { side: s.side, frac: s.frac, kind: s.kind, etf: s.etf },
           c,
           u,
-          px
+          px,
+          feeRate,
+          minFee
         );
         c = a.cashAfter;
         u = a.unitsAfter;
@@ -297,6 +354,8 @@ export class InvestFollowService {
         status,
         principal,
         start_date: startDate,
+        fee_rate: feeRate,
+        min_fee: minFee,
         market: mkt,
         price,
         cash: actual.cash,
@@ -365,8 +424,10 @@ export class InvestFollowService {
       price: r.price == null ? null : Number(r.price),
       bench_shares: r.bench_shares == null ? null : Number(r.bench_shares),
       bench_amount: r.bench_amount == null ? null : Number(r.bench_amount),
+      bench_fee: r.bench_fee == null ? 0 : Number(r.bench_fee),
       shares: r.shares == null ? null : Number(r.shares),
       amount: r.amount == null ? null : Number(r.amount),
+      fee: r.fee == null ? 0 : Number(r.fee),
       status: r.status || 'auto',
       note: r.note || '',
     };
@@ -396,7 +457,7 @@ export class InvestFollowService {
       return { ok: true, reset: true };
     }
     const cur = await this.db.one(
-      'SELECT principal, start_date, status FROM user_follow_profile WHERE user_id = ? AND leg = ?',
+      'SELECT principal, start_date, status, fee_rate, min_fee FROM user_follow_profile WHERE user_id = ? AND leg = ?',
       [userId, leg]
     );
     if (action === 'pause' || action === 'resume') {
@@ -426,6 +487,31 @@ export class InvestFollowService {
       .slice(0, 8);
     if (!/^\d{8}$/.test(start)) throw new Error('起步日格式应为 YYYYMMDD');
     if (start < today) start = today;
+    // 佣金：未填用默认档；改佣金不重开账本（只影响之后的记账与换算）
+    const feeRate =
+      body?.fee_rate == null || body?.fee_rate === ''
+        ? cur?.fee_rate == null
+          ? InvestFollowService.DEFAULT_FEE_RATE
+          : Number(cur.fee_rate)
+        : Number(body.fee_rate);
+    const minFee =
+      body?.min_fee == null || body?.min_fee === ''
+        ? cur?.min_fee == null
+          ? InvestFollowService.DEFAULT_MIN_FEE
+          : Number(cur.min_fee)
+        : Number(body.min_fee);
+    if (
+      !Number.isFinite(feeRate) ||
+      feeRate < 0 ||
+      feeRate > InvestFollowService.MAX_FEE_RATE
+    )
+      throw new Error('佣金率应在 0 到 0.3% 之间（万3 填 0.0003）');
+    if (
+      !Number.isFinite(minFee) ||
+      minFee < 0 ||
+      minFee > InvestFollowService.MAX_MIN_FEE
+    )
+      throw new Error('最低佣金应在 0 到 50 元之间');
     let reset = false;
     if (cur) {
       const changed =
@@ -447,18 +533,45 @@ export class InvestFollowService {
         }
       }
       await this.db.exec(
-        'UPDATE user_follow_profile SET principal = ?, start_date = ?, status = ?, member_until = ?, updated_at = ? ' +
-          'WHERE user_id = ? AND leg = ?',
-        [principal, start, 'active', memberUntil, now, userId, leg]
+        'UPDATE user_follow_profile SET principal = ?, start_date = ?, status = ?, fee_rate = ?, min_fee = ?, ' +
+          'member_until = ?, updated_at = ? WHERE user_id = ? AND leg = ?',
+        [
+          principal,
+          start,
+          'active',
+          feeRate,
+          minFee,
+          memberUntil,
+          now,
+          userId,
+          leg,
+        ]
       );
     } else {
       await this.db.exec(
-        'INSERT INTO user_follow_profile (user_id, leg, principal, start_date, status, member_until, updated_at) ' +
-          'VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [userId, leg, principal, start, 'active', memberUntil, now]
+        'INSERT INTO user_follow_profile (user_id, leg, principal, start_date, status, fee_rate, min_fee, ' +
+          'member_until, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          userId,
+          leg,
+          principal,
+          start,
+          'active',
+          feeRate,
+          minFee,
+          memberUntil,
+          now,
+        ]
       );
     }
-    return { ok: true, reset, principal, start_date: start };
+    return {
+      ok: true,
+      reset,
+      principal,
+      start_date: start,
+      fee_rate: feeRate,
+      min_fee: minFee,
+    };
   }
 
   /** 记账行修改（只改自己的）：done＝按提醒做了；skipped＝没做；edited＝实际份额/价格不同。 */
@@ -469,10 +582,24 @@ export class InvestFollowService {
     if (!['done', 'skipped', 'edited', 'auto'].includes(status))
       throw new Error('状态不合法');
     const row = await this.db.one(
-      'SELECT id, side, price, bench_shares, bench_amount FROM user_follow_exec WHERE id = ? AND user_id = ?',
+      'SELECT id, leg, side, price, bench_shares, bench_amount FROM user_follow_exec WHERE id = ? AND user_id = ?',
       [id, userId]
     );
     if (!row) throw new Error('记录不存在');
+    let feeRate = InvestFollowService.DEFAULT_FEE_RATE;
+    let minFee = InvestFollowService.DEFAULT_MIN_FEE;
+    try {
+      const prof = await this.db.one(
+        'SELECT fee_rate, min_fee FROM user_follow_profile WHERE user_id = ? AND leg = ?',
+        [userId, String(row.leg)]
+      );
+      if (prof) {
+        if (prof.fee_rate != null) feeRate = Number(prof.fee_rate);
+        if (prof.min_fee != null) minFee = Number(prof.min_fee);
+      }
+    } catch {
+      // 档案读不到用默认档
+    }
     const note = String(body?.note || '').slice(0, 64);
     const now = new Date();
     if (status === 'edited') {
@@ -487,17 +614,25 @@ export class InvestFollowService {
       if (!Number.isFinite(price) || !(price > 0))
         throw new Error('价格应大于 0');
       const amount = Math.round(shares * price * 100) / 100;
+      // 佣金：用户可直接填实际佣金；没填按档案费率算（0 份＝没成交＝无佣金）
+      const fee =
+        body?.fee == null || body?.fee === ''
+          ? shares > 0
+            ? Math.round(tradeFee(amount, feeRate, minFee) * 100) / 100
+            : 0
+          : Math.max(0, Number(body.fee) || 0);
       await this.db.exec(
-        'UPDATE user_follow_exec SET status = ?, shares = ?, amount = ?, note = ?, updated_at = ? WHERE id = ? AND user_id = ?',
-        ['edited', shares, amount, note, now, id, userId]
+        'UPDATE user_follow_exec SET status = ?, shares = ?, amount = ?, fee = ?, note = ?, updated_at = ? ' +
+          'WHERE id = ? AND user_id = ?',
+        ['edited', shares, amount, fee, note, now, id, userId]
       );
-      return { ok: true, shares, amount };
+      return { ok: true, shares, amount, fee };
     }
     if (status === 'auto') {
       // 撤销修改：回到自动值
       await this.db.exec(
-        'UPDATE user_follow_exec SET status = ?, shares = bench_shares, amount = bench_amount, note = ?, updated_at = ? ' +
-          'WHERE id = ? AND user_id = ?',
+        'UPDATE user_follow_exec SET status = ?, shares = bench_shares, amount = bench_amount, fee = bench_fee, ' +
+          'note = ?, updated_at = ? WHERE id = ? AND user_id = ?',
         ['auto', note, now, id, userId]
       );
       return { ok: true };

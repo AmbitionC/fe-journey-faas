@@ -22,6 +22,11 @@ class FakeDb {
     if (sql.includes('FROM broad_signal WHERE exec_date <')) return (d.hist || []).filter((r: any) => r.exec_date < params[0]);
     if (sql.includes('FROM broad_signal ORDER BY')) return d.hist || [];
     if (sql.includes('FROM trade_calendar')) return (d.cal || []).map((c: string) => ({ cal_date: c }));
+    if (sql.includes('FROM broad_strategy_stats')) return d.stats || [];
+    if (sql.includes('SELECT fee_rate, min_fee FROM user_follow_profile')) {
+      const p = (d.profile || []).find((x: any) => x.leg === params[1]);
+      return p ? [p] : [];
+    }
     if (sql.includes('FROM user_follow_profile WHERE user_id = ? AND leg')) {
       const p = (d.profile || []).find((x: any) => x.leg === params[1]);
       return p ? [p] : [];
@@ -113,12 +118,18 @@ describe('invest/follow.ts — 跟车服务层', () => {
     assert.strictEqual(hs.enabled, true);
     assert.strictEqual(hs.cash, 100000);
     assert.strictEqual(hs.advice.length, 2);
-    // 抢买 50%：50000/4.0=12500 份 → 50000 元；锚买 20%：剩余 50000×0.2=10000/4.0=2500 份
-    assert.strictEqual(hs.advice[0].shares, 12500);
-    assert.strictEqual(hs.advice[0].amount, 50000);
+    // 档案没填佣金 ⟹ 默认万3/最低5元。抢买 50%：预算 50000 含佣金 → floor(50000/(4×1.0003)/100)×100
+    // = 12400 份 → 49600 元，佣金 14.88；锚买 20% 按扣佣后现金 (100000−49600−14.88)×20% = 10077.02
+    // → 2500 份 → 10000 元，佣金 5（与 Python size_order 同一套算术）
+    assert.strictEqual(hs.advice[0].shares, 12400);
+    assert.strictEqual(hs.advice[0].amount, 49600);
+    assert.strictEqual(hs.advice[0].fee, 14.88);
     assert.strictEqual(hs.advice[1].shares, 2500);
     assert.strictEqual(hs.advice[1].amount, 10000);
-    assert.ok(hs.advice[0].text.includes('沪深300ETF 买入 50,000 元'), hs.advice[0].text);
+    assert.strictEqual(hs.advice[1].fee, 5);
+    assert.ok(hs.advice[0].text.includes('沪深300ETF（510300） 买入 12,400 份，约 49,600 元，佣金约 14.88 元'), hs.advice[0].text);
+    assert.strictEqual(hs.fee_rate, 0.0003);
+    assert.strictEqual(hs.min_fee, 5);
     const hl = r.legs.find((l: any) => l.leg === '红利');
     // 实际：现金 41000 + 9000×1.2 = 51800；基准：40000 + 10000×1.2 = 52000
     assert.strictEqual(hl.nav, 51800);
@@ -164,17 +175,47 @@ describe('invest/follow.ts — 跟车服务层', () => {
     assert.ok(ok.start_date >= '20261102');
     const p = await withRows.s.saveProfile('u1', null, { leg: '沪深300', action: 'pause' });
     assert.strictEqual(p.status, 'paused');
+    // 佣金：范围校验；只改佣金不重开账本
+    await assert.rejects(
+      () => withRows.s.saveProfile('u1', null, { leg: '沪深300', principal: 60000, start_date: '20261001', fee_rate: 0.01 }),
+      /佣金率/
+    );
+    const f = await withRows.s.saveProfile('u1', null, {
+      leg: '沪深300', principal: 60000, start_date: '20261001', fee_rate: 0.0001, min_fee: 0, confirm_reset: true,
+    });
+    assert.strictEqual(f.fee_rate, 0.0001);
+    assert.strictEqual(f.min_fee, 0);
+  });
+
+  it('市场级带四腿费前/费后统计与标的信息（库表 JSON 解析）', async () => {
+    const { s } = svc({
+      ...market,
+      stats: [
+        { leg: '沪深300', principal: 100000, etf: '510300.SH', start: '20070508', as_of: '20261030', cum: 4.116,
+          cum_published: 4.1148, cum_net: 4.01, bh_cum: 1.0812, fees: 1234.5, nb: 52, ns: 70, fee_rate: 0.0003,
+          min_fee: 5, expense: 0.002, instrument: '{"name":"沪深300ETF","mgmt":0.0015,"custody":0.0005}' },
+      ],
+    });
+    const r = await s.overview('u1', false, null);
+    assert.strictEqual(r.market.stats.length, 1);
+    assert.strictEqual(r.market.stats[0].cum_net, 4.01);
+    assert.strictEqual(r.market.stats[0].instrument.name, '沪深300ETF');
   });
 
   it('记账修改：只改自己的；edited 重算金额；auto 回到自动值', async () => {
     const { s, db } = svc({
       ...market,
       exec: [{ id: 7, user_id: 'u1', leg: '沪深300', side: 'buy', price: 4.0, bench_shares: 2500, bench_amount: 10000 }],
+      profile: [],
     });
     await assert.rejects(() => s.updateExec('u2', { id: 7, status: 'skipped' }), /不存在/);
     await assert.rejects(() => s.updateExec('u1', { id: 7, status: 'edited', shares: 2550, price: 0 }), /价格/);
     const e = await s.updateExec('u1', { id: 7, status: 'edited', shares: 2400, price: 4.01 });
     assert.strictEqual(e.amount, 9624);
+    // 没填佣金 ⟹ 按默认档算：9624×0.0003=2.89 < 5 ⟹ 5
+    assert.strictEqual(e.fee, 5);
+    const e2 = await s.updateExec('u1', { id: 7, status: 'edited', shares: 2400, price: 4.01, fee: 1.2 });
+    assert.strictEqual(e2.fee, 1.2);
     await s.updateExec('u1', { id: 7, status: 'skipped', note: '当天没开盘软件' });
     await s.updateExec('u1', { id: 7, status: 'auto' });
     assert.ok(db.execs[db.execs.length - 1].sql.includes('shares = bench_shares'));

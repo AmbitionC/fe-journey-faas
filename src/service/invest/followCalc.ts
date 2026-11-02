@@ -30,6 +30,8 @@ export const KIND_CN: Record<string, string> = {
 export interface ExecRow {
   id?: number;
   leg: string;
+  bench_fee?: number | null;
+  fee?: number | null;
   signal_date: string;
   kind: string;
   exec_date: string;
@@ -45,24 +47,43 @@ export interface ExecRow {
   note?: string | null;
 }
 
+/** 场内 ETF 单笔佣金：成交额×费率、不足最低按最低；费率与最低都为 0 ⟹ 0（ETF 免印花税）。 */
+export function tradeFee(value: number, feeRate = 0, minFee = 0): number {
+  if (!(value > 0) || (feeRate <= 0 && minFee <= 0)) return 0;
+  return Math.max(value * feeRate, minFee);
+}
+
+/**
+ * 按 100 份取整的下单量。买＝「现金×比例」是含佣金的预算：整手向下取整、成交额+佣金不超预算；
+ * 卖＝持仓×比例四舍五入到整手、不超过持仓。与 Python size_order 同一套算术。
+ */
 export function sizeOrder(
   side: string,
   frac: number,
   cash: number,
   units: number,
-  price: number | null | undefined
-): { shares: number; amount: number } {
-  if (price == null || !(price > 0)) return { shares: 0, amount: 0 };
+  price: number | null | undefined,
+  feeRate = 0,
+  minFee = 0
+): { shares: number; amount: number; fee: number } {
+  if (price == null || !(price > 0)) return { shares: 0, amount: 0, fee: 0 };
   let sh: number;
   if (side === 'buy') {
-    const amt = Math.max(cash, 0) * frac;
-    sh = Math.floor(amt / price / LOT) * LOT;
+    const budget = Math.max(cash, 0) * frac;
+    sh = Math.floor(budget / (price * (1 + Math.max(feeRate, 0))) / LOT) * LOT;
+    while (
+      sh > 0 &&
+      sh * price + tradeFee(sh * price, feeRate, minFee) > budget + 1e-9
+    )
+      sh -= LOT;
   } else {
     sh = Math.floor((units * frac) / LOT + 0.5) * LOT;
     sh = Math.min(sh, Math.floor(units / LOT) * LOT);
   }
   sh = Math.max(sh, 0);
-  return { shares: sh, amount: Math.round(sh * price * 100) / 100 };
+  const fee =
+    sh > 0 ? Math.round(tradeFee(sh * price, feeRate, minFee) * 100) / 100 : 0;
+  return { shares: sh, amount: Math.round(sh * price * 100) / 100, fee };
 }
 
 /** 由记账行汇总 (现金, 持仓份额)。bench 用完美跟车值；否则用用户实际值（skipped 不计）。 */
@@ -76,19 +97,23 @@ export function stateFromRows(
   for (const r of rows) {
     let sh: number;
     let amt: number;
+    let fee: number;
     if (bench) {
       sh = Number(r.bench_shares || 0);
       amt = Number(r.bench_amount || 0);
+      fee = Number(r.bench_fee || 0);
     } else {
       if (String(r.status || '') === 'skipped') continue;
       sh = Number(r.shares || 0);
       amt = Number(r.amount || 0);
+      fee = Number(r.fee || 0);
     }
+    // 佣金从现金扣：买＝成交额+佣金，卖＝成交额−佣金
     if (String(r.side) === 'buy') {
-      cash -= amt;
+      cash -= amt + fee;
       units += sh;
     } else {
-      cash += amt;
+      cash += amt - fee;
       units -= sh;
     }
   }
@@ -189,23 +214,38 @@ export function advise(
   sig: { side: string; frac: number; kind: string; etf: string },
   cash: number,
   units: number,
-  price: number | null | undefined
+  price: number | null | undefined,
+  feeRate = 0,
+  minFee = 0
 ): {
   shares: number;
   amount: number;
+  fee: number;
   skipped: boolean;
   reason: string;
   text: string;
   cashAfter: number;
   unitsAfter: number;
 } {
-  const { shares, amount } = sizeOrder(sig.side, sig.frac, cash, units, price);
-  const name = ETF_NAME[sig.etf] || sig.etf;
+  const { shares, amount, fee } = sizeOrder(
+    sig.side,
+    sig.frac,
+    cash,
+    units,
+    price,
+    feeRate,
+    minFee
+  );
+  const name = `${ETF_NAME[sig.etf] || sig.etf}（${
+    String(sig.etf).split('.')[0]
+  }）`;
   const pct = `${Math.round(sig.frac * 100)}%`;
+  const feeTxt = fee > 0 ? `，佣金约 ${fee.toFixed(2)} 元` : '';
   if (price == null || !(price > 0)) {
     return {
       shares: 0,
       amount: 0,
+      fee: 0,
       skipped: false,
       reason: '暂无最新收盘价',
       text: `${name}：${
@@ -220,6 +260,7 @@ export function advise(
     return {
       shares: 0,
       amount: 0,
+      fee: 0,
       skipped: true,
       reason,
       text: `${name}：${reason}，本次按规则跳过`,
@@ -231,24 +272,26 @@ export function advise(
     return {
       shares,
       amount,
+      fee,
       skipped: false,
       reason: '',
-      text: `${name} 买入 ${fmtMoney(amount)}，约 ${shares.toLocaleString(
-        'zh-CN'
-      )} 份`,
-      cashAfter: cash - amount,
+      text: `${name} 买入 ${shares.toLocaleString('zh-CN')} 份，约 ${fmtMoney(
+        amount
+      )}${feeTxt}`,
+      cashAfter: Math.round((cash - amount - fee) * 100) / 100,
       unitsAfter: units + shares,
     };
   }
   return {
     shares,
     amount,
+    fee,
     skipped: false,
     reason: '',
     text: `${name} 卖出 ${shares.toLocaleString('zh-CN')} 份，约 ${fmtMoney(
       amount
-    )}`,
-    cashAfter: cash + amount,
+    )}${feeTxt}`,
+    cashAfter: Math.round((cash + amount - fee) * 100) / 100,
     unitsAfter: units - shares,
   };
 }

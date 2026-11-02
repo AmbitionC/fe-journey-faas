@@ -11,13 +11,35 @@ import {
 /** 与 invest-model tests/test_broad_follow.py 的用例一一对应：两边算术必须给同一个数。 */
 describe('invest/followCalc.ts — 跟车换算（与 Python 端对照）', () => {
   it('sizeOrder：买向下取整到 100 份、卖半数进一、不超过整手持仓', () => {
-    assert.deepStrictEqual(sizeOrder('buy', 0.2, 50000, 0, 3.98), { shares: 2500, amount: 9950 });
-    assert.deepStrictEqual(sizeOrder('buy', 0.2, 1500, 0, 3.98), { shares: 0, amount: 0 });
-    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 2500, 4.1), { shares: 100, amount: 410 });
-    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 500, 4.1), { shares: 0, amount: 0 });
-    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 1000, 4.1), { shares: 100, amount: 410 });
-    assert.deepStrictEqual(sizeOrder('sell', 0.5, 0, 150, 2.0), { shares: 100, amount: 200 });
-    assert.deepStrictEqual(sizeOrder('buy', 0.2, 50000, 0, null), { shares: 0, amount: 0 });
+    assert.deepStrictEqual(sizeOrder('buy', 0.2, 50000, 0, 3.98), { shares: 2500, amount: 9950, fee: 0 });
+    assert.deepStrictEqual(sizeOrder('buy', 0.2, 1500, 0, 3.98), { shares: 0, amount: 0, fee: 0 });
+    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 2500, 4.1), { shares: 100, amount: 410, fee: 0 });
+    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 500, 4.1), { shares: 0, amount: 0, fee: 0 });
+    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 1000, 4.1), { shares: 100, amount: 410, fee: 0 });
+    assert.deepStrictEqual(sizeOrder('sell', 0.5, 0, 150, 2.0), { shares: 100, amount: 200, fee: 0 });
+    assert.deepStrictEqual(sizeOrder('buy', 0.2, 50000, 0, null), { shares: 0, amount: 0, fee: 0 });
+  });
+
+  it('sizeOrder：佣金（万3/最低5元）——预算含佣金、不透支；与 Python test_size_order_with_commission 同数', () => {
+    assert.deepStrictEqual(sizeOrder('buy', 0.2, 50000, 0, 3.98, 0.0003, 5), { shares: 2500, amount: 9950, fee: 5 });
+    assert.deepStrictEqual(sizeOrder('buy', 1.0, 398.0, 0, 3.98, 0.0003, 5), { shares: 0, amount: 0, fee: 0 });
+    assert.deepStrictEqual(sizeOrder('buy', 1.0, 796.0, 0, 3.98, 0.0003, 5), { shares: 100, amount: 398, fee: 5 });
+    const big = sizeOrder('buy', 0.2, 1_000_000, 0, 4.0, 0.0003, 5);
+    assert.strictEqual(big.shares, 49900);
+    assert.strictEqual(big.amount, 199600);
+    assert.strictEqual(big.fee, Math.round(199600 * 0.0003 * 100) / 100);
+    assert.ok(big.amount + big.fee <= 200000);
+    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 2500, 4.1, 0.0003, 5), { shares: 100, amount: 410, fee: 5 });
+    assert.deepStrictEqual(sizeOrder('sell', 0.05, 0, 2500, 4.1, 0.0001, 0), { shares: 100, amount: 410, fee: 0.04 });
+  });
+
+  it('stateFromRows：佣金从现金扣（买＝成交额+佣金，卖＝成交额−佣金）', () => {
+    const rows: any[] = [
+      { side: 'buy', bench_shares: 2500, bench_amount: 9950, bench_fee: 5, shares: 2500, amount: 9950, fee: 5, status: 'auto' },
+      { side: 'sell', bench_shares: 100, bench_amount: 420, bench_fee: 5, shares: 100, amount: 420, fee: 5, status: 'auto' },
+    ];
+    assert.deepStrictEqual(stateFromRows(50000, rows, true), { cash: 50000 - 9955 + 415, units: 2400 });
+    assert.deepStrictEqual(stateFromRows(50000, rows, false), { cash: 50000 - 9955 + 415, units: 2400 });
   });
 
   it('stateFromRows：基准用自动值，实际跳过 skipped', () => {
@@ -66,9 +88,14 @@ describe('invest/followCalc.ts — 跟车换算（与 Python 端对照）', () =
 
   it('advise：文案与前后状态', () => {
     const a = advise({ side: 'buy', frac: 0.2, kind: 'anchor_buy', etf: '510300.SH' }, 50000, 0, 3.98);
-    assert.strictEqual(a.text, '沪深300ETF 买入 9,950 元，约 2,500 份');
+    assert.strictEqual(a.text, '沪深300ETF（510300） 买入 2,500 份，约 9,950 元');
     assert.strictEqual(a.cashAfter, 40050);
     assert.strictEqual(a.unitsAfter, 2500);
+    // 带佣金：文案附佣金、现金多扣 5 元（与 Python follow_user_lines 同数：40,045）
+    const af = advise({ side: 'buy', frac: 0.2, kind: 'anchor_buy', etf: '510300.SH' }, 50000, 0, 3.98, 0.0003, 5);
+    assert.strictEqual(af.text, '沪深300ETF（510300） 买入 2,500 份，约 9,950 元，佣金约 5.00 元');
+    assert.strictEqual(af.cashAfter, 40045);
+    assert.strictEqual(af.fee, 5);
     const b = advise({ side: 'sell', frac: 0.05, kind: 'sell', etf: '515080.SH' }, 100, 500, 1.4);
     assert.strictEqual(b.skipped, true);
     assert.ok(b.text.includes('持仓不足一手的比例'));
