@@ -127,10 +127,20 @@ describe('线上实际处理器（server.js）也必须认 purpose', () => {
     );
   });
 
-  it('限流传入 aux 桶', () => {
+  it('辅助调用走 aux 限流桶，不走 Iris 计点', () => {
+    // 2026-11-02 起用户提问按点数计（IrisCreditService.begin），辅助调用仍只限流：
+    // 桶名必须来自 auxBucketFor，并且只有非辅助调用才 begin 扣点。
     assert.ok(
-      /checkRateLimit\(userId, isMember, auxBucketFor\(body\.purpose\)\)/.test(server),
+      /const auxBucket = auxBucketFor\(body\.purpose\)/.test(server),
+      'server.js 未用 auxBucketFor 取桶名'
+    );
+    assert.ok(
+      /checkRateLimit\(userId, isMember, auxBucket\)/.test(server),
       'server.js 的 checkRateLimit 未传 aux 桶'
+    );
+    assert.ok(
+      /irisCreditService\.begin\(userId, isMember, deepThink \? 'think' : 'chat'\)/.test(server),
+      'server.js 的用户提问未按 chat/think 计点'
     );
   });
 

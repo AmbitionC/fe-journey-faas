@@ -164,7 +164,7 @@ export default {
           ? 'https://api.openai.com/v1'
           : 'https://api.deepseek.com'),
       apiKey: process.env.HEALTH_CHAT_API_KEY || process.env.LLM_API_KEY || '',
-      model: process.env.HEALTH_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-v4-flash',
+      model: process.env.HEALTH_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-flash',
     },
   },
   typeorm: {
@@ -253,8 +253,13 @@ export default {
   ai: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
     apiKey: process.env.LLM_API_KEY || '',
-    // deepseek-chat / deepseek-reasoner 于 2026-07-24 弃用，统一切 deepseek-v4-flash（非思考=chat、思考=reasoner 均由它承载，思考走请求体 thinking 参数，见 proxy.buildRequestBody）。生产可用 LLM_MODEL 覆盖（如 deepseek-v4-pro）。
-    model: process.env.LLM_MODEL || 'deepseek-v4-flash',
+    // 2026-11-02 起默认 deepseek-flash（DeepSeek V4.1-Flash）。deepseek-v4-flash 已于 2026-09-10 下线，
+    // 官方临时转发到 Flash 并按 Flash 计费；deepseek-chat / deepseek-reasoner 2026-07-24 弃用。
+    // 非思考 / 思考同一个模型名，思考由请求体 thinking 参数控制（见 proxy.buildRequestBody）；
+    // ⚠️ DeepSeek 把 thinking 与 reasoning_effort 都省略时默认**开启**思考，所以非思考必须显式传 disabled。
+    model: process.env.LLM_MODEL || 'deepseek-flash',
+    // 面试复盘报告（Iris 会员专享、5 点一份、低频长输出）单独走更强的模型；可用 IRIS_REPORT_MODEL 覆盖
+    reportModel: process.env.IRIS_REPORT_MODEL || 'deepseek-v4-pro',
     rateLimit: {
       freeUserPerDay: parseInt(process.env.AI_RATE_FREE || '10', 10),
       freeWindowSeconds: 86400,

@@ -261,6 +261,73 @@ export function findSku(sku: string): Sku | undefined {
   return SKUS.find(s => s.sku === sku) || LEGACY_SKUS.find(s => s.sku === sku);
 }
 
+/**
+ * Iris（网站内的 AI 面试教练）各模式扣点（owner 2026-11-02：「Iris 的调用也应该算到 credit」）。
+ * 键即点数流水的 ref（`iris_<mode>`），与 Skill 工具并列进经营看板的 topTools。
+ * - chat：普通问答 / 考一考 / 划线问 / 算法提示与点评 / 简答判分（deepseek-flash 非思考）
+ * - think：深度思考问答（思考链约再花 2000 tokens，成本翻倍）
+ * - interview：模拟面试每一轮（会员专享）
+ * - report：模拟面试复盘报告（deepseek-v4-pro，会员专享）
+ * 成本参照（高峰价）：一次问答约 ¥0.016–0.02，1 点名义 ¥0.1、会员实付 ¥0.036–0.0725。
+ */
+export type IrisMode = 'chat' | 'think' | 'interview' | 'report';
+export const IRIS_COST: Record<IrisMode, number> = {
+  chat: 1,
+  think: 2,
+  interview: 1,
+  report: 5,
+};
+/** 登录用户每天免费的普通问答次数（不扣点，只覆盖 chat 模式） */
+export const IRIS_FREE_DAILY = 3;
+/** 游客（按 IP）每天的普通问答次数；游客不能开深度思考、不进点数账户 */
+export const IRIS_GUEST_DAILY = 3;
+/** 每账户每天 Iris 调用上限（成本保险丝，防脚本刷点） */
+export const IRIS_DAILY_CAP: Record<Tier, number> = { free: 60, member: 300 };
+/** 只对会员开放的模式：点数是用量、会员是资格 */
+export const IRIS_MEMBER_ONLY: IrisMode[] = ['interview', 'report'];
+
+export function irisCost(mode: IrisMode): number {
+  return IRIS_COST[mode] ?? 1;
+}
+
+/** 点数流水里 Iris 的 ref（与 Skill 工具名同一列） */
+export function irisLedgerRef(mode: IrisMode): string {
+  return `iris_${mode}`;
+}
+
+/** 给前端的 Iris 计费说明（/mcp/pricing 的 iris 块；前端文案全部从这里读，不写死） */
+export function irisPricing() {
+  return {
+    costs: { ...IRIS_COST },
+    freeDaily: IRIS_FREE_DAILY,
+    guestDaily: IRIS_GUEST_DAILY,
+    memberOnly: [...IRIS_MEMBER_ONLY],
+    dailyCap: { ...IRIS_DAILY_CAP },
+    note: `登录用户每天前 ${IRIS_FREE_DAILY} 次问答免费；之后问答 ${IRIS_COST.chat} 点、深度思考 ${IRIS_COST.think} 点、模拟面试每轮 ${IRIS_COST.interview} 点、复盘报告 ${IRIS_COST.report} 点。模拟面试与复盘报告为会员专享。`,
+  };
+}
+
+/**
+ * 邀请奖励（分享拉新，owner 2026-11-02）。货币是点数不是会员时长：成本可控，且与 Iris 直接挂钩。
+ * - invitee：被邀请人带码注册，在体验点之外另得
+ * - inviter：邀请人在被邀请人注册成功时得
+ * - memberBonus：被邀请人首次开通会员（月卡/年卡到账）时邀请人再得
+ * - monthlyCap：邀请人每月最多计奖的注册人数（开会员返点不设上限，有真实收入对应）
+ */
+export const REFERRAL_REWARD = {
+  invitee: 30,
+  inviter: 30,
+  memberBonus: 100,
+  monthlyCap: 10,
+};
+
+export function referralPricing() {
+  return {
+    ...REFERRAL_REWARD,
+    note: `好友通过你的邀请链接注册，双方各得 ${REFERRAL_REWARD.inviter} 点；好友开通会员后你再得 ${REFERRAL_REWARD.memberBonus} 点。每月最多 ${REFERRAL_REWARD.monthlyCap} 位好友计奖。`,
+  };
+}
+
 /** 每次调用扣多少点。未列出的工具默认 1 点；口径/清单/用量查询免费。 */
 export const TOOL_COST: Record<string, number> = {
   knowledge_tree: 1,

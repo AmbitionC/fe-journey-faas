@@ -66,6 +66,52 @@ export interface ToolTurnResult {
   cacheMissTokens: number;
 }
 
+/** 上游 usage 归一化（DeepSeek 带缓存命中与思考 token，OpenAI/DashScope 只有总数）。 */
+export interface AiUsage {
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  reasoningTokens: number;
+}
+
+export function readUsage(raw: unknown): AiUsage {
+  const u = (raw || {}) as Record<string, any>;
+  const prompt = Number(u.prompt_tokens ?? u.input_tokens ?? 0) || 0;
+  const completion = Number(u.completion_tokens ?? u.output_tokens ?? 0) || 0;
+  return {
+    totalTokens: Number(u.total_tokens ?? 0) || prompt + completion,
+    promptTokens: prompt,
+    completionTokens: completion,
+    cacheHitTokens: Number(u.prompt_cache_hit_tokens ?? 0) || 0,
+    cacheMissTokens: Number(u.prompt_cache_miss_tokens ?? 0) || 0,
+    reasoningTokens: Number(u.completion_tokens_details?.reasoning_tokens ?? 0) || 0,
+  };
+}
+
+/**
+ * 把 SSE 字节流切成完整的 `data:` 行。上游一个 JSON 帧可能跨两个 TCP chunk，
+ * 直接按 chunk split 会把半行当畸形 JSON 丢掉（内容悄悄缺字）。
+ */
+export class SseLineBuffer {
+  private buf = '';
+  push(text: string): string[] {
+    this.buf += text;
+    const parts = this.buf.split('\n');
+    this.buf = parts.pop() || '';
+    return parts
+      .map(l => l.trim())
+      .filter(l => l.startsWith('data:'))
+      .map(l => l.slice(5).trim());
+  }
+  flush(): string[] {
+    const rest = this.buf.trim();
+    this.buf = '';
+    return rest.startsWith('data:') ? [rest.slice(5).trim()] : [];
+  }
+}
+
 export interface ChatContext {
   module: string;
   articleKey?: string;
@@ -77,6 +123,8 @@ interface AiConfig {
   provider: string;
   apiKey: string;
   model: string;
+  /** 面试复盘报告用的模型（更强、低频），缺省回退 model */
+  reportModel?: string;
   rateLimit: {
     freeUserPerDay: number;
     freeWindowSeconds: number;
@@ -473,19 +521,17 @@ export class AiProxyService {
     if (this.isOpenAiStyle()) {
       // 深度思考：DeepSeek V4 起，思考模式改为「请求体参数」而非独立模型名。
       // 旧的 deepseek-reasoner 模型名于 2026-07-24 弃用——统一用 aiConfig.model
-      //（deepseek-v4-flash）+ thinking 参数触发思考；reasoning_content 仍在
+      //（deepseek-flash）+ thinking 参数触发思考；reasoning_content 仍在
       // delta.reasoning_content 流式返回（extractStreamContent 已读取）。
-      const wantThinking = deepThink && this.aiConfig.provider === 'deepseek';
       const body: Record<string, unknown> = {
         model: this.aiConfig.model,
         messages: allMessages,
         stream: streaming,
         max_tokens: 2048,
+        ...this.thinkingParams(deepThink),
       };
-      if (wantThinking) {
-        body.thinking = { type: 'enabled' };
-        body.reasoning_effort = process.env.LLM_REASONING_EFFORT || 'high';
-      }
+      // 流式也要拿到 usage：最后一帧（finish_reason 之后、[DONE] 之前）单独带 usage
+      if (streaming) body.stream_options = { include_usage: true };
       return body;
     }
 
@@ -498,6 +544,87 @@ export class AiProxyService {
       input: { messages: allMessages },
       parameters: params,
     };
+  }
+
+  /**
+   * 思考开关的请求体参数。
+   * ⚠️ DeepSeek 官方文档：`thinking` 与 `reasoning_effort` **都省略时默认开启思考**。
+   * 2026-11-02 前这里只在 deepThink 时传 enabled、不传时什么都不传——于是前端关掉「深度思考」
+   * 后模型照样思考（延迟高、输出 token 贵 4 倍），只是我们不把 reasoning_content 透出来。
+   * 非思考必须显式 disabled；openai 供应商不认这些字段，一律不传。
+   */
+  private thinkingParams(deepThink: boolean): Record<string, unknown> {
+    if (this.aiConfig.provider !== 'deepseek') return {};
+    if (!deepThink) return { thinking: { type: 'disabled' } };
+    return {
+      thinking: { type: 'enabled' },
+      reasoning_effort: process.env.LLM_REASONING_EFFORT || 'high',
+    };
+  }
+
+  /**
+   * 通用非流式补全（可指定模型 / JSON 输出 / 长度），给低频长输出任务（面试复盘报告）用。
+   * 仅 OpenAI 兼容协议；DashScope 形态下忽略 model/json 选项走默认链路。
+   */
+  async completeWith(
+    systemPrompt: string,
+    userPrompt: string,
+    opts: { userId: string; module: string; model?: string; json?: boolean; maxTokens?: number; deepThink?: boolean }
+  ): Promise<{ content: string; usage: AiUsage }> {
+    if (!this.aiConfig.apiKey) throw R.error('AI 服务未配置，请联系管理员');
+    const started = Date.now();
+    const { url, headers } = this.getRequestConfig(false);
+    const body = this.buildRequestBody(
+      [{ role: 'user', content: userPrompt }],
+      systemPrompt,
+      false,
+      !!opts.deepThink
+    ) as Record<string, unknown>;
+    const maxTokens = opts.maxTokens || 4096;
+    if (this.isOpenAiStyle()) {
+      if (opts.model) body.model = opts.model;
+      body.max_tokens = maxTokens;
+      if (opts.json) body.response_format = { type: 'json_object' };
+    } else if (body.parameters && typeof body.parameters === 'object') {
+      (body.parameters as Record<string, unknown>).max_tokens = maxTokens;
+    }
+    try {
+      const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw R.error(`AI 服务请求失败 (${response.status})${text ? ': ' + text : ''}`);
+      }
+      const result = (await response.json()) as Record<string, unknown>;
+      const usage = readUsage(result?.usage);
+      await this.logUsage(opts.userId, opts.module, usage.totalTokens);
+      await this.logCall({
+        userId: opts.userId,
+        route: opts.module,
+        inputSummary: userPrompt,
+        latencyMs: Date.now() - started,
+        tokenUsed: usage.totalTokens,
+        status: 'success',
+        mode: String(body.model || this.aiConfig.model),
+      });
+      return { content: this.extractContent(result), usage };
+    } catch (err: any) {
+      await this.logCall({
+        userId: opts.userId,
+        route: opts.module,
+        inputSummary: userPrompt,
+        latencyMs: Date.now() - started,
+        tokenUsed: 0,
+        status: 'error',
+        errorMsg: err?.message,
+        mode: String(body.model || this.aiConfig.model),
+      });
+      throw err;
+    }
+  }
+
+  /** 报告模型名（配置可覆盖，缺省回退主模型） */
+  reportModel(): string {
+    return this.aiConfig.reportModel || this.aiConfig.model;
   }
 
   private getRequestConfig(streaming: boolean): { url: string; headers: Record<string, string> } {
@@ -633,44 +760,29 @@ export class AiProxyService {
 
     if (!response.body) throw R.error('AI 服务响应异常');
 
-    let totalTokens = 0;
+    let usage: AiUsage | null = null;
     const decoder = new (require('string_decoder').StringDecoder)('utf8');
+    const lines = new SseLineBuffer();
 
-    for await (const chunk of response.body) {
-      const text = decoder.write(chunk as Buffer);
-      const lines = text.split('\n').filter((l: string) => l.startsWith('data:'));
-
-      for (const line of lines) {
-        const rawData = line.slice(5).trim();
-        if (rawData === '[DONE]') return;
-
+    // 不在 finish_reason 处提前返回：开了 stream_options.include_usage 后 usage 在其后一帧单独下发，
+    // 提前返回就永远记不到用量（2026-11-02 前流式用量一直记 0 就是这个原因）。
+    outer: for await (const chunk of response.body) {
+      for (const rawData of lines.push(decoder.write(chunk as Buffer))) {
+        if (rawData === '[DONE]') break outer;
         try {
           const parsed = JSON.parse(rawData) as Record<string, unknown>;
-          const { content, reasoning, done } = this.extractStreamContent(parsed);
-
+          const { content, reasoning } = this.extractStreamContent(parsed);
           // 思考链先于正文：分别下发，前端据此渲染「深度思考」块与正文
-          if (reasoning) {
-            yield { reasoning };
-          }
-          if (content) {
-            yield { content };
-          }
-
-          // Track token usage from final SSE message
-          const usage = parsed?.usage as { total_tokens?: number };
-          if (usage?.total_tokens) totalTokens = usage.total_tokens;
-
-          if (done) {
-            await this.logUsage(userId, module, totalTokens);
-            return;
-          }
+          if (reasoning) yield { reasoning };
+          if (content) yield { content };
+          if (parsed?.usage) usage = readUsage(parsed.usage);
         } catch {
           // Skip malformed SSE lines
         }
       }
     }
 
-    await this.logUsage(userId, module, totalTokens);
+    await this.logUsage(userId, module, usage?.totalTokens || 0);
   }
 
   async *forwardStream(
@@ -732,6 +844,8 @@ export class AiProxyService {
       model: this.aiConfig.model,
       messages: [{ role: 'system', content: systemPrompt }, ...rawMessages],
       max_tokens: 1200,
+      // 工具轮不思考：DeepSeek 默认开思考，且思考 + tools 时要求把 reasoning_content 原样回传
+      ...this.thinkingParams(false),
     };
     if (tools && tools.length) {
       body.tools = tools;
@@ -791,6 +905,8 @@ export class AiProxyService {
       messages: [{ role: 'system', content: systemPrompt }, ...rawMessages],
       stream: true,
       max_tokens: 2048,
+      stream_options: { include_usage: true },
+      ...this.thinkingParams(false),
     };
     const response = await fetch(url, {
       method: 'POST',
@@ -805,25 +921,15 @@ export class AiProxyService {
 
     let totalTokens = 0;
     const decoder = new (require('string_decoder').StringDecoder)('utf8');
-    for await (const chunk of response.body) {
-      const text = decoder.write(chunk as Buffer);
-      const lines = text.split('\n').filter((l: string) => l.startsWith('data:'));
-      for (const line of lines) {
-        const rawData = line.slice(5).trim();
-        if (rawData === '[DONE]') {
-          await this.logUsage(userId, module, totalTokens);
-          return;
-        }
+    const lines = new SseLineBuffer();
+    outer: for await (const chunk of response.body) {
+      for (const rawData of lines.push(decoder.write(chunk as Buffer))) {
+        if (rawData === '[DONE]') break outer;
         try {
           const parsed = JSON.parse(rawData) as Record<string, unknown>;
-          const { content, done } = this.extractStreamContent(parsed);
+          const { content } = this.extractStreamContent(parsed);
           if (content) yield { content };
-          const usage = parsed?.usage as { total_tokens?: number };
-          if (usage?.total_tokens) totalTokens = usage.total_tokens;
-          if (done) {
-            await this.logUsage(userId, module, totalTokens);
-            return;
-          }
+          if (parsed?.usage) totalTokens = readUsage(parsed.usage).totalTokens;
         } catch {
           /* 跳过畸形 SSE 行 */
         }

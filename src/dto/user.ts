@@ -25,4 +25,8 @@ export class UserDTO extends BaseDTO<UserEntity> {
 
   @Rule(RuleType.allow(null))
   memberDate?: string;
+
+  /** 邀请码（好友分享链接 ?invite= 带来的，注册后双方得点；见 mcp/referral） */
+  @Rule(RuleType.string().allow(null, '').max(32))
+  inviteCode?: string;
 }

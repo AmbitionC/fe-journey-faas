@@ -370,3 +370,48 @@ ${p.weakTags?.length ? `薄弱点：${p.weakTags.join('、')}` : ''}
 请写这段周报。`;
   return { system, user };
 }
+
+export interface InterviewReportParams {
+  /** 面试目标，如「字节跳动 · Agent 开发」或「前端综合」 */
+  label: string;
+  /** 面试官 / 候选人完整对话 */
+  history: { role: 'interviewer' | 'candidate'; content: string }[];
+  /** 服务端抽的题（公司面试模式有；按方向面试没有） */
+  plan?: { topic: string; question: string }[];
+}
+
+/**
+ * 模拟面试复盘报告（Iris 会员专享，走更强的模型、JSON 输出）。
+ * 报告要能脱离对话单独读：给分、画像、每题表现、复习考点、下一步。
+ * 分享页只透出画像部分（见 irisReport.sharedView），所以 perQuestion 的 question 字段必须是独立字段。
+ */
+export function buildInterviewReportMessages(p: InterviewReportParams): { system: string; user: string } {
+  const system = `${IRIS_SOUL}
+
+你现在是技术面试官兼教练，请基于下面这场「${p.label}」模拟面试的完整对话，写一份复盘报告。只输出一个 JSON 对象，不要 Markdown、不要解释，字段：
+{
+  "score": 0-100 的整数（综合表现分，70 分≈能通过这一轮），
+  "verdict": "一句话总评（60 字以内，具体、对事不对人）",
+  "level": "初级 | 中级 | 高级（按本场表现判断最接近的岗位级别）",
+  "strengths": ["最多 4 条，每条一句话，写出具体表现出来的能力"],
+  "weaknesses": ["最多 4 条，每条一句话，写出具体漏掉或答错的点"],
+  "perQuestion": [{ "question": "题目（用一句话概括原题）", "topic": "考点名", "performance": "一句话表现评价", "keyPoint": "答对这题最关键的一个点", "score": 0-10 }],
+  "reviewTopics": ["建议复习的考点名，最多 8 个，按优先级排序"],
+  "nextSteps": ["接下来一周可执行的 2-4 条行动建议，具体到做什么"]
+}
+规则：只依据对话内容判断，候选人没回答的题按 0-3 分记并在 performance 里写明；不编造对话里没有的内容；用中文。`;
+  const convo = p.history
+    .map(
+      h =>
+        `${h.role === 'interviewer' ? '面试官' : '候选人'}：${
+          h.role === 'candidate' ? sanitizeForPrompt(h.content, 2000) : String(h.content || '').slice(0, 2000)
+        }`
+    )
+    .join('\n');
+  const planText = p.plan?.length
+    ? `\n\n本场预设题目（服务端抽题，供你对照）：\n${p.plan
+        .map((q, i) => `${i + 1}. [${q.topic}] ${q.question}`)
+        .join('\n')}`
+    : '';
+  return { system, user: `完整对话：\n${convo || '（空）'}${planText}` };
+}

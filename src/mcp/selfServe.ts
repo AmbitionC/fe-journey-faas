@@ -13,6 +13,8 @@ import {
   findSellableSku,
   payCode,
   PAY_TEST_SKU,
+  irisPricing,
+  referralPricing,
 } from './billing';
 import {
   checkPaid,
@@ -95,6 +97,9 @@ export function pricing(
     toolCost: toolCostFor(product),
     defaultToolCost: 1,
     chargeCalls: phase.id !== 'free',
+    // 网站 Iris 的计点口径与邀请奖励（前端只读这里，不写死数字）
+    iris: irisPricing(),
+    referral: referralPricing(),
   };
 }
 
@@ -134,6 +139,17 @@ async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
   const r = await rt.billing.fulfill(orderNo, actor);
   if (r === 'ok') {
     const o = await rt.billing.getOrder(orderNo).catch(() => null);
+    // 受邀者开通会员 → 邀请人加点（只认 plan SKU；加油包不算「成为会员」）
+    if (o && rt.referral && findSku(o.sku)?.kind === 'plan') {
+      const bonus = await rt.referral.onMemberPaid(String(o.user_id)).catch(() => null);
+      if (bonus) {
+        await track(rt, {
+          event: 'referral_member',
+          userId: bonus.inviter,
+          props: { invitee: String(o.user_id), points: bonus.points, orderNo },
+        });
+      }
+    }
     await track(rt, {
       event: 'order_paid',
       userId: o?.user_id || null,
