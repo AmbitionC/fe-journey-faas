@@ -5,6 +5,9 @@ import {
   mergeEvents,
   sizeOrder,
   stateFromRows,
+  portfolioState,
+  dayPlan,
+  signalOrder,
   navSeries,
   execStats,
   nextCheckDates,
@@ -55,21 +58,73 @@ describe('invest/followCalc.ts — 跟车换算（与 Python 端对照）', () =
     assert.deepStrictEqual(stateFromRows(50000, rows, false), { cash: 50000 - 9950 + 420, units: 2400 });
   });
 
-  it('navSeries：记账行按执行日生效，净值=现金+份额×收盘', () => {
+  it('navSeries（组合级）：记账行按执行日生效，净值=现金池+Σ份额×收盘，缺收盘的指数前向填充', () => {
     const rows: any[] = [
-      { leg: 'x', signal_date: '20261030', kind: 'anchor_buy', exec_date: '20261102', side: 'buy',
+      { leg: '沪深300', signal_date: '20261030', kind: 'anchor_buy', exec_date: '20261102', side: 'buy',
         bench_shares: 2500, bench_amount: 10000, shares: 2500, amount: 10000, status: 'auto' },
+      { leg: '红利', signal_date: '20261030', kind: 'anchor_buy', exec_date: '20261102', side: 'buy',
+        bench_shares: 1000, bench_amount: 1500, shares: 1000, amount: 1500, status: 'auto' },
     ];
-    const s = navSeries(50000, rows, [
-      { date: '20261030', close: 3.98 },
-      { date: '20261102', close: 4.0 },
-      { date: '20261103', close: 4.4 },
-    ]);
+    const s = navSeries(50000, rows, {
+      沪深300: [{ date: '20261030', close: 3.98 }, { date: '20261102', close: 4.0 }, { date: '20261103', close: 4.4 }],
+      红利: [{ date: '20261102', close: 1.5 }],
+    });
     assert.deepStrictEqual(s.map((x) => [x.date, x.nav, x.bench]), [
       ['20261030', 50000, 50000],
       ['20261102', 50000, 50000],
       ['20261103', 51000, 51000],
     ]);
+    assert.ok(Math.abs(s[2].unit - 1.02) < 1e-9);
+  });
+
+  const sig = (leg: string, side: string, frac: number, seq = 1) => ({
+    leg, side, frac, seq, kind: 'x', etf: ({ 沪深300: '510300.SH', 创业板: '159915.SZ', 科创50: '588000.SH', 红利: '515080.SH' } as any)[leg],
+  });
+
+  it('portfolioState：一个现金池、按指数记份额；基准用自动值、实际跳过 skipped；资金流进现金池', () => {
+    const rows: any[] = [
+      { leg: '沪深300', exec_date: '20261013', side: 'buy', bench_shares: 2500, bench_amount: 9950, bench_fee: 5, shares: 2500, amount: 9950, fee: 5, status: 'auto' },
+      { leg: '创业板', exec_date: '20261013', side: 'buy', bench_shares: 2000, bench_amount: 8000, shares: 0, amount: 0, status: 'skipped' },
+      { leg: '沪深300', exec_date: '20261020', side: 'sell', bench_shares: 100, bench_amount: 420, bench_fee: 5, shares: 100, amount: 420, fee: 5, status: 'auto' },
+    ];
+    const b = portfolioState(50000, rows, true, [{ flow_date: '20261020', amount: 1000 }]);
+    assert.strictEqual(b.cash, 50000 - 9955 - 8000 + 415 + 1000);
+    assert.deepStrictEqual(b.units, { 沪深300: 2400, 创业板: 2000, 科创50: 0, 红利: 0 });
+    const a = portfolioState(50000, rows, false);
+    assert.strictEqual(a.cash, 50000 - 9955 + 415);
+    assert.deepStrictEqual(a.units, { 沪深300: 2400, 创业板: 0, 科创50: 0, 红利: 0 });
+  });
+
+  it('dayPlan：与 Python test_day_plan_quarter_sizing_and_sell_first 同数', () => {
+    const px: Record<string, number> = { 沪深300: 4.0, 创业板: 2.0, 科创50: 1.0, 红利: 1.5 };
+    // 四个指数同一天都恐慌抢买 50%：各按 现金池÷4×50% ＝ 12.5%，合计正好 50%，不会缩放/透支
+    const p1 = dayPlan(100000, {}, Object.keys(px).map((l) => sig(l, 'buy', 0.5)), (l) => px[l]);
+    assert.deepStrictEqual(p1.items.map((i) => i.shares), [3100, 6200, 12500, 8300]);
+    assert.deepStrictEqual(p1.items.map((i) => i.amount), [12400, 12400, 12500, 12450]);
+    assert.strictEqual(p1.cash, 100000 - (12400 + 12400 + 12500 + 12450));
+    assert.deepStrictEqual(p1.units, { 沪深300: 3100, 创业板: 6200, 科创50: 12500, 红利: 8300 });
+    // 先卖后买：红利先卖 5%（回笼现金当天可用），再按卖后的现金池÷4 买沪深300
+    const p2 = dayPlan(10000, { 红利: 20000 }, [sig('沪深300', 'buy', 0.2), sig('红利', 'sell', 0.05)], (l) => px[l]);
+    assert.deepStrictEqual(p2.items.map((i) => i.sig.leg), ['红利', '沪深300']);
+    assert.strictEqual(p2.items[0].shares, 1000);
+    assert.strictEqual(p2.items[0].amount, 1500);
+    assert.strictEqual(p2.items[1].shares, 100);        // (10000+1500)÷4×20% = 575 → 100 份×4
+    assert.strictEqual(p2.items[1].amount, 400);
+    assert.strictEqual(p2.cash, 10000 + 1500 - 400);
+    assert.strictEqual(p2.units['红利'], 19000);
+    // 同一指数同日两笔：第二笔按该指数那份扣掉第一笔后的余额算
+    const p3 = dayPlan(400000, {}, [sig('沪深300', 'buy', 0.5, 1), sig('沪深300', 'buy', 0.2, 2)], (l) => px[l]);
+    assert.strictEqual(p3.items[0].amount, 50000);
+    assert.strictEqual(p3.items[1].amount, 10000);
+    // 没有持仓的卖出：无需操作、不动状态；缺价：份额待算、不动状态
+    const p4 = dayPlan(1000, {}, [sig('红利', 'sell', 0.05)], (l) => px[l]);
+    assert.ok(p4.items[0].text.includes('你没有这个指数的持仓，本次无需操作'));
+    const p5 = dayPlan(100000, {}, [sig('沪深300', 'buy', 0.2)], () => null);
+    assert.ok(p5.items[0].text.includes('暂无收盘价'));
+    assert.strictEqual(p5.cash, 100000);
+    // 顺序：先卖后买，同方向按 沪深300 → 创业板 → 科创50 → 红利
+    const order = [sig('红利', 'buy', 0.2), sig('科创50', 'sell', 0.05), sig('沪深300', 'buy', 0.2)].sort(signalOrder);
+    assert.deepStrictEqual(order.map((s) => s.leg), ['科创50', '沪深300', '红利']);
   });
 
   it('execStats：auto 视为已执行', () => {
