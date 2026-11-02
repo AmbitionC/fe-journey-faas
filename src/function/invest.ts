@@ -444,6 +444,24 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '跟车资金进出：追加 / 取出 / 删除流水（会员专属，只写自己的）',
+    functionName: 'investFollowCashflow',
+    name: 'investFollowCashflow',
+    path: '/invest/follow/cashflow',
+    method: 'post',
+  })
+  async followCashflow(@Body(ALL) body: any) {
+    const { uid, isMember } = await this.memberState();
+    if (!uid) return { success: false, message: '未登录' };
+    if (!isMember) return { success: false, code: 'MEMBER_ONLY', message: '跟车是会员权益' };
+    try {
+      return { success: true, data: await this.followService.cashflow(uid, body) };
+    } catch (e: any) {
+      return { success: false, message: e?.message || '保存失败' };
+    }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '跟车信号流：会员全量；非会员只看 30 天前的历史',
     functionName: 'investFollowSignals',
     name: 'investFollowSignals',

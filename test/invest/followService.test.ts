@@ -40,7 +40,18 @@ class FakeDb {
       const r = (d.exec || []).find((x: any) => x.id === params[0] && x.user_id === params[1]);
       return r ? [r] : [];
     }
+    if (sql.includes('FROM user_follow_exec WHERE user_id = ? AND leg = ? ORDER BY')) {
+      return (d.exec || []).filter((r: any) => r.leg === params[1]);
+    }
     if (sql.includes('FROM user_follow_exec WHERE user_id')) return d.exec || [];
+    if (sql.includes('SELECT id, flow_date FROM user_follow_cashflow WHERE id')) {
+      const f = (d.flows || []).find((x: any) => x.id === params[0] && x.leg === params[2]);
+      return f ? [f] : [];
+    }
+    if (sql.includes('FROM user_follow_cashflow WHERE user_id = ? AND leg = ?')) {
+      return (d.flows || []).filter((x: any) => x.leg === params[1]);
+    }
+    if (sql.includes('FROM user_follow_cashflow WHERE user_id')) return d.flows || [];
     if (sql.includes('FROM stock_daily WHERE code = ? AND trade_date >= ?')) {
       return (d.closes?.[params[0]] || []).filter((r: any) => r.trade_date >= params[1] && r.trade_date <= params[2]);
     }
@@ -190,10 +201,19 @@ describe('invest/follow.ts — 跟车服务层', () => {
     const ok = await withRows.s.saveProfile('u1', null, { leg: '沪深300', principal: 60000, start_date: '20261001', confirm_reset: true });
     assert.strictEqual(ok.reset, true);
     assert.ok(withRows.db.execs.some((e) => e.sql.startsWith('DELETE FROM user_follow_exec')));
+    // 重开账本时资金进出流水一并清掉（旧本金下的流水不能算进新账本）
+    assert.ok(withRows.db.execs.some((e) => e.sql.startsWith('DELETE FROM user_follow_cashflow')));
     // 起步日会被抬到今天（不回溯）
     assert.ok(ok.start_date >= '20261102');
     const p = await withRows.s.saveProfile('u1', null, { leg: '沪深300', action: 'pause' });
     assert.strictEqual(p.status, 'paused');
+    const rm = await withRows.s.saveProfile('u1', null, { leg: '沪深300', action: 'remove' });
+    assert.strictEqual(rm.reset, true);
+    assert.strictEqual(
+      withRows.db.execs.filter((e) => e.sql.startsWith('DELETE FROM user_follow_cashflow')).length,
+      2,
+      '移除指数也要删掉它的资金流水'
+    );
     // 佣金：范围校验；只改佣金不重开账本
     await assert.rejects(
       () => withRows.s.saveProfile('u1', null, { leg: '沪深300', principal: 60000, start_date: '20261001', fee_rate: 0.01 }),
@@ -265,5 +285,60 @@ describe('invest/follow.ts — 跟车服务层', () => {
       { date: '20260102', nav: 151, bench: 152 },
       { date: '20260103', nav: 158, bench: 160 },
     ]);
+  });
+
+  it('资金进出：现金含流水；净投入/收益额/单位净值；取出上限、日期不早于最后记账、删除不改写历史', async () => {
+    const data = {
+      ...market,
+      today: [],
+      profile: [{ leg: '沪深300', principal: 100000, start_date: '20261001', status: 'active' }],
+      exec: [
+        // 10-13 按 20% 买 20000 元（5000 份 @4.0）
+        { id: 1, user_id: 'u1', leg: '沪深300', signal_date: '20261010', kind: 'anchor_buy', exec_date: '20261013', etf: '510300.SH', side: 'buy', frac: 0.2, price: 4.0, bench_shares: 5000, bench_amount: 20000, shares: 5000, amount: 20000, status: 'auto', note: '' },
+      ],
+      flows: [
+        { id: 7, user_id: 'u1', leg: '沪深300', flow_date: '20261013', amount: 30000, note: '同日追加' },
+        { id: 8, user_id: 'u1', leg: '沪深300', flow_date: '20261020', amount: -10000, note: '取出' },
+      ],
+      closes: {
+        '510300.SH': [
+          { trade_date: '20261013', close: 4.0 },
+          { trade_date: '20261020', close: 4.4 },
+          { trade_date: '20261030', close: 4.4 },
+        ],
+      },
+    };
+    const { s, db } = svc(data);
+    const r = await s.overview('u1', true, new Date('2027-01-01T00:00:00Z'));
+    const hs = r.legs.find((l: any) => l.leg === '沪深300')!;
+    // 现金 = 100000 − 20000 + 30000 − 10000 = 100000；净投入 120000；市值 100000 + 5000×4.4 = 122000；收益 2000
+    assert.strictEqual(hs.cash, 100000);
+    assert.strictEqual(hs.net_in, 120000);
+    assert.strictEqual(hs.nav, 122000);
+    assert.strictEqual(hs.pnl, 2000);
+    // 单位净值：10-13 追加当日先按流入前市值定价（100000/100000=1.0），10-20 市值 132000−… 份额法 = 1.0 + 持仓涨幅贡献
+    // 10-13：V=130000，pre=100000 → u=1.0，份额 130000；10-20：V=(80000+30000−10000)+5000×4.4=122000，pre=132000 → u=1.015385，份额 130000−10000/1.015385
+    assert.ok(Math.abs(hs.unit_nav - 1.015385) < 1e-5, String(hs.unit_nav));
+    assert.strictEqual(r.totals!.net_in, 120000);
+    assert.strictEqual(r.totals!.pnl, 2000);
+    assert.ok(Math.abs(r.totals!.unit_nav - 1.015385) < 1e-5);
+    assert.ok(r.curve.every((c: any) => typeof c.unit === 'number'));
+    assert.ok(typeof r.totals!.mwr === 'number');
+    // 追加：日期早于最后记账日拒绝；默认今天写入
+    await assert.rejects(() => s.cashflow('u1', { leg: '沪深300', amount: 5000, flow_date: '20261010' }), /最后一笔记账日/);
+    await assert.rejects(() => s.cashflow('u1', { leg: '沪深300', amount: 0 }), /不能为 0/);
+    const ok = await s.cashflow('u1', { leg: '沪深300', amount: 5000 });
+    assert.strictEqual(ok.ok, true);
+    assert.ok(db.execs.some((e) => e.sql.startsWith('INSERT INTO user_follow_cashflow') && e.params[3] === 5000));
+    // 取出：不超过现金（你的现金 100000 / 基准现金 100000）
+    await assert.rejects(() => s.cashflow('u1', { leg: '沪深300', amount: -100001 }), /最多可取出 100,000/);
+    const w = await s.cashflow('u1', { leg: '沪深300', amount: -100000 });
+    assert.strictEqual(w.amount, -100000);
+    // 删除：其后已有记账的流水不可删（id 7 日期 10-13 = 最后记账日，允许；若早于则拒）
+    const rm = await s.cashflow('u1', { leg: '沪深300', action: 'remove', id: 7 });
+    assert.strictEqual(rm.removed, 7);
+    const later = svc({ ...data, exec: [...data.exec, { ...data.exec[0], id: 2, signal_date: '20261017', exec_date: '20261020' }] });
+    await assert.rejects(() => later.s.cashflow('u1', { leg: '沪深300', action: 'remove', id: 7 }), /不能删除/);
+    await assert.rejects(() => s.cashflow('u1', { leg: '红利', amount: 100 }), /尚未开启/);
   });
 });
