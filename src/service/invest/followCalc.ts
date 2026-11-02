@@ -1,13 +1,18 @@
 /**
  * 跟车换算的纯函数层（2026-11-02）。与 invest-model `orchestration/broad_follow.py` 同一套算术：
- * 买＝当前现金×比例、份额向下取整到 100 份；卖＝当前持仓×比例、四舍五入（半数进一）到 100 份、
- * 不超过整手持仓；现金 = 本金 − 买入金额 + 卖出金额，不计利息。
- * 自动记账由 Python 端在执行日收盘后写入；这里只做「今日换算预览」与「净值/执行率」的汇总，
+ * **一个总资金、一个现金池**（owner 2026-11-02 晚「跟车肯定是有一个总额，然后模型进行分配持有」）：
+ * 每个执行日先卖后买；买入前把现金池按四个指数均分计量，各指数当天只按自己那份×比例买（同指数同日多笔按花掉的钱递减）；
+ * 卖出回笼的钱回到池里共用。份额向下取整到 100 份；卖＝该指数持仓×比例四舍五入到 100 份、不超过整手持仓；
+ * 现金不计利息。自动记账由 Python 端在执行日收盘后写入；这里只做「今日换算预览」与「净值/执行率」的汇总，
  * 不做任何路径重放——两边的算术用 test/invest/follow.test.ts 钉在一起。
  */
 
 export const LOT = 100;
+/** 页面展示顺序（全站统一：沪深300 → 红利 → 创业板 → 科创50） */
 export const LEG_ORDER = ['沪深300', '红利', '创业板', '科创50'];
+/** 同一执行日内的处理顺序（与 Python LEG_RANK 一致）；现金池按这 4 个指数均分计量 */
+export const PLAN_ORDER = ['沪深300', '创业板', '科创50', '红利'];
+export const N_LEGS = PLAN_ORDER.length;
 export const LEG_ETF: Record<string, string> = {
   沪深300: '510300.SH',
   创业板: '159915.SZ',
@@ -100,14 +105,183 @@ export function mergeEvents(
   rows: ExecRow[],
   flows: CashFlow[] = []
 ): { kind: 'exec' | 'flow'; date: string; row?: ExecRow; flow?: CashFlow }[] {
-  const ev: { kind: 'exec' | 'flow'; date: string; order: number; i: number; row?: ExecRow; flow?: CashFlow }[] = [];
-  rows.forEach((r, i) => ev.push({ kind: 'exec', date: String(r.exec_date || ''), order: 0, i, row: r }));
-  flows.forEach((f, i) => ev.push({ kind: 'flow', date: String(f.flow_date || ''), order: 1, i, flow: f }));
-  ev.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order || a.i - b.i);
+  const ev: {
+    kind: 'exec' | 'flow';
+    date: string;
+    order: number;
+    i: number;
+    row?: ExecRow;
+    flow?: CashFlow;
+  }[] = [];
+  rows.forEach((r, i) =>
+    ev.push({
+      kind: 'exec',
+      date: String(r.exec_date || ''),
+      order: 0,
+      i,
+      row: r,
+    })
+  );
+  flows.forEach((f, i) =>
+    ev.push({
+      kind: 'flow',
+      date: String(f.flow_date || ''),
+      order: 1,
+      i,
+      flow: f,
+    })
+  );
+  ev.sort(
+    (a, b) => a.date.localeCompare(b.date) || a.order - b.order || a.i - b.i
+  );
   return ev.map(({ kind, date, row, flow }) => ({ kind, date, row, flow }));
 }
 
-/** 由记账行（+资金流）汇总 (现金, 持仓份额)。bench 用完美跟车值；否则用用户实际值（skipped 不计）。 */
+/** 由记账行（+资金流）汇总组合状态 (现金池, {指数: 份额})。bench 用完美跟车值；否则用用户实际值（skipped 不计）。 */
+export function portfolioState(
+  principal: number,
+  rows: ExecRow[],
+  bench: boolean,
+  flows: CashFlow[] = []
+): { cash: number; units: Record<string, number> } {
+  let cash = Number(principal) || 0;
+  const units: Record<string, number> = {};
+  for (const l of PLAN_ORDER) units[l] = 0;
+  for (const e of mergeEvents(rows, flows)) {
+    if (e.kind === 'flow') {
+      cash += Number(e.flow!.amount) || 0;
+      continue;
+    }
+    const r = e.row!;
+    let sh: number;
+    let amt: number;
+    let fee: number;
+    if (bench) {
+      sh = Number(r.bench_shares || 0);
+      amt = Number(r.bench_amount || 0);
+      fee = Number(r.bench_fee || 0);
+    } else {
+      if (String(r.status || '') === 'skipped') continue;
+      sh = Number(r.shares || 0);
+      amt = Number(r.amount || 0);
+      fee = Number(r.fee || 0);
+    }
+    const leg = String(r.leg);
+    if (String(r.side) === 'buy') {
+      cash -= amt + fee;
+      units[leg] = (units[leg] || 0) + sh;
+    } else {
+      cash += amt - fee;
+      units[leg] = Math.max((units[leg] || 0) - sh, 0);
+    }
+  }
+  return { cash: Math.round(cash * 100) / 100, units };
+}
+
+export interface PlanSignal {
+  leg: string;
+  side: string;
+  frac: number;
+  kind: string;
+  etf: string;
+  seq?: number;
+  exec_date?: string | null;
+}
+
+/** 同一执行日内的顺序：先卖后买，同方向按 PLAN_ORDER、再按 seq（与 Python signal_order 同序）。 */
+export function signalOrder(a: PlanSignal, b: PlanSignal): number {
+  const sa = a.side === 'sell' ? 0 : 1;
+  const sb = b.side === 'sell' ? 0 : 1;
+  if (sa !== sb) return sa - sb;
+  const ra = PLAN_ORDER.indexOf(a.leg);
+  const rb = PLAN_ORDER.indexOf(b.leg);
+  if (ra !== rb) return (ra < 0 ? 99 : ra) - (rb < 0 ? 99 : rb);
+  return (a.seq || 0) - (b.seq || 0);
+}
+
+export interface PlanItem {
+  sig: PlanSignal;
+  shares: number;
+  amount: number;
+  fee: number;
+  skipped: boolean;
+  reason: string;
+  text: string;
+  cashAfter: number;
+  unitsAfter: number;
+}
+
+/**
+ * 一个执行日的全部信号在组合上的换算（P110 分配规则）：先卖后买；买入前把现金池÷N_LEGS 作为各指数当天的额度，
+ * 买入预算＝额度×比例，同指数多笔按花掉的钱递减；卖出回笼的现金当天可用。与 Python day_plan 同一算术。
+ * priceOf(leg) 给该指数最新价；缺价的信号给出「份额待算」且不动状态。返回逐笔明细与推进后的 (现金, 持仓)。
+ */
+export function dayPlan(
+  cash: number,
+  units: Record<string, number>,
+  signals: PlanSignal[],
+  priceOf: (leg: string) => number | null | undefined,
+  feeRate = 0,
+  minFee = 0
+): { items: PlanItem[]; cash: number; units: Record<string, number> } {
+  const u: Record<string, number> = { ...units };
+  let c = cash;
+  let quarter: Record<string, number> | null = null;
+  const items: PlanItem[] = [];
+  for (const sig of [...signals].sort(signalOrder)) {
+    const leg = sig.leg;
+    const price = priceOf(leg);
+    const have = u[leg] || 0;
+    if (sig.side === 'sell' && have <= 0) {
+      items.push({
+        sig,
+        shares: 0,
+        amount: 0,
+        fee: 0,
+        skipped: true,
+        reason: '没有该指数持仓',
+        text: `${legName(sig.etf)}：你没有这个指数的持仓，本次无需操作`,
+        cashAfter: c,
+        unitsAfter: 0,
+      });
+      continue;
+    }
+    if (sig.side === 'sell') {
+      const a = advise(sig, c, have, price, feeRate, minFee);
+      items.push({ sig, ...a });
+      if (price != null && price > 0) {
+        c = a.cashAfter;
+        u[leg] = a.unitsAfter;
+      }
+      continue;
+    }
+    if (quarter == null) {
+      quarter = {};
+      for (const l of PLAN_ORDER) quarter[l] = Math.max(c, 0) / N_LEGS;
+    }
+    const a = advise(sig, quarter[leg] || 0, have, price, feeRate, minFee);
+    // advise 按「额度」算份额；现金池的前后值按真实现金给
+    const spend = a.amount + a.fee;
+    const item: PlanItem = {
+      sig,
+      ...a,
+      cashAfter: Math.round((c - spend) * 100) / 100,
+      unitsAfter: have + a.shares,
+    };
+    items.push(item);
+    if (price != null && price > 0) {
+      c = item.cashAfter;
+      quarter[leg] = Math.max((quarter[leg] || 0) - spend, 0);
+      u[leg] = item.unitsAfter;
+    }
+  }
+  return { items, cash: Math.round(c * 100) / 100, units: u };
+}
+
+const legName = (etf: string) =>
+  `${ETF_NAME[etf] || etf}（${String(etf).split('.')[0]}）`;
+
+/** 单指数口径的 (现金, 份额)，只给旧测试兼容；生产用 portfolioState。 */
 export function stateFromRows(
   principal: number,
   rows: ExecRow[],
@@ -148,45 +322,82 @@ export function stateFromRows(
 }
 
 /**
- * 一条腿的逐日净值：closes 为该 ETF 自起步日起的收盘序列（升序），记账行按 exec_date 当天生效。
- * 返回 [{date, nav, bench}]；nav = 现金 + 份额×收盘。
+ * 组合逐日净值：closes 为各指数 ETF 自起步日起的收盘序列（升序），记账行按 exec_date 当天生效。
+ * 日期取并集；某指数当日无收盘沿用其最近一次收盘（前向填充）。返回 [{date, nav, bench, unit, bench_unit}]；
+ * nav = 现金池 + Σ 份额×收盘。
  */
 export function navSeries(
   principal: number,
   rows: ExecRow[],
-  closes: { date: string; close: number }[],
+  closesByLeg: Record<string, { date: string; close: number }[]>,
   flows: CashFlow[] = []
-): { date: string; nav: number; bench: number; unit: number; bench_unit: number }[] {
+): {
+  date: string;
+  nav: number;
+  bench: number;
+  unit: number;
+  bench_unit: number;
+}[] {
   const sorted = [...rows].sort((a, b) =>
     a.exec_date === b.exec_date
       ? String(a.signal_date).localeCompare(String(b.signal_date))
       : String(a.exec_date).localeCompare(String(b.exec_date))
   );
-  const fl = [...flows].sort((a, b) => String(a.flow_date).localeCompare(String(b.flow_date)));
+  const fl = [...flows].sort((a, b) =>
+    String(a.flow_date).localeCompare(String(b.flow_date))
+  );
+  const dates = new Set<string>();
+  for (const leg of Object.keys(closesByLeg))
+    for (const c of closesByLeg[leg]) dates.add(c.date);
+  const days = [...dates].sort();
+  const idx: Record<string, number> = {};
+  const last: Record<string, number> = {};
+  for (const leg of Object.keys(closesByLeg)) idx[leg] = 0;
   const out: { date: string; nav: number; bench: number }[] = [];
   let i = 0;
   let j = 0;
   const applied: ExecRow[] = [];
   const appliedFlows: CashFlow[] = [];
-  for (const c of closes) {
-    while (i < sorted.length && String(sorted[i].exec_date) <= c.date) {
+  for (const d of days) {
+    while (i < sorted.length && String(sorted[i].exec_date) <= d) {
       applied.push(sorted[i]);
       i += 1;
     }
-    while (j < fl.length && String(fl[j].flow_date) <= c.date) {
+    while (j < fl.length && String(fl[j].flow_date) <= d) {
       appliedFlows.push(fl[j]);
       j += 1;
     }
-    const a = stateFromRows(principal, applied, false, appliedFlows);
-    const b = stateFromRows(principal, applied, true, appliedFlows);
+    for (const leg of Object.keys(closesByLeg)) {
+      const arr = closesByLeg[leg];
+      while (idx[leg] < arr.length && arr[idx[leg]].date <= d) {
+        last[leg] = arr[idx[leg]].close;
+        idx[leg] += 1;
+      }
+    }
+    const a = portfolioState(principal, applied, false, appliedFlows);
+    const b = portfolioState(principal, applied, true, appliedFlows);
+    const val = (st: { cash: number; units: Record<string, number> }) =>
+      st.cash +
+      Object.keys(st.units).reduce(
+        (s, leg) => s + st.units[leg] * (last[leg] || 0),
+        0
+      );
     out.push({
-      date: c.date,
-      nav: Math.round((a.cash + a.units * c.close) * 100) / 100,
-      bench: Math.round((b.cash + b.units * c.close) * 100) / 100,
+      date: d,
+      nav: Math.round(val(a) * 100) / 100,
+      bench: Math.round(val(b) * 100) / 100,
     });
   }
-  const unit = unitNavSeries(principal, out.map(o => ({ date: o.date, value: o.nav })), fl);
-  const bunit = unitNavSeries(principal, out.map(o => ({ date: o.date, value: o.bench })), fl);
+  const unit = unitNavSeries(
+    principal,
+    out.map(o => ({ date: o.date, value: o.nav })),
+    fl
+  );
+  const bunit = unitNavSeries(
+    principal,
+    out.map(o => ({ date: o.date, value: o.bench })),
+    fl
+  );
   return out.map((o, k) => ({ ...o, unit: unit[k], bench_unit: bunit[k] }));
 }
 
@@ -226,16 +437,19 @@ export function xirr(flows: { date: string; amount: number }[]): number | null {
   const t0 = toTime(fs[0].date);
   const yrs = fs.map(f => (toTime(f.date) - t0) / (365.25 * 86400000));
   if (!(Math.max(...yrs) > 0)) return null;
-  const npv = (r: number) => fs.reduce((s, f, k) => s + f.amount / Math.pow(1 + r, yrs[k]), 0);
+  const npv = (r: number) =>
+    fs.reduce((s, f, k) => s + f.amount / Math.pow(1 + r, yrs[k]), 0);
   let lo = -0.99;
   let hi = 10;
   let flo = npv(lo);
   const fhi = npv(hi);
-  if (!Number.isFinite(flo) || !Number.isFinite(fhi) || flo * fhi > 0) return null;
+  if (!Number.isFinite(flo) || !Number.isFinite(fhi) || flo * fhi > 0)
+    return null;
   for (let k = 0; k < 200; k += 1) {
     const mid = (lo + hi) / 2;
     const fm = npv(mid);
-    if (Math.abs(fm) < 1e-8 || hi - lo < 1e-10) return Math.round(mid * 1e6) / 1e6;
+    if (Math.abs(fm) < 1e-8 || hi - lo < 1e-10)
+      return Math.round(mid * 1e6) / 1e6;
     if (flo * fm < 0) hi = mid;
     else {
       lo = mid;

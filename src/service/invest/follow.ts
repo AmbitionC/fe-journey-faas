@@ -2,27 +2,29 @@ import { Provide, Inject } from '@midwayjs/core';
 import { InvestDbService } from './db';
 import { beijingDay } from '../../common/signupSite';
 import {
+  CashFlow,
   ETF_NAME,
   ExecRow,
   KIND_CN,
   LEG_ETF,
   LEG_ORDER,
-  advise,
-  combineCurves,
-  unitNavSeries,
+  N_LEGS,
+  PlanSignal,
+  dayPlan,
   xirr,
   tradeFee,
   execStats,
   navSeries,
   nextCheckDates,
-  stateFromRows,
+  portfolioState,
 } from './followCalc';
 
 /**
  * 跟车（2026-11-02 owner「主打服务就是买会员跟这个策略，收操作的提醒」）。
  *
  * 真源分工：规则与信号由 invest-model `broad_engine` 每日重算写 `broad_signal`；执行日收盘后
- * Python 端按用户档案自动记账 `user_follow_exec`（bench_*＝完美跟车值，shares/amount＝用户实际值）。
+ * Python 端按用户档案（`user_follow_portfolio`：一个总资金、一个现金池）自动记账 `user_follow_exec`
+ * （bench_*＝完美跟车值，shares/amount＝用户实际值）。分配规则：先卖后买，买入按现金池÷4 计量（与 followCalc.dayPlan 同）。
  * 本服务只做：档案读写（会员才可开启）、今日信号按用户现金/持仓的换算预览、净值/执行率汇总、
  * 记账行的用户修改。**不重放任何路径、不改任何规则参数**。
  *
@@ -33,7 +35,8 @@ export class InvestFollowService {
   @Inject()
   db: InvestDbService;
 
-  static readonly MIN_PRINCIPAL = 1000;
+  /** 总资金下限：现金池÷4×20% 的一笔至少要买得起一手（科创50ETF 约 1.3 元/份 ⟹ 100 份 ≈ 130 元） */
+  static readonly MIN_PRINCIPAL = 10000;
   static readonly MAX_PRINCIPAL = 1e9;
   /** 用户未填佣金时的默认档（行业默认万3、最低 5 元；与 invest-model 费后统计同假设）。 */
   static readonly DEFAULT_FEE_RATE = 0.0003;
@@ -220,9 +223,70 @@ export class InvestFollowService {
     };
   }
 
+  /** 档案（一个总资金、一个现金池）；无表/无行返回 null。 */
+  private async readPortfolio(userId: string) {
+    try {
+      const p = await this.db.one(
+        'SELECT principal, start_date, status, fee_rate, min_fee, member_until, updated_at ' +
+          'FROM user_follow_portfolio WHERE user_id = ?',
+        [userId]
+      );
+      if (!p) return null;
+      return {
+        principal: Number(p.principal) || 0,
+        start_date: String(p.start_date || ''),
+        status: String(p.status || 'active'),
+        fee_rate:
+          p.fee_rate == null
+            ? InvestFollowService.DEFAULT_FEE_RATE
+            : Number(p.fee_rate),
+        min_fee:
+          p.min_fee == null
+            ? InvestFollowService.DEFAULT_MIN_FEE
+            : Number(p.min_fee),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async readExec(userId: string): Promise<ExecRow[]> {
+    try {
+      return await this.db.q(
+        'SELECT id, leg, signal_date, kind, exec_date, etf, side, frac, price, bench_shares, bench_amount, ' +
+          'bench_fee, shares, amount, fee, status, note, updated_at FROM user_follow_exec WHERE user_id = ? ' +
+          'ORDER BY exec_date, signal_date, id',
+        [userId]
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  private async readFlows(userId: string): Promise<CashFlow[]> {
+    try {
+      const rows: any[] = await this.db.q(
+        'SELECT id, flow_date, amount, note, created_at FROM user_follow_cashflow WHERE user_id = ? ' +
+          'ORDER BY flow_date, id',
+        [userId]
+      );
+      return rows.map(f => ({
+        id: Number(f.id),
+        flow_date: String(f.flow_date),
+        amount: Number(f.amount) || 0,
+        note: f.note == null ? '' : String(f.note),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   /**
    * 跟车页一次出全屏。isMember 由路由按登录态判定（admin 视为会员）；非会员只给市场级信息
    * 与「今天哪条腿有动作」，不给比例/金额/账本。memberUntil 会回写档案，供邮件分发器兜底判会员。
+   *
+   * 会员：一个总资金 → 一个现金池 → 四个指数各自的份额。今日换算按 dayPlan（先卖后买、买入按现金池÷4 计量），
+   * 净值＝现金池 + Σ 份额×最新收盘；单位净值份额法、资金加权收益 XIRR。
    */
   async overview(userId: string, isMember: boolean, memberUntil: Date | null) {
     const market = await this.market();
@@ -232,103 +296,62 @@ export class InvestFollowService {
         market: { ...market, today: market.today.map(s => this.sigPublic(s)) },
         profile: null,
         legs: [],
+        flows: [],
         curve: [],
         totals: null,
       };
     }
-    let prof: any[] = [];
-    try {
-      prof = await this.db.q(
-        'SELECT leg, principal, start_date, status, fee_rate, min_fee, member_until, updated_at ' +
-          'FROM user_follow_profile WHERE user_id = ?',
-        [userId]
-      );
-    } catch {
-      prof = [];
-    }
-    if (prof.length && memberUntil) {
+    const prof = await this.readPortfolio(userId);
+    if (prof && memberUntil) {
       try {
         await this.db.exec(
-          'UPDATE user_follow_profile SET member_until = ? WHERE user_id = ?',
+          'UPDATE user_follow_portfolio SET member_until = ? WHERE user_id = ?',
           [memberUntil, userId]
         );
       } catch {
         // 兜底字段写失败不影响页面
       }
     }
-    const byLeg = new Map<string, any>(prof.map(p => [String(p.leg), p]));
-    let execAll: ExecRow[] = [];
-    if (prof.length) {
-      try {
-        execAll = await this.db.q(
-          'SELECT id, leg, signal_date, kind, exec_date, etf, side, frac, price, bench_shares, bench_amount, ' +
-            'bench_fee, shares, amount, fee, status, note, updated_at FROM user_follow_exec WHERE user_id = ? ' +
-            'ORDER BY exec_date, signal_date, id',
-          [userId]
-        );
-      } catch {
-        execAll = [];
-      }
-    }
-    let flowsAll: any[] = [];
-    if (prof.length) {
-      try {
-        flowsAll = await this.db.q(
-          'SELECT id, leg, flow_date, amount, note, created_at FROM user_follow_cashflow WHERE user_id = ? ' +
-            'ORDER BY flow_date, id',
-          [userId]
-        );
-      } catch {
-        flowsAll = [];
-      }
-    }
     const todayBase = market.date || beijingDay();
-    const legs: any[] = [];
-    const curves: {
-      principal: number;
-      series: { date: string; nav: number; bench: number }[];
-    }[] = [];
-    const allFlows: { date: string; amount: number }[] = [];
+    if (!prof) {
+      return {
+        member: true,
+        member_until: memberUntil ? memberUntil.toISOString() : null,
+        market,
+        profile: null,
+        legs: LEG_ORDER.map(leg => ({
+          leg,
+          etf: LEG_ETF[leg],
+          etf_name: ETF_NAME[LEG_ETF[leg]],
+          market: market.legs.find(l => l.leg === leg) || null,
+        })),
+        flows: [],
+        curve: [],
+        totals: null,
+      };
+    }
+    const {
+      principal,
+      start_date: startDate,
+      status,
+      fee_rate: feeRate,
+      min_fee: minFee,
+    } = prof;
+    const execAll = await this.readExec(userId);
+    const flows = await this.readFlows(userId);
+    const netIn =
+      Math.round((principal + flows.reduce((s, f) => s + f.amount, 0)) * 100) /
+      100;
+    const actual = portfolioState(principal, execAll, false, flows);
+    const bench = portfolioState(principal, execAll, true, flows);
+    // 各指数自起步日起的收盘序列（曲线用）与最新价（换算与估值用）
+    const closesByLeg: Record<string, { date: string; close: number }[]> = {};
+    const priceByLeg: Record<string, { close: number; date: string } | null> =
+      {};
     for (const leg of LEG_ORDER) {
-      const p = byLeg.get(leg);
       const etf = LEG_ETF[leg];
-      const mkt = market.legs.find(l => l.leg === leg) || null;
-      if (!p) {
-        legs.push({
-          leg,
-          etf,
-          etf_name: ETF_NAME[etf],
-          enabled: false,
-          market: mkt,
-        });
-        continue;
-      }
-      const principal = Number(p.principal) || 0;
-      const startDate = String(p.start_date || '');
-      const status = String(p.status || 'active');
-      const feeRate =
-        p.fee_rate == null
-          ? InvestFollowService.DEFAULT_FEE_RATE
-          : Number(p.fee_rate);
-      const minFee =
-        p.min_fee == null
-          ? InvestFollowService.DEFAULT_MIN_FEE
-          : Number(p.min_fee);
-      const rows = execAll.filter(r => String(r.leg) === leg);
-      const flows = flowsAll
-        .filter(f => String(f.leg) === leg)
-        .map(f => ({
-          id: Number(f.id),
-          leg,
-          flow_date: String(f.flow_date),
-          amount: Number(f.amount) || 0,
-          note: f.note == null ? '' : String(f.note),
-        }));
-      const netIn = Math.round((principal + flows.reduce((s, f) => s + f.amount, 0)) * 100) / 100;
-      const actual = stateFromRows(principal, rows, false, flows);
-      const bench = stateFromRows(principal, rows, true, flows);
-      let price: { close: number; date: string } | null = null;
       let closes: { date: string; close: number }[] = [];
+      let price: { close: number; date: string } | null = null;
       try {
         const q = await this.db.q(
           'SELECT trade_date, close FROM stock_daily WHERE code = ? AND trade_date >= ? AND trade_date <= ? ' +
@@ -341,12 +364,12 @@ export class InvestFollowService {
             date: String(r.trade_date),
             close: Number(r.close),
           }));
-        if (closes.length)
+        if (closes.length) {
           price = {
             close: closes[closes.length - 1].close,
             date: closes[closes.length - 1].date,
           };
-        else {
+        } else {
           const one = await this.db.one(
             'SELECT trade_date, close FROM stock_daily WHERE code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 1',
             [etf, todayBase]
@@ -357,205 +380,225 @@ export class InvestFollowService {
       } catch {
         price = null;
       }
-      const px = price?.close ?? null;
-      const nav =
-        px == null
-          ? null
-          : Math.round((actual.cash + actual.units * px) * 100) / 100;
-      const benchNav =
-        px == null
-          ? null
-          : Math.round((bench.cash + bench.units * px) * 100) / 100;
-      const recorded = new Set(rows.map(r => `${r.signal_date}|${r.kind}`));
-      const todo = market.today
-        .filter(
-          s =>
-            s.leg === leg &&
-            status === 'active' &&
-            (s.exec_date || '') >= startDate
-        )
-        .filter(s => !recorded.has(`${s.signal_date}|${s.kind}`));
-      // 多条信号按 seq 顺序串联换算（恐慌抢买先扣现金，锚买再按剩余现金算）
-      let c = actual.cash;
-      let u = actual.units;
-      const advice = todo.map(s => {
-        const a = advise(
-          { side: s.side, frac: s.frac, kind: s.kind, etf: s.etf },
-          c,
-          u,
-          px,
-          feeRate,
-          minFee
-        );
-        c = a.cashAfter;
-        u = a.unitsAfter;
-        return { ...s, ...a, price_basis: price };
-      });
-      const series = navSeries(principal, rows, closes, flows);
-      curves.push({ principal, series });
-      allFlows.push({ date: startDate, amount: -principal });
-      for (const f of flows) allFlows.push({ date: f.flow_date, amount: -f.amount });
-      const unitNav = series.length ? series[series.length - 1].unit : null;
-      const benchUnit = series.length ? series[series.length - 1].bench_unit : null;
-      legs.push({
+      closesByLeg[leg] = closes;
+      priceByLeg[leg] = price;
+    }
+    const pxOf = (leg: string) => priceByLeg[leg]?.close ?? null;
+    // 今日待执行：未记账、执行日不早于起步日、档案在跟（暂停不出提醒）
+    const recorded = new Set(
+      execAll.map(r => `${r.leg}|${r.signal_date}|${r.kind}`)
+    );
+    const todo: PlanSignal[] = market.today
+      .filter(s => status === 'active' && (s.exec_date || '') >= startDate)
+      .filter(s => !recorded.has(`${s.leg}|${s.signal_date}|${s.kind}`))
+      .map(s => ({ ...s }));
+    const plan = dayPlan(
+      actual.cash,
+      actual.units,
+      todo,
+      pxOf,
+      feeRate,
+      minFee
+    );
+    const adviceOf = (leg: string) =>
+      plan.items
+        .filter(i => i.sig.leg === leg)
+        .map(i => ({
+          ...(i.sig as any),
+          shares: i.shares,
+          amount: i.amount,
+          fee: i.fee,
+          skipped: i.skipped,
+          reason: i.reason,
+          text: i.text,
+          cashAfter: i.cashAfter,
+          unitsAfter: i.unitsAfter,
+          price_basis: priceByLeg[leg],
+        }));
+    const hasAllPrices = LEG_ORDER.every(
+      leg =>
+        pxOf(leg) != null ||
+        ((actual.units[leg] || 0) === 0 && (bench.units[leg] || 0) === 0)
+    );
+    const valueOf = (st: { cash: number; units: Record<string, number> }) =>
+      hasAllPrices
+        ? Math.round(
+            (st.cash +
+              LEG_ORDER.reduce(
+                (s, leg) => s + (st.units[leg] || 0) * (pxOf(leg) || 0),
+                0
+              )) *
+              100
+          ) / 100
+        : null;
+    const nav = valueOf(actual);
+    const benchNav = valueOf(bench);
+    const legs = LEG_ORDER.map(leg => {
+      const etf = LEG_ETF[leg];
+      const rows = execAll.filter(r => String(r.leg) === leg);
+      const px = pxOf(leg);
+      const units = actual.units[leg] || 0;
+      const bunits = bench.units[leg] || 0;
+      const value = px == null ? null : Math.round(units * px * 100) / 100;
+      return {
         leg,
         etf,
         etf_name: ETF_NAME[etf],
-        enabled: true,
-        status,
-        principal,
-        start_date: startDate,
-        fee_rate: feeRate,
-        min_fee: minFee,
-        market: mkt,
-        price,
-        cash: actual.cash,
-        units: actual.units,
-        nav,
-        net_in: netIn,
-        flows,
-        unit_nav: unitNav,
-        pnl: nav == null ? null : Math.round((nav - netIn) * 100) / 100,
-        bench: { cash: bench.cash, units: bench.units, nav: benchNav, unit_nav: benchUnit },
+        market: market.legs.find(l => l.leg === leg) || null,
+        price: priceByLeg[leg],
+        units,
+        bench_units: bunits,
+        value,
+        bench_value: px == null ? null : Math.round(bunits * px * 100) / 100,
+        share:
+          value == null || nav == null || nav <= 0
+            ? null
+            : Math.round((value / nav) * 1000) / 10,
         stats: execStats(rows),
-        advice,
+        advice: adviceOf(leg),
         recent: rows
           .slice(-20)
           .reverse()
           .map(r => this.execOut(r)),
-      });
-    }
-    const enabled = legs.filter(l => l.enabled);
-    const curve = curves.length ? combineCurves(curves) : [];
-    const totalPrincipal = enabled.reduce((s, l) => s + l.principal, 0);
-    const flowsForUnit = enabled.flatMap(l => l.flows as { flow_date: string; amount: number }[]);
-    // 多腿合并的单位净值：各腿按起步日先后并入，晚起步的腿按其本金计为当日「追加」
-    const laterStarts = enabled
-      .filter(l => curve.length && l.start_date > curve[0].date)
-      .map(l => ({ flow_date: l.start_date, amount: l.principal }));
-    const firstPrincipal = totalPrincipal - laterStarts.reduce((s, f) => s + f.amount, 0);
-    const unitAll = curve.length
-      ? unitNavSeries(firstPrincipal, curve.map(c => ({ date: c.date, value: c.nav })), [...flowsForUnit, ...laterStarts])
-      : [];
-    const benchUnitAll = curve.length
-      ? unitNavSeries(firstPrincipal, curve.map(c => ({ date: c.date, value: c.bench })), [...flowsForUnit, ...laterStarts])
-      : [];
-    const curveOut = curve.map((c, k) => ({ ...c, unit: unitAll[k], bench_unit: benchUnitAll[k] }));
-    const navAll = enabled.every(l => l.nav != null)
-      ? Math.round(enabled.reduce((s, l) => s + l.nav, 0) * 100) / 100
-      : null;
-    const netInAll = Math.round(enabled.reduce((s, l) => s + l.net_in, 0) * 100) / 100;
-    const lastDate = curve.length ? curve[curve.length - 1].date : todayBase;
-    const mwr = navAll == null ? null : xirr([...allFlows, { date: lastDate, amount: navAll }].sort((a, b) => a.date.localeCompare(b.date)));
-    const totals = enabled.length
-      ? {
-          principal: totalPrincipal,
-          net_in: netInAll,
-          pnl: navAll == null ? null : Math.round((navAll - netInAll) * 100) / 100,
-          unit_nav: unitAll.length ? unitAll[unitAll.length - 1] : null,
-          bench_unit_nav: benchUnitAll.length ? benchUnitAll[benchUnitAll.length - 1] : null,
-          mwr,
-          nav: enabled.every(l => l.nav != null)
-            ? Math.round(enabled.reduce((s, l) => s + l.nav, 0) * 100) / 100
-            : null,
-          bench_nav: enabled.every(l => l.bench.nav != null)
-            ? Math.round(enabled.reduce((s, l) => s + l.bench.nav, 0) * 100) /
-              100
-            : null,
-          cash: Math.round(enabled.reduce((s, l) => s + l.cash, 0) * 100) / 100,
-          actions_today: enabled.reduce((s, l) => s + l.advice.length, 0),
-          stats: execStats(
-            execAll.filter(r => enabled.some(l => l.leg === String(r.leg)))
-          ),
-        }
-      : null;
+      };
+    });
+    const series = navSeries(principal, execAll, closesByLeg, flows);
+    const lastDate = series.length ? series[series.length - 1].date : todayBase;
+    const allFlows: { date: string; amount: number }[] = [
+      { date: startDate, amount: -principal },
+    ];
+    for (const f of flows)
+      allFlows.push({ date: f.flow_date, amount: -f.amount });
+    const mwr =
+      nav == null
+        ? null
+        : xirr(
+            [...allFlows, { date: lastDate, amount: nav }].sort((a, b) =>
+              a.date.localeCompare(b.date)
+            )
+          );
+    const actions = plan.items.filter(
+      i => !(i.skipped && i.reason === '没有该指数持仓')
+    );
+    const totals = {
+      principal,
+      net_in: netIn,
+      pnl: nav == null ? null : Math.round((nav - netIn) * 100) / 100,
+      unit_nav: series.length ? series[series.length - 1].unit : null,
+      bench_unit_nav: series.length
+        ? series[series.length - 1].bench_unit
+        : null,
+      mwr,
+      nav,
+      bench_nav: benchNav,
+      bench_pnl:
+        benchNav == null ? null : Math.round((benchNav - netIn) * 100) / 100,
+      cash: actual.cash,
+      bench_cash: bench.cash,
+      cash_share:
+        nav == null || nav <= 0
+          ? null
+          : Math.round((actual.cash / nav) * 1000) / 10,
+      /** 买入前各指数当天的计量额度：现金池 ÷ 4 */
+      quarter: Math.round((Math.max(actual.cash, 0) / N_LEGS) * 100) / 100,
+      actions_today: actions.length,
+      stats: execStats(execAll),
+      as_of: lastDate,
+    };
     return {
       member: true,
       member_until: memberUntil ? memberUntil.toISOString() : null,
       market,
-      profile: prof.length
-        ? {
-            legs: prof.map(p => ({
-              leg: String(p.leg),
-              principal: Number(p.principal),
-              start_date: String(p.start_date || ''),
-              status: String(p.status || 'active'),
-            })),
-          }
-        : null,
+      profile: {
+        principal,
+        start_date: startDate,
+        status,
+        fee_rate: feeRate,
+        min_fee: minFee,
+      },
       legs,
-      curve: curveOut,
+      flows,
+      curve: series,
       totals,
     };
   }
 
   /**
-   * 资金进出（会员，只写自己的）。add：amount>0 追加 / <0 取出；flow_date 默认今天，不早于该指数起步日
-   * 与最后一笔记账日（不改写历史）、不晚于今天；取出不超过「你的现金」与「基准现金」二者较小值
+   * 资金进出（会员，只写自己的，组合级）。add：amount>0 追加 / <0 取出；flow_date 默认今天，不早于起步日
+   * 与最后一笔记账日（不改写历史）、不晚于今天；取出不超过「你的现金池」与「基准现金池」二者较小值
    * （取出只动现金，不自动卖出）。remove：其后已有记账的流水不可删（那些笔的金额按它算过），
    * 请录一笔反向流水。
    */
   async cashflow(userId: string, body: any) {
-    const leg = String(body?.leg || '');
-    if (!LEG_ORDER.includes(leg)) throw new Error('指数不在四腿之内');
     const action = String(body?.action || 'add');
     const today = beijingDay();
     const now = new Date();
-    const cur = await this.db.one(
-      'SELECT principal, start_date, status FROM user_follow_profile WHERE user_id = ? AND leg = ?',
-      [userId, leg]
+    const cur = await this.readPortfolio(userId);
+    if (!cur) throw new Error('尚未开启跟车');
+    const rows = await this.readExec(userId);
+    const lastExec = rows.reduce(
+      (m, r) => (String(r.exec_date) > m ? String(r.exec_date) : m),
+      ''
     );
-    if (!cur) throw new Error('该指数尚未开启跟车');
-    const rows: ExecRow[] = await this.db.q(
-      'SELECT id, leg, signal_date, kind, exec_date, etf, side, frac, price, bench_shares, bench_amount, ' +
-        'bench_fee, shares, amount, fee, status, note FROM user_follow_exec WHERE user_id = ? AND leg = ? ' +
-        'ORDER BY exec_date, signal_date, id',
-      [userId, leg]
-    );
-    const lastExec = rows.reduce((m, r) => (String(r.exec_date) > m ? String(r.exec_date) : m), '');
     if (action === 'remove') {
       const id = Number(body?.id);
       if (!Number.isFinite(id)) throw new Error('缺少流水编号');
       const row = await this.db.one(
-        'SELECT id, flow_date FROM user_follow_cashflow WHERE id = ? AND user_id = ? AND leg = ?',
-        [id, userId, leg]
+        'SELECT id, flow_date FROM user_follow_cashflow WHERE id = ? AND user_id = ?',
+        [id, userId]
       );
       if (!row) throw new Error('流水不存在');
       if (lastExec && String(row.flow_date) < lastExec)
-        throw new Error('这笔流水之后已经有记账，不能删除；要撤销请录一笔反向的追加或取出');
-      await this.db.exec('DELETE FROM user_follow_cashflow WHERE id = ? AND user_id = ?', [id, userId]);
+        throw new Error(
+          '这笔流水之后已经有记账，不能删除；要撤销请录一笔反向的追加或取出'
+        );
+      await this.db.exec(
+        'DELETE FROM user_follow_cashflow WHERE id = ? AND user_id = ?',
+        [id, userId]
+      );
       return { ok: true, removed: id };
     }
     const amount = Math.round(Number(body?.amount) * 100) / 100;
-    if (!Number.isFinite(amount) || amount === 0) throw new Error('金额不能为 0');
-    if (Math.abs(amount) > InvestFollowService.MAX_PRINCIPAL) throw new Error('金额超出可填范围');
-    let day = String(body?.flow_date || today).replace(/-/g, '').slice(0, 8);
+    if (!Number.isFinite(amount) || amount === 0)
+      throw new Error('金额不能为 0');
+    if (Math.abs(amount) > InvestFollowService.MAX_PRINCIPAL)
+      throw new Error('金额超出可填范围');
+    let day = String(body?.flow_date || today)
+      .replace(/-/g, '')
+      .slice(0, 8);
     if (!/^\d{8}$/.test(day)) throw new Error('日期格式应为 YYYYMMDD');
     if (day > today) throw new Error('日期不能晚于今天');
     const start = String(cur.start_date || '');
     if (day < start) day = start;
-    if (lastExec && day < lastExec) throw new Error(`日期不能早于最后一笔记账日 ${lastExec}（历史不改写）`);
-    const flows: any[] = await this.db.q(
-      'SELECT id, leg, flow_date, amount FROM user_follow_cashflow WHERE user_id = ? AND leg = ? ORDER BY flow_date, id',
-      [userId, leg]
-    );
-    const fl = flows.map(f => ({ flow_date: String(f.flow_date), amount: Number(f.amount) || 0 }));
+    if (lastExec && day < lastExec)
+      throw new Error(`日期不能早于最后一笔记账日 ${lastExec}（历史不改写）`);
+    const fl = await this.readFlows(userId);
     if (amount < 0) {
-      const principal = Number(cur.principal) || 0;
-      const a = stateFromRows(principal, rows, false, fl);
-      const b = stateFromRows(principal, rows, true, fl);
+      const a = portfolioState(cur.principal, rows, false, fl);
+      const b = portfolioState(cur.principal, rows, true, fl);
       const cap = Math.floor(Math.min(a.cash, b.cash) * 100) / 100;
       if (-amount > cap + 1e-9)
         throw new Error(
-          `最多可取出 ${cap.toLocaleString('zh-CN')} 元（你的现金 ${a.cash.toLocaleString('zh-CN')} 元、基准现金 ${b.cash.toLocaleString('zh-CN')} 元，取小）；取出只动现金，不会自动卖出`
+          `最多可取出 ${cap.toLocaleString(
+            'zh-CN'
+          )} 元（你的现金 ${a.cash.toLocaleString(
+            'zh-CN'
+          )} 元、基准现金 ${b.cash.toLocaleString(
+            'zh-CN'
+          )} 元，取小）；取出只动现金，不会自动卖出`
         );
     }
     const note = String(body?.note || '').slice(0, 64);
     await this.db.exec(
       'INSERT INTO user_follow_cashflow (user_id, leg, flow_date, amount, note, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, leg, day, amount, note, now]
+      [userId, '*', day, amount, note, now]
     );
-    return { ok: true, flow_date: day, amount, effective: '从下一笔信号起按新现金换算' };
+    return {
+      ok: true,
+      flow_date: day,
+      amount,
+      effective: '从下一笔买入信号起按新的现金池换算',
+    };
   }
 
   private execOut(r: ExecRow & { updated_at?: any }) {
@@ -583,47 +626,37 @@ export class InvestFollowService {
   }
 
   /**
-   * 档案保存（会员专属，路由把关）。规则：
-   *  - 本金 ≥ 1000 元；起步日默认今天（北京），不得早于今天（不回溯记账——过去的信号你没真做过）；
-   *  - 修改本金或起步日会**重开该腿账本**（删除已有记账行），前端须提示；
-   *  - action: save（新建/修改）| pause（暂停：保留记录、不再记新信号）| resume（恢复，从今天起）| remove（删腿及其记录）。
+   * 档案保存（会员专属，路由把关）。一个用户一份档案＝一个总资金。规则：
+   *  - 总资金 ≥ 10000 元（现金池÷4×20% 才够买一手）；起步日默认今天（北京），不得早于今天（不回溯记账）；
+   *  - 修改总资金或起步日会**重开账本**（删除已有记账行与资金流水），前端须提示；
+   *  - action: save（新建/修改）| pause（暂停：保留记录、不再记新信号）| resume（恢复）| remove（删档案及其全部记录）。
    */
   async saveProfile(userId: string, memberUntil: Date | null, body: any) {
-    const leg = String(body?.leg || '');
-    if (!LEG_ORDER.includes(leg)) throw new Error('指数不在四腿之内');
     const action = String(body?.action || 'save');
     const today = beijingDay();
     const now = new Date();
     if (action === 'remove') {
+      await this.db.exec('DELETE FROM user_follow_exec WHERE user_id = ?', [
+        userId,
+      ]);
+      await this.db.exec('DELETE FROM user_follow_cashflow WHERE user_id = ?', [
+        userId,
+      ]);
       await this.db.exec(
-        'DELETE FROM user_follow_exec WHERE user_id = ? AND leg = ?',
-        [userId, leg]
-      );
-      await this.db.exec(
-        'DELETE FROM user_follow_cashflow WHERE user_id = ? AND leg = ?',
-        [userId, leg]
-      );
-      await this.db.exec(
-        'DELETE FROM user_follow_profile WHERE user_id = ? AND leg = ?',
-        [userId, leg]
+        'DELETE FROM user_follow_portfolio WHERE user_id = ?',
+        [userId]
       );
       return { ok: true, reset: true };
     }
     const cur = await this.db.one(
-      'SELECT principal, start_date, status, fee_rate, min_fee FROM user_follow_profile WHERE user_id = ? AND leg = ?',
-      [userId, leg]
+      'SELECT principal, start_date, status, fee_rate, min_fee FROM user_follow_portfolio WHERE user_id = ?',
+      [userId]
     );
     if (action === 'pause' || action === 'resume') {
-      if (!cur) throw new Error('该指数尚未开启跟车');
+      if (!cur) throw new Error('尚未开启跟车');
       await this.db.exec(
-        'UPDATE user_follow_profile SET status = ?, member_until = ?, updated_at = ? WHERE user_id = ? AND leg = ?',
-        [
-          action === 'pause' ? 'paused' : 'active',
-          memberUntil,
-          now,
-          userId,
-          leg,
-        ]
+        'UPDATE user_follow_portfolio SET status = ?, member_until = ?, updated_at = ? WHERE user_id = ?',
+        [action === 'pause' ? 'paused' : 'active', memberUntil, now, userId]
       );
       return { ok: true, status: action === 'pause' ? 'paused' : 'active' };
     }
@@ -632,9 +665,13 @@ export class InvestFollowService {
       !Number.isFinite(principal) ||
       principal < InvestFollowService.MIN_PRINCIPAL
     )
-      throw new Error(`本金至少 ${InvestFollowService.MIN_PRINCIPAL} 元`);
+      throw new Error(
+        `总资金至少 ${InvestFollowService.MIN_PRINCIPAL.toLocaleString(
+          'zh-CN'
+        )} 元`
+      );
     if (principal > InvestFollowService.MAX_PRINCIPAL)
-      throw new Error('本金超出可填范围');
+      throw new Error('总资金超出可填范围');
     let start = String(body?.start_date || today)
       .replace(/-/g, '')
       .slice(0, 8);
@@ -672,54 +709,33 @@ export class InvestFollowService {
         String(cur.start_date) !== start;
       if (changed) {
         const n = await this.db.one(
-          'SELECT COUNT(*) n FROM user_follow_exec WHERE user_id = ? AND leg = ?',
-          [userId, leg]
+          'SELECT COUNT(*) n FROM user_follow_exec WHERE user_id = ?',
+          [userId]
         );
         if (Number(n?.n || 0) > 0) {
           if (!body?.confirm_reset)
-            throw new Error('修改本金或起步日会重新开始记账，请确认');
-          await this.db.exec(
-            'DELETE FROM user_follow_exec WHERE user_id = ? AND leg = ?',
-            [userId, leg]
-          );
+            throw new Error('修改总资金或起步日会重新开始记账，请确认');
+          await this.db.exec('DELETE FROM user_follow_exec WHERE user_id = ?', [
+            userId,
+          ]);
           // 资金进出流水跟着账本一起归零：它们是旧本金/旧起步日下的事实，留着会算进新账本
           await this.db.exec(
-            'DELETE FROM user_follow_cashflow WHERE user_id = ? AND leg = ?',
-            [userId, leg]
+            'DELETE FROM user_follow_cashflow WHERE user_id = ?',
+            [userId]
           );
           reset = true;
         }
       }
       await this.db.exec(
-        'UPDATE user_follow_profile SET principal = ?, start_date = ?, status = ?, fee_rate = ?, min_fee = ?, ' +
-          'member_until = ?, updated_at = ? WHERE user_id = ? AND leg = ?',
-        [
-          principal,
-          start,
-          'active',
-          feeRate,
-          minFee,
-          memberUntil,
-          now,
-          userId,
-          leg,
-        ]
+        'UPDATE user_follow_portfolio SET principal = ?, start_date = ?, status = ?, fee_rate = ?, min_fee = ?, ' +
+          'member_until = ?, updated_at = ? WHERE user_id = ?',
+        [principal, start, 'active', feeRate, minFee, memberUntil, now, userId]
       );
     } else {
       await this.db.exec(
-        'INSERT INTO user_follow_profile (user_id, leg, principal, start_date, status, fee_rate, min_fee, ' +
-          'member_until, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [
-          userId,
-          leg,
-          principal,
-          start,
-          'active',
-          feeRate,
-          minFee,
-          memberUntil,
-          now,
-        ]
+        'INSERT INTO user_follow_portfolio (user_id, principal, start_date, status, fee_rate, min_fee, ' +
+          'member_until, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [userId, principal, start, 'active', feeRate, minFee, memberUntil, now]
       );
     }
     return {
@@ -748,8 +764,8 @@ export class InvestFollowService {
     let minFee = InvestFollowService.DEFAULT_MIN_FEE;
     try {
       const prof = await this.db.one(
-        'SELECT fee_rate, min_fee FROM user_follow_profile WHERE user_id = ? AND leg = ?',
-        [userId, String(row.leg)]
+        'SELECT fee_rate, min_fee FROM user_follow_portfolio WHERE user_id = ?',
+        [userId]
       );
       if (prof) {
         if (prof.fee_rate != null) feeRate = Number(prof.fee_rate);
