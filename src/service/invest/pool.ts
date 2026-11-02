@@ -1,5 +1,5 @@
 import { Provide, Inject } from '@midwayjs/core';
-import { InvestDbService } from './db';
+import { InvestDbService, LATEST_STOCK_DATE_SQL } from './db';
 import { modelTrust, modelView } from './calc';
 import { R } from '../../common/base.error.utils';
 
@@ -38,7 +38,7 @@ export class InvestPoolService {
     let d: string | null | undefined;
     let recos: any[];
     try {
-      d = date || (await this.db.one('SELECT MAX(trade_date) d FROM stock_daily'))?.d;
+      d = date || (await this.db.one(LATEST_STOCK_DATE_SQL))?.d;
       if (!d) return { date: null, list: [] };
       recos = await this.db.q(
         `SELECT rec_date, code, source_type, grade, direction, catalyst, valid_until, source
