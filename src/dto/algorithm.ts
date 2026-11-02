@@ -1,7 +1,14 @@
 import { Rule, RuleType } from '@midwayjs/validate';
 
 const DIFFICULTY_ENUM = ['easy', 'medium', 'hard'];
-const LANGUAGE_ENUM = ['javascript', 'typescript', 'python', 'c', 'cpp', 'java'];
+const LANGUAGE_ENUM = [
+  'javascript',
+  'typescript',
+  'python',
+  'c',
+  'cpp',
+  'java',
+];
 
 // --- 用户端 ---
 
@@ -9,7 +16,8 @@ export class ProblemListQueryDTO {
   @Rule(RuleType.number().integer().min(1).default(1).optional())
   page?: number;
 
-  @Rule(RuleType.number().integer().min(1).max(50).default(20).optional())
+  // 题库不到百道，练习中心一页拿全（上一题/下一题沿当前筛选结果走，不能只看前 50）
+  @Rule(RuleType.number().integer().min(1).max(200).default(20).optional())
   pageSize?: number;
 
   @Rule(
@@ -117,6 +125,15 @@ export class SaveProblemDTO {
 
   @Rule(RuleType.array().items(RuleType.number().integer()).optional())
   tagIds?: number[];
+
+  @Rule(
+    RuleType.array()
+      .items(RuleType.string().max(50))
+      .max(20)
+      .allow(null)
+      .optional()
+  )
+  listSlugs?: string[] | null;
 }
 
 export class DeleteProblemDTO {
@@ -162,6 +179,11 @@ export class ImportProblemsDTO {
 }
 
 export class ProblemStatusQueryDTO {
+  @Rule(RuleType.string().max(50).optional())
+  userId?: string;
+}
+
+export class OverviewQueryDTO {
   @Rule(RuleType.string().max(50).optional())
   userId?: string;
 }

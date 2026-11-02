@@ -27,6 +27,7 @@ import {
   LastResultQueryDTO,
   ProblemStatusQueryDTO,
   ToggleFavoriteDTO,
+  OverviewQueryDTO,
 } from '../dto/algorithm';
 
 @Provide()
@@ -82,6 +83,22 @@ export class AlgorithmHTTPService {
   @NoAuth()
   async getTags() {
     const data = await this.algorithmService.getTags();
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description:
+      '练习中心概览：进度 / 连续天数 / 活跃热力 / 推荐 / 题单进度（未登录也可看）',
+    functionName: 'getAlgoOverview',
+    name: 'getAlgoOverview',
+    path: '/algorithm/overview',
+    method: 'get',
+  })
+  @NoAuth()
+  async getOverview(@Query(ALL) query: OverviewQueryDTO) {
+    // 与其它读接口一致：优先 token 解析出的用户，其次前端显式传的 userId；都没有按访客返回
+    const userId = this.ctx.userInfo?.userId || query.userId || null;
+    const data = await this.algorithmService.getOverview(userId);
     return { success: true, data };
   }
 
@@ -171,7 +188,11 @@ export class AlgorithmHTTPService {
   })
   async toggleFavorite(@Body(ALL) body: ToggleFavoriteDTO) {
     const userId = this.requireUserId(this.ctx.userInfo?.userId);
-    const data = await this.algorithmService.toggleFlag(userId, body.slug, body.flag ?? null);
+    const data = await this.algorithmService.toggleFlag(
+      userId,
+      body.slug,
+      body.flag ?? null
+    );
     return { success: true, data };
   }
 
