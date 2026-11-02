@@ -86,15 +86,42 @@ export function sizeOrder(
   return { shares: sh, amount: Math.round(sh * price * 100) / 100, fee };
 }
 
-/** 由记账行汇总 (现金, 持仓份额)。bench 用完美跟车值；否则用用户实际值（skipped 不计）。 */
+/** 资金进出流水：amount>0 追加、<0 取出；flow_date 当天的执行记完之后、下一笔信号之前计入现金。 */
+export interface CashFlow {
+  id?: number;
+  leg?: string;
+  flow_date: string;
+  amount: number;
+  note?: string | null;
+}
+
+/** 记账行与资金流按日期合并：同一天先记执行（0）、后计资金流（1）。与 Python _events 同序。 */
+export function mergeEvents(
+  rows: ExecRow[],
+  flows: CashFlow[] = []
+): { kind: 'exec' | 'flow'; date: string; row?: ExecRow; flow?: CashFlow }[] {
+  const ev: { kind: 'exec' | 'flow'; date: string; order: number; i: number; row?: ExecRow; flow?: CashFlow }[] = [];
+  rows.forEach((r, i) => ev.push({ kind: 'exec', date: String(r.exec_date || ''), order: 0, i, row: r }));
+  flows.forEach((f, i) => ev.push({ kind: 'flow', date: String(f.flow_date || ''), order: 1, i, flow: f }));
+  ev.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order || a.i - b.i);
+  return ev.map(({ kind, date, row, flow }) => ({ kind, date, row, flow }));
+}
+
+/** 由记账行（+资金流）汇总 (现金, 持仓份额)。bench 用完美跟车值；否则用用户实际值（skipped 不计）。 */
 export function stateFromRows(
   principal: number,
   rows: ExecRow[],
-  bench: boolean
+  bench: boolean,
+  flows: CashFlow[] = []
 ): { cash: number; units: number } {
   let cash = Number(principal) || 0;
   let units = 0;
-  for (const r of rows) {
+  for (const e of mergeEvents(rows, flows)) {
+    if (e.kind === 'flow') {
+      cash += Number(e.flow!.amount) || 0;
+      continue;
+    }
+    const r = e.row!;
     let sh: number;
     let amt: number;
     let fee: number;
@@ -127,31 +154,99 @@ export function stateFromRows(
 export function navSeries(
   principal: number,
   rows: ExecRow[],
-  closes: { date: string; close: number }[]
-): { date: string; nav: number; bench: number }[] {
+  closes: { date: string; close: number }[],
+  flows: CashFlow[] = []
+): { date: string; nav: number; bench: number; unit: number; bench_unit: number }[] {
   const sorted = [...rows].sort((a, b) =>
     a.exec_date === b.exec_date
       ? String(a.signal_date).localeCompare(String(b.signal_date))
       : String(a.exec_date).localeCompare(String(b.exec_date))
   );
+  const fl = [...flows].sort((a, b) => String(a.flow_date).localeCompare(String(b.flow_date)));
   const out: { date: string; nav: number; bench: number }[] = [];
   let i = 0;
+  let j = 0;
   const applied: ExecRow[] = [];
+  const appliedFlows: CashFlow[] = [];
   for (const c of closes) {
     while (i < sorted.length && String(sorted[i].exec_date) <= c.date) {
       applied.push(sorted[i]);
       i += 1;
     }
-    const a = stateFromRows(principal, applied, false);
-    const b = stateFromRows(principal, applied, true);
+    while (j < fl.length && String(fl[j].flow_date) <= c.date) {
+      appliedFlows.push(fl[j]);
+      j += 1;
+    }
+    const a = stateFromRows(principal, applied, false, appliedFlows);
+    const b = stateFromRows(principal, applied, true, appliedFlows);
     out.push({
       date: c.date,
       nav: Math.round((a.cash + a.units * c.close) * 100) / 100,
       bench: Math.round((b.cash + b.units * c.close) * 100) / 100,
     });
   }
+  const unit = unitNavSeries(principal, out.map(o => ({ date: o.date, value: o.nav })), fl);
+  const bunit = unitNavSeries(principal, out.map(o => ({ date: o.date, value: o.bench })), fl);
+  return out.map((o, k) => ({ ...o, unit: unit[k], bench_unit: bunit[k] }));
+}
+
+/**
+ * 份额法单位净值（时间加权）：values 为逐日「当日全部事件后的总市值」，flows 为资金流。起点 1.0；
+ * 资金流当日先按流入前市值 (V − F) 定价、再按该价增减基金份额 ⟹ 当日单位净值不因出入金跳变。
+ * 与 invest-model broad_follow.unit_nav_series 同一算术。
+ */
+export function unitNavSeries(
+  principal: number,
+  values: { date: string; value: number }[],
+  flows: CashFlow[] = []
+): number[] {
+  const fsum = new Map<string, number>();
+  for (const f of flows) {
+    const d = String(f.flow_date || '');
+    fsum.set(d, (fsum.get(d) || 0) + (Number(f.amount) || 0));
+  }
+  let fundUnits = principal > 0 ? Number(principal) : 1;
+  const out: number[] = [];
+  for (const v of values) {
+    const f = fsum.get(v.date) || 0;
+    if (f && fundUnits > 0) {
+      const pre = v.value - f;
+      const u = pre > 0 ? pre / fundUnits : 1;
+      fundUnits += f / u;
+    }
+    out.push(fundUnits > 0 ? Math.round((v.value / fundUnits) * 1e6) / 1e6 : 1);
+  }
   return out;
 }
+
+/** 资金加权年化（XIRR，二分法）。cashflows：投入为负、取出与期末市值为正；不足两笔或无解返回 null。 */
+export function xirr(flows: { date: string; amount: number }[]): number | null {
+  const fs = flows.filter(f => Number.isFinite(f.amount) && f.amount !== 0);
+  if (fs.length < 2) return null;
+  const t0 = toTime(fs[0].date);
+  const yrs = fs.map(f => (toTime(f.date) - t0) / (365.25 * 86400000));
+  if (!(Math.max(...yrs) > 0)) return null;
+  const npv = (r: number) => fs.reduce((s, f, k) => s + f.amount / Math.pow(1 + r, yrs[k]), 0);
+  let lo = -0.99;
+  let hi = 10;
+  let flo = npv(lo);
+  const fhi = npv(hi);
+  if (!Number.isFinite(flo) || !Number.isFinite(fhi) || flo * fhi > 0) return null;
+  for (let k = 0; k < 200; k += 1) {
+    const mid = (lo + hi) / 2;
+    const fm = npv(mid);
+    if (Math.abs(fm) < 1e-8 || hi - lo < 1e-10) return Math.round(mid * 1e6) / 1e6;
+    if (flo * fm < 0) hi = mid;
+    else {
+      lo = mid;
+      flo = fm;
+    }
+  }
+  return Math.round(((lo + hi) / 2) * 1e6) / 1e6;
+}
+
+const toTime = (d: string) =>
+  Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8));
 
 /** 执行率：记录里非 skipped 的占比（auto 视为已按提醒执行）。 */
 export function execStats(rows: ExecRow[]): {

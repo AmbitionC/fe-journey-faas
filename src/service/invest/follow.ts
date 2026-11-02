@@ -9,6 +9,8 @@ import {
   LEG_ORDER,
   advise,
   combineCurves,
+  unitNavSeries,
+  xirr,
   tradeFee,
   execStats,
   navSeries,
@@ -268,12 +270,25 @@ export class InvestFollowService {
         execAll = [];
       }
     }
+    let flowsAll: any[] = [];
+    if (prof.length) {
+      try {
+        flowsAll = await this.db.q(
+          'SELECT id, leg, flow_date, amount, note, created_at FROM user_follow_cashflow WHERE user_id = ? ' +
+            'ORDER BY flow_date, id',
+          [userId]
+        );
+      } catch {
+        flowsAll = [];
+      }
+    }
     const todayBase = market.date || beijingDay();
     const legs: any[] = [];
     const curves: {
       principal: number;
       series: { date: string; nav: number; bench: number }[];
     }[] = [];
+    const allFlows: { date: string; amount: number }[] = [];
     for (const leg of LEG_ORDER) {
       const p = byLeg.get(leg);
       const etf = LEG_ETF[leg];
@@ -300,8 +315,18 @@ export class InvestFollowService {
           ? InvestFollowService.DEFAULT_MIN_FEE
           : Number(p.min_fee);
       const rows = execAll.filter(r => String(r.leg) === leg);
-      const actual = stateFromRows(principal, rows, false);
-      const bench = stateFromRows(principal, rows, true);
+      const flows = flowsAll
+        .filter(f => String(f.leg) === leg)
+        .map(f => ({
+          id: Number(f.id),
+          leg,
+          flow_date: String(f.flow_date),
+          amount: Number(f.amount) || 0,
+          note: f.note == null ? '' : String(f.note),
+        }));
+      const netIn = Math.round((principal + flows.reduce((s, f) => s + f.amount, 0)) * 100) / 100;
+      const actual = stateFromRows(principal, rows, false, flows);
+      const bench = stateFromRows(principal, rows, true, flows);
       let price: { close: number; date: string } | null = null;
       let closes: { date: string; close: number }[] = [];
       try {
@@ -366,8 +391,12 @@ export class InvestFollowService {
         u = a.unitsAfter;
         return { ...s, ...a, price_basis: price };
       });
-      const series = navSeries(principal, rows, closes);
+      const series = navSeries(principal, rows, closes, flows);
       curves.push({ principal, series });
+      allFlows.push({ date: startDate, amount: -principal });
+      for (const f of flows) allFlows.push({ date: f.flow_date, amount: -f.amount });
+      const unitNav = series.length ? series[series.length - 1].unit : null;
+      const benchUnit = series.length ? series[series.length - 1].bench_unit : null;
       legs.push({
         leg,
         etf,
@@ -383,8 +412,11 @@ export class InvestFollowService {
         cash: actual.cash,
         units: actual.units,
         nav,
-        pnl: nav == null ? null : Math.round((nav - principal) * 100) / 100,
-        bench: { cash: bench.cash, units: bench.units, nav: benchNav },
+        net_in: netIn,
+        flows,
+        unit_nav: unitNav,
+        pnl: nav == null ? null : Math.round((nav - netIn) * 100) / 100,
+        bench: { cash: bench.cash, units: bench.units, nav: benchNav, unit_nav: benchUnit },
         stats: execStats(rows),
         advice,
         recent: rows
@@ -394,9 +426,35 @@ export class InvestFollowService {
       });
     }
     const enabled = legs.filter(l => l.enabled);
+    const curve = curves.length ? combineCurves(curves) : [];
+    const totalPrincipal = enabled.reduce((s, l) => s + l.principal, 0);
+    const flowsForUnit = enabled.flatMap(l => l.flows as { flow_date: string; amount: number }[]);
+    // 多腿合并的单位净值：各腿按起步日先后并入，晚起步的腿按其本金计为当日「追加」
+    const laterStarts = enabled
+      .filter(l => curve.length && l.start_date > curve[0].date)
+      .map(l => ({ flow_date: l.start_date, amount: l.principal }));
+    const firstPrincipal = totalPrincipal - laterStarts.reduce((s, f) => s + f.amount, 0);
+    const unitAll = curve.length
+      ? unitNavSeries(firstPrincipal, curve.map(c => ({ date: c.date, value: c.nav })), [...flowsForUnit, ...laterStarts])
+      : [];
+    const benchUnitAll = curve.length
+      ? unitNavSeries(firstPrincipal, curve.map(c => ({ date: c.date, value: c.bench })), [...flowsForUnit, ...laterStarts])
+      : [];
+    const curveOut = curve.map((c, k) => ({ ...c, unit: unitAll[k], bench_unit: benchUnitAll[k] }));
+    const navAll = enabled.every(l => l.nav != null)
+      ? Math.round(enabled.reduce((s, l) => s + l.nav, 0) * 100) / 100
+      : null;
+    const netInAll = Math.round(enabled.reduce((s, l) => s + l.net_in, 0) * 100) / 100;
+    const lastDate = curve.length ? curve[curve.length - 1].date : todayBase;
+    const mwr = navAll == null ? null : xirr([...allFlows, { date: lastDate, amount: navAll }].sort((a, b) => a.date.localeCompare(b.date)));
     const totals = enabled.length
       ? {
-          principal: enabled.reduce((s, l) => s + l.principal, 0),
+          principal: totalPrincipal,
+          net_in: netInAll,
+          pnl: navAll == null ? null : Math.round((navAll - netInAll) * 100) / 100,
+          unit_nav: unitAll.length ? unitAll[unitAll.length - 1] : null,
+          bench_unit_nav: benchUnitAll.length ? benchUnitAll[benchUnitAll.length - 1] : null,
+          mwr,
           nav: enabled.every(l => l.nav != null)
             ? Math.round(enabled.reduce((s, l) => s + l.nav, 0) * 100) / 100
             : null,
@@ -426,9 +484,78 @@ export class InvestFollowService {
           }
         : null,
       legs,
-      curve: curves.length ? combineCurves(curves) : [],
+      curve: curveOut,
       totals,
     };
+  }
+
+  /**
+   * 资金进出（会员，只写自己的）。add：amount>0 追加 / <0 取出；flow_date 默认今天，不早于该指数起步日
+   * 与最后一笔记账日（不改写历史）、不晚于今天；取出不超过「你的现金」与「基准现金」二者较小值
+   * （取出只动现金，不自动卖出）。remove：其后已有记账的流水不可删（那些笔的金额按它算过），
+   * 请录一笔反向流水。
+   */
+  async cashflow(userId: string, body: any) {
+    const leg = String(body?.leg || '');
+    if (!LEG_ORDER.includes(leg)) throw new Error('指数不在四腿之内');
+    const action = String(body?.action || 'add');
+    const today = beijingDay();
+    const now = new Date();
+    const cur = await this.db.one(
+      'SELECT principal, start_date, status FROM user_follow_profile WHERE user_id = ? AND leg = ?',
+      [userId, leg]
+    );
+    if (!cur) throw new Error('该指数尚未开启跟车');
+    const rows: ExecRow[] = await this.db.q(
+      'SELECT id, leg, signal_date, kind, exec_date, etf, side, frac, price, bench_shares, bench_amount, ' +
+        'bench_fee, shares, amount, fee, status, note FROM user_follow_exec WHERE user_id = ? AND leg = ? ' +
+        'ORDER BY exec_date, signal_date, id',
+      [userId, leg]
+    );
+    const lastExec = rows.reduce((m, r) => (String(r.exec_date) > m ? String(r.exec_date) : m), '');
+    if (action === 'remove') {
+      const id = Number(body?.id);
+      if (!Number.isFinite(id)) throw new Error('缺少流水编号');
+      const row = await this.db.one(
+        'SELECT id, flow_date FROM user_follow_cashflow WHERE id = ? AND user_id = ? AND leg = ?',
+        [id, userId, leg]
+      );
+      if (!row) throw new Error('流水不存在');
+      if (lastExec && String(row.flow_date) < lastExec)
+        throw new Error('这笔流水之后已经有记账，不能删除；要撤销请录一笔反向的追加或取出');
+      await this.db.exec('DELETE FROM user_follow_cashflow WHERE id = ? AND user_id = ?', [id, userId]);
+      return { ok: true, removed: id };
+    }
+    const amount = Math.round(Number(body?.amount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount === 0) throw new Error('金额不能为 0');
+    if (Math.abs(amount) > InvestFollowService.MAX_PRINCIPAL) throw new Error('金额超出可填范围');
+    let day = String(body?.flow_date || today).replace(/-/g, '').slice(0, 8);
+    if (!/^\d{8}$/.test(day)) throw new Error('日期格式应为 YYYYMMDD');
+    if (day > today) throw new Error('日期不能晚于今天');
+    const start = String(cur.start_date || '');
+    if (day < start) day = start;
+    if (lastExec && day < lastExec) throw new Error(`日期不能早于最后一笔记账日 ${lastExec}（历史不改写）`);
+    const flows: any[] = await this.db.q(
+      'SELECT id, leg, flow_date, amount FROM user_follow_cashflow WHERE user_id = ? AND leg = ? ORDER BY flow_date, id',
+      [userId, leg]
+    );
+    const fl = flows.map(f => ({ flow_date: String(f.flow_date), amount: Number(f.amount) || 0 }));
+    if (amount < 0) {
+      const principal = Number(cur.principal) || 0;
+      const a = stateFromRows(principal, rows, false, fl);
+      const b = stateFromRows(principal, rows, true, fl);
+      const cap = Math.floor(Math.min(a.cash, b.cash) * 100) / 100;
+      if (-amount > cap + 1e-9)
+        throw new Error(
+          `最多可取出 ${cap.toLocaleString('zh-CN')} 元（你的现金 ${a.cash.toLocaleString('zh-CN')} 元、基准现金 ${b.cash.toLocaleString('zh-CN')} 元，取小）；取出只动现金，不会自动卖出`
+        );
+    }
+    const note = String(body?.note || '').slice(0, 64);
+    await this.db.exec(
+      'INSERT INTO user_follow_cashflow (user_id, leg, flow_date, amount, note, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, leg, day, amount, note, now]
+    );
+    return { ok: true, flow_date: day, amount, effective: '从下一笔信号起按新现金换算' };
   }
 
   private execOut(r: ExecRow & { updated_at?: any }) {

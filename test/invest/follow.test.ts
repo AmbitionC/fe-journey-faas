@@ -1,5 +1,8 @@
 import * as assert from 'assert';
 import {
+  unitNavSeries,
+  xirr,
+  mergeEvents,
   sizeOrder,
   stateFromRows,
   navSeries,
@@ -101,5 +104,28 @@ describe('invest/followCalc.ts — 跟车换算（与 Python 端对照）', () =
     assert.ok(b.text.includes('持仓不足一手的比例'));
     const c = advise({ side: 'buy', frac: 0.2, kind: 'anchor_buy', etf: '510300.SH' }, 50000, 0, null);
     assert.ok(c.text.includes('暂无收盘价'));
+  });
+
+  it('资金流：同日先执行后资金流；份额法单位净值不因出入金跳变；XIRR', () => {
+    const rows = [
+      { leg: '沪深300', signal_date: '20261010', kind: 'anchor_buy', exec_date: '20261013', side: 'buy', frac: 0.2, bench_shares: 5000, bench_amount: 20000, shares: 5000, amount: 20000, status: 'auto' },
+    ];
+    const flows = [{ flow_date: '20261013', amount: 30000 }, { flow_date: '20261020', amount: -10000 }];
+    assert.deepStrictEqual(mergeEvents(rows as any, flows).map((e) => e.kind), ['exec', 'flow', 'flow']);
+    assert.deepStrictEqual(stateFromRows(100000, rows as any, false, flows), { cash: 100000, units: 5000 });
+    assert.deepStrictEqual(stateFromRows(100000, rows as any, false), { cash: 80000, units: 5000 });
+    // 与 Python test_unit_nav_does_not_jump_on_cashflow 同数
+    const u = unitNavSeries(100, [
+      { date: 'd1', value: 100 }, { date: 'd2', value: 110 }, { date: 'd3', value: 160 }, { date: 'd4', value: 176 },
+    ], [{ flow_date: 'd3', amount: 50 }]);
+    assert.deepStrictEqual(u.map((x) => Math.round(x * 1e4) / 1e4), [1, 1.1, 1.1, 1.21]);
+    const u2 = unitNavSeries(100, [{ date: 'd1', value: 100 }, { date: 'd2', value: 110 }, { date: 'd3', value: 70 }], [{ flow_date: 'd3', amount: -40 }]);
+    assert.strictEqual(Math.round(u2[2] * 1e4) / 1e4, 1.1);
+    // XIRR：−100 → 一年后 110 ≈ 10%；追加后同样收敛
+    const r1 = xirr([{ date: '20200101', amount: -100 }, { date: '20210101', amount: 110 }]);
+    assert.ok(r1 != null && Math.abs(r1 - 0.1) < 1e-3, String(r1));
+    const r2 = xirr([{ date: '20200101', amount: -100 }, { date: '20200701', amount: -100 }, { date: '20210101', amount: 220 }]);
+    assert.ok(r2 != null && r2 > 0.1 && r2 < 0.2, String(r2));
+    assert.strictEqual(xirr([{ date: '20200101', amount: -100 }]), null);
   });
 });
