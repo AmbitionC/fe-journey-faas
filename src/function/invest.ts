@@ -40,11 +40,14 @@ export class InvestHTTPService {
   @Inject()
   entitlementService: EntitlementService;
 
-  /** 会员判定（跟车/操作提醒的付费边界）：admin 视为会员；其余走权益网关（单一会员档）。 */
+  /**
+   * 会员判定（跟车/操作提醒的付费边界）：一律走权益网关（单一会员档）。
+   * 2026-11-03 owner：管理员不再「视为会员」——自己的账号也开真实会员（/mcp/admin/member/grant），
+   * 否则网页显示会员、邮件分发（只认真实会员档）却不发，两边对不上。
+   */
   private async memberState(): Promise<{ uid: string; isMember: boolean; until: Date | null }> {
     const uid = String(this.ctx?.userInfo?.userId || '');
     if (!uid) return { uid, isMember: false, until: null };
-    if (this.ctx?.userInfo?.role === 'admin') return { uid, isMember: true, until: null };
     try {
       const isMember = await this.entitlementService.isMember(uid);
       const until = isMember ? await this.entitlementService.currentExpiry(uid) : null;
