@@ -687,6 +687,28 @@ export async function handleBillingAdmin(
       body: { success: ok, message: ok ? '已驳回' : '订单不存在或已处理' },
     };
   }
+  // 管理员赠送会员（2026-11-03 owner：自己的账号也走真实会员，不再靠「管理员视为会员」旁路）。
+  // 走与付费开通同一个 applyPlan（顺延/新开同口径、发月度点数），不建订单＝不进收入统计。
+  if (path === '/mcp/admin/member/grant' && method === 'POST') {
+    const userId = String(data.userId || '').trim();
+    const months = Math.trunc(Number(data.months));
+    const base = findSku('member_month');
+    if (!userId || !base || !(months >= 1 && months <= 120)) {
+      return {
+        status: 400,
+        body: { success: false, message: '需要 userId 与 months（1~120）' },
+      };
+    }
+    await rt.billing.applyPlan(
+      userId,
+      { ...base, months },
+      `admin_grant:${await actor()}${data.note ? `:${String(data.note).slice(0, 40)}` : ''}`
+    );
+    return {
+      status: 200,
+      body: { success: true, data: await rt.billing.getAccount(userId) },
+    };
+  }
   if (path === '/mcp/admin/points/grant' && method === 'POST') {
     const userId = String(data.userId || '').trim();
     const points = Math.trunc(Number(data.points));
