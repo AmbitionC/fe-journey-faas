@@ -345,6 +345,9 @@ resources:
           triggerType: timer
           qualifier: LATEST
           triggerConfig:
+            # 2026-11-03 owner 关闭投顾/个股（只留宽基跟车）：个股模型重建、影子回测、套利记分卡、
+            # 每周复盘都不再需要，定时器停用（代码保留，invoke.trigger 仍可手动跑）。
+            # 宽基/跟车/恐慌不依赖这一步（run_pipeline all 只重建个股模型，不拉行情）。
             cronExpression: '0 0 10 ? * SAT'       # 北京周六 18:00 全量重建→影子回测→复盘
-            enable: true
+            enable: false
             payload: 'weekly_rebuild_review'
