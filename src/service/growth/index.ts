@@ -11,6 +11,9 @@ import { GrowthReviewEntity } from '../../entity/growthReview';
 import { buildPdfSalesReport, pdfSalesWindow } from './pdfSales';
 import { InvestDbService } from '../invest/db';
 import { skillSummary } from './skillSummary';
+import { ArticleViewLogEntity } from '../../entity/articleViewLog';
+import { EntitlementService } from '../entitlement';
+import { BOT_UA, ReadingRow, readerKind, summarizeReading } from './readingQuota';
 
 /** 高价 SKU 的订单类型（order.type）；破冰 SKU = pdf + 书籍订单 */
 const HIGH_VALUE_ORDER_TYPES = ['member', 'consult'];
@@ -134,6 +137,12 @@ export function propValueLabel(raw?: string | null): string {
 export class GrowthService {
   @Inject()
   investDb: InvestDbService;
+
+  @Inject()
+  entitlementService: EntitlementService;
+
+  @InjectEntityModel(ArticleViewLogEntity)
+  viewLogModel: Repository<ArticleViewLogEntity>;
 
   @InjectEntityModel(UserEntity)
   userModel: Repository<UserEntity>;
@@ -1095,5 +1104,76 @@ export class GrowthService {
   async deleteReview(id: number) {
     await this.growthReviewModel.delete(id);
     return { success: true };
+  }
+
+  /**
+   * 「非会员每模块限看 quota 篇」影响评估（管理员只读，2026-11-03）。
+   * 同时给两种口径：窗口内累计（≈终身额度）与按自然月（≈每月额度）。
+   * 当前会员与内部账号从「会被拦」里剔除；只输出计数，不输出任何指纹/手机号。
+   */
+  async readingQuotaImpact(days = 90, quota = 5, exclude?: string[]) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = new Set(this.excludedUserIds(exclude));
+    const botExpr = `MAX(CASE WHEN v.userAgent REGEXP '${BOT_UA.source}' THEN 1 ELSE 0 END)`;
+    const base = () =>
+      this.viewLogModel
+        .createQueryBuilder('v')
+        .select('v.fingerprint', 'fingerprint')
+        .addSelect('v.module', 'module')
+        .addSelect('COUNT(DISTINCT v.articleKey)', 'articles')
+        .addSelect(botExpr, 'bot')
+        .where('v.createTime >= :since', { since })
+        .groupBy('v.fingerprint')
+        .addGroupBy('v.module');
+    const toRows = (raw: any[]): ReadingRow[] =>
+      raw.map((r) => ({
+        fingerprint: String(r.fingerprint || ''),
+        module: String(r.module || ''),
+        articles: Number(r.articles || 0),
+        bot: Number(r.bot) === 1,
+      }));
+    const whole = toRows(await base().getRawMany());
+    const monthlyRaw = await base()
+      .addSelect('LEFT(v.viewDate, 7)', 'month')
+      .addGroupBy('LEFT(v.viewDate, 7)')
+      .getRawMany();
+    // 按月口径：每人取「最多的那个月」
+    const peak = new Map<string, ReadingRow>();
+    for (const r of toRows(monthlyRaw)) {
+      const k = `${r.fingerprint}|${r.module}`;
+      const prev = peak.get(k);
+      if (!prev || r.articles > prev.articles) peak.set(k, { ...r, bot: r.bot || prev?.bot });
+    }
+    // 只给「登录且超额」的人查会员状态（量小）
+    const candidates = Array.from(
+      new Set(
+        whole
+          .filter((r) => !r.bot && readerKind(r.fingerprint) === 'login' && r.articles > quota)
+          .map((r) => r.fingerprint)
+      )
+    ).slice(0, 2000);
+    let members = 0;
+    for (const uid of candidates) {
+      if (ex.has(uid)) continue;
+      try {
+        if (await this.entitlementService.isMember(uid)) {
+          ex.add(uid);
+          members += 1;
+        }
+      } catch {
+        /* 查不到按非会员算（偏保守：高估被拦人数） */
+      }
+    }
+    const allReaders = new Set(whole.filter((r) => !r.bot).map((r) => r.fingerprint));
+    return {
+      days,
+      quota,
+      since: since.toISOString(),
+      readers: allReaders.size,
+      skippedMembersOrInternal: ex.size,
+      membersOverQuota: members,
+      cumulative: summarizeReading(whole, quota, ex),
+      peakMonth: summarizeReading(Array.from(peak.values()), quota, ex),
+    };
   }
 }
