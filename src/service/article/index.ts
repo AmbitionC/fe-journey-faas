@@ -1,4 +1,5 @@
 import { Inject, Provide } from '@midwayjs/core';
+import { beijingDate } from '../../common/readingQuota';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { RedisService } from '@midwayjs/redis';
 import { In, Repository } from 'typeorm';
@@ -87,7 +88,7 @@ export class ArticleService {
       article.viewCount += 1;
       await this.articleModel.save(article);
 
-      const viewDate = new Date().toISOString().split('T')[0];
+      const viewDate = beijingDate();
       await this.viewLogModel.save({
         articleKey,
         module,
@@ -116,20 +117,34 @@ export class ArticleService {
       articleKey,
       module,
       fingerprint,
-      viewDate: new Date().toISOString().split('T')[0],
+      viewDate: beijingDate(),
       ip,
       userAgent: userAgent.substring(0, 500),
     });
   }
 
-  async readArticleKeys(userId: string, module: string): Promise<Set<string>> {
-    const rows: Array<{ articleKey: string }> = await this.viewLogModel
+  /** 额度用：这个模块看过的全部，以及第一次在今天（北京时间）看的 */
+  async readArticleKeys(
+    userId: string,
+    module: string
+  ): Promise<{ ever: Set<string>; todayNew: Set<string> }> {
+    const rows: Array<{ articleKey: string; first: string }> = await this.viewLogModel
       .createQueryBuilder('v')
-      .select('DISTINCT v.articleKey', 'articleKey')
+      .select('v.articleKey', 'articleKey')
+      .addSelect('MIN(v.viewDate)', 'first')
       .where('v.fingerprint = :fp', { fp: userId })
       .andWhere('v.module = :module', { module })
+      .groupBy('v.articleKey')
       .getRawMany();
-    return new Set(rows.map(r => String(r.articleKey)));
+    const today = beijingDate();
+    const ever = new Set<string>();
+    const todayNew = new Set<string>();
+    for (const r of rows) {
+      const k = String(r.articleKey);
+      ever.add(k);
+      if (String(r.first) >= today) todayNew.add(k);
+    }
+    return { ever, todayNew };
   }
 
   async batchGetArticleStats(articleKeys: string[]) {
