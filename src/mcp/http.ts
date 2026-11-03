@@ -29,6 +29,13 @@ import { Analytics, clientOf, sanitizeWebBatch, track } from './analytics';
 import { ReferralStore } from './referral';
 import { PayNotifier } from './payNotify';
 import {
+  OAuthStore,
+  handleOAuth,
+  isOAuthPath,
+  publicBase,
+  wwwAuthenticate,
+} from './oauth';
+import {
   AuthFailReason,
   authHelp,
   lowBalanceNotice,
@@ -75,6 +82,8 @@ export interface McpRuntime {
   referral?: ReferralStore | null;
   /** 收款提醒（短信 / 邮件）；未装配时跳过 */
   payNotify?: PayNotifier | null;
+  /** OAuth 授权（一句话安装：客户端自己走浏览器授权，不用手填 Key）；未装配时只认手填 Key */
+  oauth?: OAuthStore | null;
 }
 
 const SPECS: Record<Product, ServerSpec<any>> = {
@@ -91,7 +100,10 @@ function setCors(res: ServerResponse) {
     'Access-Control-Allow-Headers',
     'Content-Type,Authorization,X-API-Key,Accept,Mcp-Session-Id,Mcp-Protocol-Version,token'
   );
-  res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'Mcp-Session-Id,WWW-Authenticate'
+  );
   res.setHeader('Access-Control-Max-Age', '86400');
 }
 
@@ -127,6 +139,8 @@ export async function handleMcpHttp(
     return;
   }
 
+  if (isOAuthPath(url.pathname))
+    return handleOAuth(req, res, url, rt, body, method);
   if (url.pathname.replace(/\/+$/, '') === '/mcp/pay/alipay/notify')
     return handleAlipayNotify(res, rt, body, method);
   if (url.pathname.startsWith('/mcp/admin/'))
@@ -167,6 +181,12 @@ export async function handleMcpHttp(
       product,
       props: { reason, via, client },
     });
+    // 带上发现入口：支持 OAuth 的客户端（Claude Code、Cursor…）据此自己弹浏览器授权
+    if (rt.oauth)
+      res.setHeader(
+        'WWW-Authenticate',
+        wwwAuthenticate(publicBase(req.headers as any), product)
+      );
     return sendJson(
       res,
       401,
@@ -195,6 +215,12 @@ export async function handleMcpHttp(
       product,
       props: { reason, via, client },
     });
+    // 授权发出的 Key 被吊销 / 失效：告诉客户端重新授权
+    if (rt.oauth)
+      res.setHeader(
+        'WWW-Authenticate',
+        wwwAuthenticate(publicBase(req.headers as any), product, true)
+      );
     return sendJson(
       res,
       401,
@@ -612,6 +638,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
     billing,
     analytics,
     referral,
+    oauth: new OAuthStore((sql, params) => ds.query(sql, params)),
     payNotify: new PayNotifier({
       query: (sql, params) => ds.query(sql, params),
     }),

@@ -360,6 +360,8 @@ export async function handleSelfServe(
             createdAt: k.created_at,
             lastUsedAt: k.last_used_at,
             connectedAt: k.connected_at || null,
+            // 'oauth'＝在客户端里授权登录自动发的，不占手动建 Key 名额
+            via: k.kind === 'oauth' ? 'oauth' : 'manual',
           })),
           ledger,
           orders: orders.map(orderView),

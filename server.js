@@ -409,7 +409,9 @@ async function bootstrap() {
       });
       return handler(req, res);
     }
-    if (url.pathname.startsWith('/mcp/')) return handleMcp(req, res, url);
+    // /.well-known/oauth-*：MCP 授权发现（一句话安装，客户端自己走浏览器授权），实现见 src/mcp/oauth.ts
+    if (url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/.well-known/oauth-') || url.pathname.startsWith('/.well-known/openid-configuration'))
+      return handleMcp(req, res, url);
     if (url.pathname === '/api/ai/chat/stream') {
       const m = (req.method || '').toUpperCase();
       if (m === 'OPTIONS') {
