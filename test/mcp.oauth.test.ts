@@ -43,6 +43,18 @@ export class MemOAuth {
   }
 }
 
+/**
+ * 后端跳转一律 200 + 页面内跳转：函数计算默认域名会把指向外站的 302 拦成
+ * ExternalRedirectForbidden（2026-11-03 线上实测）。返回跳转目标。
+ */
+function jumpTarget(r: { status: number; headers: any; body: string }): string {
+  assert.strictEqual(r.status, 200, r.body);
+  assert.ok(!r.headers.location, '不能带 Location 头');
+  const m = /http-equiv="refresh" content="0;url=([^"]+)"/.exec(r.body);
+  assert.ok(m, r.body);
+  return m![1].replace(/&amp;/g, '&');
+}
+
 export function memRuntime(over: Partial<McpRuntime> = {}) {
   const keys: any[] = [];
   const oauth = new MemOAuth();
@@ -175,7 +187,8 @@ describe('MCP OAuth（一句话安装）', () => {
       const as = await run(rt, { path: p });
       assert.strictEqual(as.status, 200, p);
       assert.strictEqual(as.json.issuer, 'https://fe.example.com/mcp/invest');
-      assert.strictEqual(as.json.authorization_endpoint, 'https://fe.example.com/mcp/oauth/invest/authorize');
+      // 线上函数计算默认域名不许 302 到外站：带产品的授权端点直接给站点授权页
+      assert.strictEqual(as.json.authorization_endpoint, 'https://invest-journey.vercel.app/skills/authorize');
       assert.deepStrictEqual(as.json.code_challenge_methods_supported, ['S256']);
       assert.ok(as.json.registration_endpoint.endsWith('/mcp/oauth/register'));
     }
@@ -194,8 +207,7 @@ describe('MCP OAuth（一句话安装）', () => {
     const { rt, activated, keys } = memRuntime();
     const id = await register(rt);
     const a = await run(rt, { path: `/mcp/oauth/invest/authorize?${authzQuery(id)}` });
-    assert.strictEqual(a.status, 302);
-    const page = new URL(a.headers.location);
+    const page = new URL(jumpTarget(a));
     assert.strictEqual(page.origin + page.pathname, 'https://invest-journey.vercel.app/skills/authorize');
     assert.strictEqual(page.searchParams.get('state'), 'st1');
 
@@ -256,8 +268,7 @@ describe('MCP OAuth（一句话安装）', () => {
     assert.ok(!evil.headers.location);
     assert.ok(/回调地址/.test(evil.body));
     const nopkce = await run(rt, { path: `/mcp/oauth/invest/authorize?${authzQuery(id, { code_challenge_method: 'plain' })}` });
-    assert.strictEqual(nopkce.status, 302);
-    assert.ok(nopkce.headers.location.startsWith('http://localhost:61000/callback?error=invalid_request'));
+    assert.ok(jumpTarget(nopkce).startsWith('http://localhost:61000/callback?error=invalid_request'));
     const unknown = await run(rt, { path: `/mcp/oauth/invest/authorize?${authzQuery('jc_nope')}` });
     assert.strictEqual(unknown.status, 400);
   });
@@ -266,14 +277,13 @@ describe('MCP OAuth（一句话安装）', () => {
     const { rt } = memRuntime();
     const id = await register(rt);
     const a = await run(rt, { path: `/mcp/oauth/authorize?${authzQuery(id, { resource: 'https://fe.example.com/mcp/agent' })}` });
-    assert.strictEqual(a.status, 302);
-    assert.ok(a.headers.location.startsWith('https://www.agent-journey.cn/developer/authorize?'));
+    assert.ok(jumpTarget(a).startsWith('https://www.agent-journey.cn/developer/authorize?'));
   });
 
   it('授权发的 Key 只留最新几把，不占手动建 Key 名额', async () => {
     const { rt, keys } = memRuntime();
     const id = await register(rt);
-    const page = new URL((await run(rt, { path: `/mcp/oauth/invest/authorize?${authzQuery(id)}` })).headers.location);
+    const page = new URL(jumpTarget(await run(rt, { path: `/mcp/oauth/invest/authorize?${authzQuery(id)}` })));
     const params = Object.fromEntries(page.searchParams.entries());
     for (let i = 0; i < MAX_OAUTH_KEYS + 2; i++) {
       const ok = await run(rt, { method: 'POST', path: '/mcp/me/oauth/approve', headers: { 'content-type': 'application/json', token: 'login-u1' }, body: { ...params, product: 'invest' } });

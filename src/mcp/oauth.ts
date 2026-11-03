@@ -318,8 +318,10 @@ export function protectedResourceMetadata(base: string, product: Product) {
 export function authServerMetadata(base: string, product: Product | null) {
   return {
     issuer: product ? `${base}/mcp/${product}` : base,
+    // 带产品时直接给站点前端的授权页：函数计算默认域名不允许 302 跳到外站
+    // （ExternalRedirectForbidden），绕一道后端跳转在线上走不通
     authorization_endpoint: product
-      ? `${base}/mcp/oauth/${product}/authorize`
+      ? `${SITES[product].origin}${AUTHORIZE_PATH[product]}`
       : `${base}/mcp/oauth/authorize`,
     token_endpoint: `${base}/mcp/oauth/token`,
     registration_endpoint: `${base}/mcp/oauth/register`,
@@ -374,11 +376,23 @@ function errorPage(res: ServerResponse, status: number, msg: string) {
   );
 }
 
+/**
+ * 跳转用 200 + 页面内跳转，不用 302：函数计算默认域名（*.fcapp.run）会把指向外站的
+ * Location 拦成 ExternalRedirectForbidden，客户端回调（localhost）和站点授权页都算外站。
+ */
 function redirect(res: ServerResponse, to: string) {
-  res.statusCode = 302;
-  res.setHeader('Location', to);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
-  res.end();
+  const href = esc(to);
+  res.end(
+    '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">' +
+      `<meta http-equiv="refresh" content="0;url=${href}">` +
+      '<meta name="viewport" content="width=device-width,initial-scale=1"><title>正在跳转</title></head>' +
+      '<body style="font-family:-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif;max-width:520px;margin:15vh auto;padding:0 16px;color:#222;line-height:1.7">' +
+      `<p>正在跳转… 没有自动跳转请 <a href="${href}">点这里</a>。</p>` +
+      `<script>location.replace(${JSON.stringify(to).replace(/</g, '\\u003c')})</script></body></html>`
+  );
 }
 
 function parseBody(req: IncomingMessage, body: Buffer): Record<string, any> {
@@ -604,6 +618,13 @@ export async function handleOAuth(
         message: c.page || '客户端发起的授权请求参数不完整，请让客户端重新连接',
         back: c.back,
       });
+    // 客户端直接打开站点授权页（不经后端跳转），在这里记「发起授权」
+    const qp = url.searchParams.get('product');
+    await track(rt, {
+      event: 'oauth_authorize',
+      product: isProduct(qp) ? qp : productFromResource(url.searchParams.get('resource')),
+      props: { clientName: c.client.client_name },
+    });
     return sendJson(res, 200, {
       success: true,
       data: {
