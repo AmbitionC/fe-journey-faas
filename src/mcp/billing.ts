@@ -61,10 +61,19 @@ export interface Sku {
   listCents: number;
   tier?: Tier;
   months?: number;
+  /** 按天计的会员（7 天体验卡）；有它时忽略 months */
+  days?: number;
+  /** 不随收费阶段打折，售价恒为原价（体验卡本身就是低价） */
+  fixedPrice?: boolean;
+  /** 每人限买一次，且只给从没开过会员的人（见 BillingStore.trialEligible） */
+  oncePerUser?: boolean;
   /** plan：每月发放点数；pack：一次性点数 */
   points: number;
   desc: string;
 }
+
+/** 7 天体验卡附送点数（≈ 月卡 400 点按 7 天折算再取整） */
+export const TRIAL7_POINTS = 100;
 
 export const SKUS: Sku[] = [
   {
@@ -86,6 +95,19 @@ export const SKUS: Sku[] = [
     points: MEMBER_MONTHLY_POINTS,
     listCents: 23900,
     desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 × 12 个月 · 约 7 折`,
+  },
+  {
+    // owner 2026-11-03 定（参照可灵「新客 3 折试用」）：¥4.9 七天会员，每人限一次，不自动续费
+    sku: 'member_trial7',
+    name: '7 天体验卡',
+    kind: 'plan',
+    tier: 'member',
+    days: 7,
+    points: TRIAL7_POINTS,
+    listCents: 490,
+    fixedPrice: true,
+    oncePerUser: true,
+    desc: `新用户专享 · 7 天全部会员权益 · 送 ${TRIAL7_POINTS} 点 · 不自动续费 · 每人限一次`,
   },
   {
     sku: 'pack_100',
@@ -176,10 +198,11 @@ export function currentPhase(now = new Date()) {
 
 /** 某阶段下的售价（分）。 */
 export function phasePrice(
-  sku: Pick<Sku, 'listCents'>,
+  sku: Pick<Sku, 'listCents' | 'fixedPrice'>,
   phase: PhaseId
 ): number {
   if (phase === 'free') return 0;
+  if (sku.fixedPrice) return sku.listCents;
   if (phase === 'half') return Math.round(sku.listCents / 2);
   return sku.listCents;
 }
@@ -630,6 +653,7 @@ export class BillingStore {
       [userId]
     );
     const a = await this.getAccount(userId);
+    if (sku.days) return this.applyDayPlan(userId, sku, ref, a);
     const months = sku.months || 1;
     if (a && effectiveTier(a) === sku.tier) {
       await this.q(
@@ -657,6 +681,59 @@ export class BillingStore {
       ref,
       `${sku.name} 开通，发放首月点数`
     );
+  }
+
+  /**
+   * 按天的会员（体验卡）：一次性发点，不设月度发放；
+   * 已是会员就顺延天数（体验卡只卖给没开过会员的人，这条只是兜底）。
+   */
+  private async applyDayPlan(
+    userId: string,
+    sku: Sku,
+    ref: string,
+    a: Account | null
+  ) {
+    const days = sku.days || 7;
+    if (a && effectiveTier(a) === sku.tier) {
+      await this.q(
+        'UPDATE mcp_account SET tier_expire_at = DATE_ADD(tier_expire_at, INTERVAL ? DAY), points = points + ? WHERE user_id = ?',
+        [days, sku.points, userId]
+      );
+    } else {
+      // next_grant_at 设在到期之后：月度懒发放的条件 next_grant_at < tier_expire_at 不成立，不会多发点
+      await this.q(
+        'UPDATE mcp_account SET tier = ?, tier_expire_at = DATE_ADD(NOW(), INTERVAL ? DAY), ' +
+          'next_grant_at = DATE_ADD(NOW(), INTERVAL ? DAY), monthly_points = 0, points = points + ? WHERE user_id = ?',
+        [sku.tier, days, days + 1, sku.points, userId]
+      );
+    }
+    await this.ledger(
+      userId,
+      sku.points,
+      'plan_grant',
+      ref,
+      `${sku.name} 开通 ${days} 天，发放 ${sku.points} 点`
+    );
+  }
+
+  /**
+   * 体验卡资格：从没付过任何会员单（含体验卡、旧版入门/Pro），且当前不是会员。
+   * 待付款的体验卡单不算「买过」，否则用户放弃付款后就再也买不了。
+   */
+  async trialEligible(userId: string): Promise<boolean> {
+    await this.ensureSchema();
+    const plans = [...SKUS, ...LEGACY_SKUS]
+      .filter(s => s.kind === 'plan')
+      .map(s => s.sku);
+    const rows = await this.q(
+      `SELECT COUNT(*) n FROM mcp_order WHERE user_id = ? AND status = 'paid' AND sku IN (${plans
+        .map(() => '?')
+        .join(',')})`,
+      [userId, ...plans]
+    );
+    if (Number(rows?.[0]?.n || 0) > 0) return false;
+    const a = await this.getAccount(userId);
+    return !(a && effectiveTier(a) === 'member');
   }
 
   async ledgerOf(userId: string, limit = 30) {

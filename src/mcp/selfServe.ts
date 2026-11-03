@@ -86,6 +86,9 @@ export function pricing(
       kind: s.kind,
       tier: s.tier || null,
       months: s.months || null,
+      days: s.days || null,
+      // 每人限一次的体验卡；能不能买看 /mcp/me 的 trialEligible
+      trial: !!s.oncePerUser,
       points: s.points,
       // 当前阶段的售价（只有 2026-10-31 公测免费那一天为 0 且不开放购买）
       price: phasePrice(s, phase.id) / 100,
@@ -305,12 +308,15 @@ export async function handleSelfServe(
     if (path === '/mcp/me' && method === 'GET') {
       const account = await rt.billing.getAccount(userId);
       const tier = effectiveTier(account);
-      const [keys, ledger, orders, admin] = await Promise.all([
+      const [keys, ledger, orders, admin, trialEligible] = await Promise.all([
         rt.store.listByUser(userId),
         account ? rt.billing.ledgerOf(userId, 30) : Promise.resolve([]),
         rt.billing.ordersOf(userId),
         rt.alipay
           ? rt.isAdmin(req.headers as any).catch(() => false)
+          : Promise.resolve(false),
+        typeof rt.billing.trialEligible === 'function'
+          ? rt.billing.trialEligible(userId).catch(() => false)
           : Promise.resolve(false),
       ]);
       return send(res, 200, {
@@ -343,6 +349,8 @@ export async function handleSelfServe(
           orders: orders.map(orderView),
           // 管理员可下 1 分钱支付宝测试单（正式收费前验证收银台与到账通知）
           canTestPay: admin,
+          // 能不能买 7 天体验卡（从没开过会员、每人一次）
+          trialEligible,
         },
       });
     }
@@ -420,6 +428,11 @@ export async function handleSelfServe(
           message: phase.next
             ? `公测免费期内调用不扣点，无需购买。${phase.next.from} 起${phase.next.name}。`
             : '公测免费期内调用不扣点，无需购买。',
+        });
+      if (sku.oncePerUser && !(await rt.billing.trialEligible(userId)))
+        return send(res, 400, {
+          success: false,
+          message: `${sku.name}仅限从未开通过会员的用户，每人一次`,
         });
       const act = await rt.billing.activate(userId); // 下单即视为开通
       await trackActivation(rt, userId, !!act?.created, 'order');

@@ -210,6 +210,32 @@ describe('MCP 计费（真 MySQL）', function () {
 });
 
 describe('MCP 计价表', () => {
+  it('7 天体验卡：¥4.9 不随阶段打折、开 7 天发一次点不月发、付过任何会员单后不能再买', async () => {
+    const sku = findSellableSku('member_trial7')!;
+    assert.ok(sku && sku.oncePerUser && sku.days === 7);
+    assert.strictEqual(phasePrice(sku, 'half'), 490);
+    assert.strictEqual(phasePrice(sku, 'full'), 490);
+    const b = new BillingStore(q);
+    await b.activate('t1');
+    assert.strictEqual(await b.trialEligible('t1'), true);
+    const o = await b.createOrder('t1', sku, 490);
+    // 待付款不算买过
+    assert.strictEqual(await b.trialEligible('t1'), true);
+    await b.fulfill(o.order_no, 'test');
+    const a = (await b.getAccount('t1'))!;
+    assert.strictEqual(effectiveTier(a), 'member');
+    assert.strictEqual(a.points, TRIAL_POINTS + sku.points);
+    assert.strictEqual(a.monthly_points, 0);
+    const days = (new Date(a.tier_expire_at!.replace(' ', 'T')).getTime() - Date.now()) / 86400000;
+    assert.ok(days > 6.9 && days < 7.1, `到期约 7 天，实际 ${days}`);
+    assert.strictEqual(await b.trialEligible('t1'), false);
+    // 买过月卡的老会员也不能买
+    await b.activate('t2');
+    const m = await b.createOrder('t2', findSku('member_month')!, 1450);
+    await b.fulfill(m.order_no, 'test');
+    assert.strictEqual(await b.trialEligible('t2'), false);
+  });
+
   it('三阶段价格：免费 0、半价五折、正式价＝原价；阶段按北京时间切换', () => {
     for (const s of SKUS) {
       assert.strictEqual(phasePrice(s, 'free'), 0);
