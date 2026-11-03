@@ -512,6 +512,28 @@ describe('MCP HTTP 适配', () => {
     assert.strictEqual(created[0].scope, 'invest');
   });
 
+  it('管理端赠送会员：校验参数，并以 applyPlan 开通（不建订单）', async () => {
+    const plans: any[] = [];
+    const { rt } = fakeRuntime({ isAdmin: async () => true, adminIdOf: async () => 'u_admin' });
+    (rt.billing as any).applyPlan = async (u: string, sku: any, ref: string) => { plans.push({ u, sku, ref }); };
+    (rt.billing as any).createOrder = async () => { throw new Error('不应建订单'); };
+    assert.strictEqual((await run(rt, { path: '/mcp/admin/member/grant', body: { userId: 'u9' } })).status, 400);
+    assert.strictEqual((await run(rt, { path: '/mcp/admin/member/grant', body: { userId: 'u9', months: 121 } })).status, 400);
+    const ok = await run(rt, { path: '/mcp/admin/member/grant', body: { userId: 'u9', months: 12, note: '自用' } });
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(plans.length, 1);
+    assert.strictEqual(plans[0].u, 'u9');
+    assert.strictEqual(plans[0].sku.tier, 'member');
+    assert.strictEqual(plans[0].sku.months, 12);
+    assert.ok(plans[0].ref.startsWith('admin_grant:u_admin'));
+  });
+
+  it('管理端赠送会员：非 admin 401', async () => {
+    const { rt } = fakeRuntime();
+    const r = await run(rt, { path: '/mcp/admin/member/grant', body: { userId: 'u9', months: 1 } });
+    assert.strictEqual(r.status, 401);
+  });
+
   describe('自助 Key 扣点', () => {
     const USER_ROW = { ...ROW, scope: 'all' as any, user_id: 'u1', daily_limit: 100 };
     function userRt(points: number, now = HALF) {
