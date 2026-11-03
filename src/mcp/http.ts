@@ -27,6 +27,7 @@ import {
 import { AlipayConfig, loadAlipayConfig } from './alipay';
 import { Analytics, clientOf, sanitizeWebBatch, track } from './analytics';
 import { ReferralStore } from './referral';
+import { PayNotifier } from './payNotify';
 import {
   AuthFailReason,
   authHelp,
@@ -72,6 +73,8 @@ export interface McpRuntime {
   analytics?: Analytics | null;
   /** 邀请拉新（受邀者开会员 → 邀请人加点）；未装配时跳过 */
   referral?: ReferralStore | null;
+  /** 收款提醒（短信 / 邮件）；未装配时跳过 */
+  payNotify?: PayNotifier | null;
 }
 
 const SPECS: Record<Product, ServerSpec<any>> = {
@@ -558,7 +561,10 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
 
   const billing = new BillingStore((sql, params) => ds.query(sql, params));
   const analytics = new Analytics((sql, params) => ds.query(sql, params));
-  const referral = new ReferralStore((sql, params) => ds.query(sql, params), billing);
+  const referral = new ReferralStore(
+    (sql, params) => ds.query(sql, params),
+    billing
+  );
 
   const usageOf = (row: ApiKeyRow, product: Product) => async () => {
     const base = {
@@ -606,6 +612,9 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
     billing,
     analytics,
     referral,
+    payNotify: new PayNotifier({
+      query: (sql, params) => ds.query(sql, params),
+    }),
     autoFulfill: process.env.MCP_ORDER_AUTO_FULFILL === '1',
     alipay: (() => {
       try {

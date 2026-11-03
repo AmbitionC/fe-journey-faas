@@ -103,6 +103,16 @@ resources:
         ALIPAY_GATEWAY: ${env('ALIPAY_GATEWAY', '')}
         ALIPAY_NOTIFY_URL: ${env('ALIPAY_NOTIFY_URL', '')}
         ALIPAY_RETURN_URL: ${env('ALIPAY_RETURN_URL', '')}
+        # 收款提醒（src/mcp/payNotify.ts）：支付宝到账 / 微信自报时提醒站长。全部可选，失败不影响订单。
+        # 邮件走预警同一发信地址，收件人缺省 ALERT_SELFTEST_TO；短信要短信服务（dysms）的签名 + 通知模板，
+        # 模板变量 item/amount/via，号码取 user 表 role=admin（PAY_NOTIFY_PHONES 可覆盖）。
+        DM_SMTP_HOST: ${env('DM_SMTP_HOST', '')}
+        DM_SMTP_USER: ${env('DM_SMTP_USER', '')}
+        DM_SMTP_PASS: ${env('DM_SMTP_PASS', '')}
+        ALERT_SELFTEST_TO: ${env('ALERT_SELFTEST_TO', '')}
+        PAY_NOTIFY_EMAIL: ${env('PAY_NOTIFY_EMAIL', '')}
+        PAY_NOTIFY_SMS_SIGN: ${env('PAY_NOTIFY_SMS_SIGN', '')}
+        PAY_NOTIFY_SMS_TEMPLATE: ${env('PAY_NOTIFY_SMS_TEMPLATE', '')}
       triggers:
         - triggerName: httpTrigger
           triggerType: http

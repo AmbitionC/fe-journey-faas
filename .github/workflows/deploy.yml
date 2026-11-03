@@ -42,6 +42,10 @@ env:
   DM_SMTP_PASS: ${{ secrets.DM_SMTP_PASS }}
   WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
   ALERT_SELFTEST_TO: ${{ secrets.ALERT_SELFTEST_TO }}
+  # 收款提醒（fe-journey-main）：收件邮箱缺省同 ALERT_SELFTEST_TO；短信签名/模板在短信服务审核通过后设成仓库变量即生效。
+  PAY_NOTIFY_EMAIL: ${{ vars.PAY_NOTIFY_EMAIL }}
+  PAY_NOTIFY_SMS_SIGN: ${{ vars.PAY_NOTIFY_SMS_SIGN }}
+  PAY_NOTIFY_SMS_TEMPLATE: ${{ vars.PAY_NOTIFY_SMS_TEMPLATE }}
   # Web 函数只拿「是否已开通」布尔（订阅页显示「开通中」用），不拿密钥
   ALERT_MAIL_READY: ${{ (secrets.DM_SMTP_USER != '' && secrets.DM_SMTP_PASS != '') && '1' || '' }}
   ALERT_WX_READY: ${{ secrets.WXPUSHER_APP_TOKEN != '' && '1' || '' }}
