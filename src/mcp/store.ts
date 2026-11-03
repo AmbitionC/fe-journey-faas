@@ -26,6 +26,8 @@ export interface ApiKeyRow {
   connected_at?: string | null;
   /** 自助开通的 Key 归属的平台用户；管理员手发的为 null（不扣点）。 */
   user_id?: string | null;
+  /** 'oauth'＝客户端经授权页自动换来的；空＝用户手动建的 / 管理员发的 */
+  kind?: string | null;
 }
 
 /** 执行 SQL 的最小接口（生产用 TypeORM DataSource.query，单测用假实现）。 */
@@ -120,6 +122,12 @@ export class McpStore {
             'ALTER TABLE mcp_api_key ADD COLUMN connected_at DATETIME NULL'
           );
         }
+        // 第五版（一句话安装）：授权发出的 Key 单独计数，不占用户手动建 Key 的名额
+        if (!names.has('kind')) {
+          await this.q(
+            'ALTER TABLE mcp_api_key ADD COLUMN kind VARCHAR(16) NULL'
+          );
+        }
         // 第三版（埋点）：调用日志补「实扣点数」与「客户端」两列
         const logCols = await this.q(
           "SELECT COLUMN_NAME c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mcp_call_log'"
@@ -148,7 +156,7 @@ export class McpStore {
   async findActive(key: string): Promise<ApiKeyRow | null> {
     await this.ensureSchema();
     const rows = await this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id, kind ' +
         "FROM mcp_api_key WHERE key_hash = ? AND status = 'active' LIMIT 1",
       [hashKey(key)]
     );
@@ -180,6 +188,7 @@ export class McpStore {
     note?: string;
     dailyLimit?: number;
     userId?: string;
+    kind?: 'oauth';
   }) {
     await this.ensureSchema();
     const key = generateKey();
@@ -188,7 +197,7 @@ export class McpStore {
       Math.min(100000, Number(p.dailyLimit) || DEFAULT_DAILY_LIMIT)
     );
     await this.q(
-      'INSERT INTO mcp_api_key (key_hash, key_prefix, scope, owner, note, daily_limit, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO mcp_api_key (key_hash, key_prefix, scope, owner, note, daily_limit, user_id, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         hashKey(key),
         key.slice(0, 10),
@@ -197,6 +206,7 @@ export class McpStore {
         (p.note || '').slice(0, 255) || null,
         limit,
         p.userId || null,
+        p.kind || null,
       ]
     );
     return {
@@ -211,7 +221,7 @@ export class McpStore {
   async list(): Promise<ApiKeyRow[]> {
     await this.ensureSchema();
     return this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id, kind ' +
         'FROM mcp_api_key ORDER BY id DESC LIMIT 500'
     );
   }
@@ -220,19 +230,41 @@ export class McpStore {
   async listByUser(userId: string): Promise<ApiKeyRow[]> {
     await this.ensureSchema();
     return this.q(
-      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id ' +
+      'SELECT id, key_prefix, scope, owner, note, status, daily_limit, created_at, last_used_at, connected_at, user_id, kind ' +
         'FROM mcp_api_key WHERE user_id = ? ORDER BY id DESC LIMIT 50',
       [userId]
     );
   }
 
+  /** 用户手动建的有效 Key 数（授权发出的不算，那些由 pruneOAuthKeys 单独控量）。 */
   async countActiveByUser(userId: string): Promise<number> {
     await this.ensureSchema();
     const rows = await this.q(
-      "SELECT COUNT(*) n FROM mcp_api_key WHERE user_id = ? AND status = 'active'",
+      "SELECT COUNT(*) n FROM mcp_api_key WHERE user_id = ? AND status = 'active' AND (kind IS NULL OR kind <> 'oauth')",
       [userId]
     );
     return Number(rows?.[0]?.n ?? 0);
+  }
+
+  /** 授权发出的 Key 只留最新 keep 把，更早的吊销（每台电脑重新授权都会换一把）。返回吊销数。 */
+  async pruneOAuthKeys(userId: string, keep: number): Promise<number> {
+    await this.ensureSchema();
+    const rows = await this.q(
+      `SELECT id FROM mcp_api_key WHERE user_id = ? AND kind = 'oauth' AND status = 'active' ORDER BY id DESC LIMIT ${Math.max(
+        0,
+        Math.floor(keep)
+      )}, 100`,
+      [userId]
+    );
+    const ids = (rows || []).map((r: any) => Number(r.id)).filter(Boolean);
+    if (!ids.length) return 0;
+    await this.q(
+      `UPDATE mcp_api_key SET status = 'revoked' WHERE user_id = ? AND id IN (${ids
+        .map(() => '?')
+        .join(',')})`,
+      [userId, ...ids]
+    );
+    return ids.length;
   }
 
   /** 用户只能吊销自己的 Key。 */

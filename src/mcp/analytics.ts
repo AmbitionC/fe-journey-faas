@@ -45,6 +45,10 @@ export interface TrackInput {
  * - order_reported       { orderNo }
  * - order_paid           { orderNo, sku, amountCents, channel: 'alipay'|'manual'|'auto' }
  * - order_rejected       { orderNo }
+ * - oauth_register       { clientName }                       客户端动态注册（一句话安装后第一次连接）
+ * - oauth_authorize      { clientName }                       客户端把用户送到授权页
+ * - oauth_approved       { clientName, newAccount }           用户在授权页点了授权
+ * （OAuth 换到 token 时另记 key_created { tier, via: 'oauth', clientName }）
  */
 export const SERVER_EVENTS = [
   'trial_granted',
@@ -64,6 +68,9 @@ export const SERVER_EVENTS = [
   // 邀请拉新（2026-11-02）：referral_signup { inviter, status: 'rewarded'|'held', reason } / referral_member { invitee, points, orderNo }
   'referral_signup',
   'referral_member',
+  'oauth_register',
+  'oauth_authorize',
+  'oauth_approved',
 ] as const;
 
 /**

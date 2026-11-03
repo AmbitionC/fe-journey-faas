@@ -84,12 +84,16 @@ export function authHelp(reason: AuthFailReason, product: Product): string {
         `明文只显示一次，找不到原文就新建一个，替换 ${env} 后重启客户端。`
       );
     case 'revoked':
-      return `这个 API Key 已被吊销。到 ${manage} 新建一个，替换 ${env} 后重启客户端即可，点数余额不受影响。`;
+      return (
+        `这个 API Key 已被吊销，点数余额不受影响。浏览器授权接入的，在客户端里重新授权即可（Claude Code：输入 /mcp，选中服务后重新授权）；` +
+        `手填 Key 的，到 ${manage} 新建一个，替换 ${env} 后重启客户端。`
+      );
     case 'missing':
     default:
       return (
-        '缺少 API Key：请求头需要带 Authorization: Bearer jk_xxx。' +
-        `到 ${manage} 登录后开通（新用户送体验点）并创建 Key，页面上会给出填好 Key 的安装命令。`
+        '缺少 API Key，还没授权。Claude Code、Cursor 等支持浏览器授权的客户端：在客户端里点授权（Claude Code：输入 /mcp，选中服务，选 Authenticate），' +
+        '浏览器登录后点「授权」即可，新用户自动开通并送体验点。' +
+        `不支持浏览器授权的客户端：到 ${manage} 登录创建 Key，请求头带上 Authorization: Bearer jk_xxx。`
       );
   }
 }
