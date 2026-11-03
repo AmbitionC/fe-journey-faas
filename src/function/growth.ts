@@ -163,6 +163,17 @@ export class GrowthHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '非会员限看 N 篇影响评估（管理员只读，只出计数）',
+    functionName: 'growthReadingQuota', name: 'growthReadingQuota', path: '/growth/reading-quota', method: 'get',
+  })
+  async readingQuota(@Query(ALL) query: { days?: number; quota?: number }) {
+    await assertAdmin(this.ctx, this.redisService);
+    const days = Math.min(Math.max(Number(query?.days) || 90, 1), 365);
+    const quota = Math.min(Math.max(Number(query?.quota) || 5, 1), 100);
+    return { success: true, data: await this.growthService.readingQuotaImpact(days, quota) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '转化漏斗',
     functionName: 'growthFunnel',
     name: 'growthFunnel',
