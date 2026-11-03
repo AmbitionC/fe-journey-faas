@@ -125,6 +125,24 @@ export class OssService {
     return objKey;
   }
 
+  /** 写入用户头像（公开可读、内容寻址 key ⟹ 可长缓存），写后校验大小 */
+  async putAvatar(objKey: string, buf: Buffer, mime: string): Promise<void> {
+    this.assertClient();
+    await this.client!.put(objKey, buf, {
+      headers: {
+        'Content-Type': mime,
+        'Content-Disposition': 'inline',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-MD5': md5Base64(buf),
+      },
+    });
+    const metadata: any = await this.client!.getObjectMeta(objKey);
+    const storedSize = Number(metadata?.res?.headers?.['content-length']);
+    if (!Number.isSafeInteger(storedSize) || storedSize !== buf.length) {
+      throw new Error(`OSS ${objKey} 大小校验失败`);
+    }
+  }
+
   /**
    * 生成带失效期的临时下载签名 URL（防泄漏传播）。
    * 对象需为 private ACL，公网直链不可访问，只能通过本签名链接在 expires 秒内下载。

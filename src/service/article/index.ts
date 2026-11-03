@@ -19,6 +19,7 @@ import { deriveStreak, topTags, aggregateWeak, WeakTag } from './insights';
 import { computeReviewDue, ReviewDueItem } from './reviewSchedule';
 import { computeRadar, RadarDim, RadarInput } from './radar';
 import { LearningService } from '../learning';
+import { avatarSeedOf } from '../../common/avatar';
 
 @Provide()
 export class ArticleService {
@@ -360,6 +361,7 @@ export class ArticleService {
       rank: i + 1,
       nickName: uMap.get(r.userId)?.nickName || '匿名用户',
       avatar: uMap.get(r.userId)?.avatar || '',
+      avatarSeed: avatarSeedOf(uMap.get(r.userId)),
       count: Number(r.cnt),
       isMe: !!userId && r.userId === userId,
     }));
