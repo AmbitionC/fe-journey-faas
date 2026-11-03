@@ -11,6 +11,9 @@ import {
   displayClientName,
   s256,
   MAX_OAUTH_KEYS,
+  DEVICE_GRANT,
+  normalizeUserCode,
+  newUserCode,
 } from '../src/mcp/oauth';
 import { McpStore } from '../src/mcp/store';
 
@@ -31,6 +34,32 @@ export class MemOAuth {
     const code = 'jac_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
     this.codes.set(code, { ...c, used: false, exp: this.now() + 10 * 60_000 });
     return code;
+  }
+  devices = new Map<string, any>();
+  async createDevice(product: any, client_name: string | null) {
+    const device_code = 'jdc_' + Math.random().toString(36).slice(2);
+    const user_code = newUserCode();
+    this.devices.set(device_code, { user_code, product, client_name, status: 'pending', user_id: null, exp: this.now() + 600_000 });
+    return { device_code, user_code };
+  }
+  private view(d: any) {
+    return d ? { user_code: d.user_code, product: d.product, client_name: d.client_name, status: d.status, user_id: d.user_id, expired: d.exp <= this.now() } : null;
+  }
+  async getDeviceByUserCode(c: string) {
+    return this.view([...this.devices.values()].find(d => d.user_code === c));
+  }
+  async decideDevice(c: string, userId: string, approve: boolean) {
+    const d = [...this.devices.values()].find(x => x.user_code === c);
+    if (!d || d.status !== 'pending' || d.exp <= this.now()) return false;
+    d.status = approve ? 'approved' : 'denied';
+    d.user_id = userId;
+    return true;
+  }
+  async pollDevice(code: string) {
+    const d = this.devices.get(code);
+    const v = this.view(d);
+    if (d && d.status === 'approved') d.status = 'consumed';
+    return v;
   }
   async consumeCode(code: string) {
     const c = this.codes.get(code);
@@ -326,5 +355,83 @@ describe('MCP OAuth（一句话安装）', () => {
     assert.strictEqual(await s.pruneOAuthKeys('u', 5), 2);
     assert.ok(sqls.some(x => /LIMIT 5, 100/.test(x.sql)));
     assert.deepStrictEqual(sqls[sqls.length - 1].params, ['u', 3, 2]);
+  });
+});
+
+describe('MCP 设备授权（命令行 login，对照可灵）', () => {
+  const form = (o: any) => new URLSearchParams(o).toString();
+  const poll = (rt: McpRuntime, device_code: string) =>
+    run(rt, { method: 'POST', path: '/mcp/oauth/token', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ grant_type: DEVICE_GRANT, device_code }) });
+
+  it('user_code 规整：大小写、空格、横线都认；含元音或长度不对的拒绝', () => {
+    const c = newUserCode();
+    assert.ok(/^[B-Z]{4}-[B-Z]{4}$/.test(c));
+    assert.strictEqual(normalizeUserCode(c.toLowerCase().replace('-', ' ')), c);
+    assert.strictEqual(normalizeUserCode('ABCD-EFGH'), '');
+    assert.strictEqual(normalizeUserCode('BCDF'), '');
+  });
+
+  it('发起 → 等待 → 网页授权（自动开通）→ 拿到 Key → 能调 MCP；Key 只能拿一次', async () => {
+    const { rt, keys, activated } = memRuntime();
+    const meta = await run(rt, { path: '/.well-known/oauth-authorization-server/mcp/invest' });
+    assert.strictEqual(meta.json.device_authorization_endpoint, 'https://fe.example.com/mcp/oauth/invest/device');
+    assert.ok(meta.json.grant_types_supported.includes(DEVICE_GRANT));
+
+    const start = await run(rt, { method: 'POST', path: '/mcp/oauth/invest/device', headers: { 'content-type': 'application/json' }, body: { client_name: '命令行 (Claude Code)' } });
+    assert.strictEqual(start.status, 200, start.body);
+    const { device_code, user_code, verification_uri_complete, interval } = start.json;
+    assert.ok(interval >= 1);
+    const page = new URL(verification_uri_complete);
+    assert.strictEqual(page.origin + page.pathname, 'https://invest-journey.vercel.app/skills/authorize');
+    assert.strictEqual(page.searchParams.get('user_code'), user_code);
+
+    assert.strictEqual((await poll(rt, device_code)).json.error, 'authorization_pending');
+
+    const info = await run(rt, { path: `/mcp/oauth/device/info?user_code=${user_code.toLowerCase()}` });
+    assert.strictEqual(info.json.data.clientName, '命令行');
+    assert.strictEqual(info.json.data.status, 'pending');
+
+    const noLogin = await run(rt, { method: 'POST', path: '/mcp/me/oauth/device/approve', headers: { 'content-type': 'application/json' }, body: { user_code, product: 'invest' } });
+    assert.strictEqual(noLogin.status, 401);
+    const wrongSite = await run(rt, { method: 'POST', path: '/mcp/me/oauth/device/approve', headers: { 'content-type': 'application/json', token: 'login-u1' }, body: { user_code, product: 'agent' } });
+    assert.strictEqual(wrongSite.status, 404);
+
+    const ok = await run(rt, { method: 'POST', path: '/mcp/me/oauth/device/approve', headers: { 'content-type': 'application/json', token: 'login-u1' }, body: { user_code, product: 'invest' } });
+    assert.strictEqual(ok.status, 200, ok.body);
+    assert.strictEqual(ok.json.data.newAccount, true);
+    assert.deepStrictEqual(activated, ['u1']);
+    const again = await run(rt, { method: 'POST', path: '/mcp/me/oauth/device/approve', headers: { 'content-type': 'application/json', token: 'login-u1' }, body: { user_code, product: 'invest' } });
+    assert.strictEqual(again.status, 409);
+
+    const t = await poll(rt, device_code);
+    assert.strictEqual(t.status, 200, t.body);
+    assert.ok(t.json.access_token.startsWith('jk_'));
+    assert.strictEqual(keys[0].row.kind, 'oauth');
+    assert.strictEqual(keys[0].row.scope, 'invest');
+    assert.strictEqual((await poll(rt, device_code)).json.error, 'invalid_grant');
+
+    const init = await run(rt, { method: 'POST', path: '/mcp/invest', headers: { authorization: `Bearer ${t.json.access_token}` }, body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } } });
+    assert.strictEqual(init.status, 200, init.body);
+  });
+
+  it('用户点取消 → access_denied；过期 → expired_token；乱填 → invalid_grant', async () => {
+    const { rt, oauth } = memRuntime();
+    const a = (await run(rt, { method: 'POST', path: '/mcp/oauth/device', headers: { 'content-type': 'application/json' }, body: { product: 'agent' } })).json;
+    assert.ok(a.verification_uri.startsWith('https://www.agent-journey.cn/developer/authorize'));
+    await run(rt, { method: 'POST', path: '/mcp/me/oauth/device/approve', headers: { 'content-type': 'application/json', token: 'login-u1' }, body: { user_code: a.user_code, deny: true } });
+    assert.strictEqual((await poll(rt, a.device_code)).json.error, 'access_denied');
+
+    const b = (await run(rt, { method: 'POST', path: '/mcp/oauth/agent/device', body: '' })).json;
+    const realNow = oauth.now;
+    oauth.now = () => realNow() + 11 * 60_000;
+    assert.strictEqual((await poll(rt, b.device_code)).json.error, 'expired_token');
+    const late = await run(rt, { method: 'POST', path: '/mcp/me/oauth/device/approve', headers: { 'content-type': 'application/json', token: 'login-u1' }, body: { user_code: b.user_code } });
+    assert.strictEqual(late.status, 409);
+    assert.ok(/过期/.test(late.json.message));
+    oauth.now = realNow;
+
+    assert.strictEqual((await poll(rt, 'jdc_nope')).json.error, 'invalid_grant');
+    const noProduct = await run(rt, { method: 'POST', path: '/mcp/oauth/device', body: {} });
+    assert.strictEqual(noProduct.status, 400);
   });
 });

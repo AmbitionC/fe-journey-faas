@@ -54,6 +54,46 @@ export interface OAuthCode {
   code_challenge: string;
 }
 
+/**
+ * 设备授权（RFC 8628，owner 2026-11-03 对照可灵：装 Skill → 命令行 login → 浏览器点授权）。
+ * 命令行拿 device_code 轮询；用户在站点授权页看到同一个 user_code，登录后点授权。
+ * 不需要回调地址，所以 Claude App / Cowork / 远程机器 / 沙箱里都能用。
+ */
+export const DEVICE_TTL_SEC = 600;
+export const DEVICE_INTERVAL_SEC = 3;
+export const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
+/** user_code 字母表：去掉元音和易混字母，避免拼出词、避免 0/O、1/I 混淆（RFC 8628 §6.1） */
+const USER_CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ';
+
+export type DeviceStatus = 'pending' | 'approved' | 'denied' | 'consumed';
+
+export interface OAuthDevice {
+  user_code: string;
+  product: Product;
+  client_name: string | null;
+  status: DeviceStatus;
+  user_id: string | null;
+  expired: boolean;
+}
+
+export function newUserCode(): string {
+  const b = randomBytes(8);
+  let out = '';
+  for (let i = 0; i < 8; i++)
+    out += USER_CODE_ALPHABET[b[i] % USER_CODE_ALPHABET.length];
+  return `${out.slice(0, 4)}-${out.slice(4)}`;
+}
+
+/** 用户手输 / 地址栏带来的 user_code 规整成 XXXX-XXXX；不合法返回空串 */
+export function normalizeUserCode(raw: unknown): string {
+  const t = String(raw || '')
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '');
+  if (t.length !== 8) return '';
+  for (const ch of t) if (!USER_CODE_ALPHABET.includes(ch)) return '';
+  return `${t.slice(0, 4)}-${t.slice(4)}`;
+}
+
 const sha256hex = (s: string) =>
   createHash('sha256').update(s, 'utf8').digest('hex');
 
@@ -86,6 +126,18 @@ export class OAuthStore {
           used_at DATETIME NULL,
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           KEY idx_mcp_oauth_code_exp (expires_at)
+        ) DEFAULT CHARSET=utf8mb4`);
+        await this.q(`CREATE TABLE IF NOT EXISTS mcp_oauth_device (
+          device_hash CHAR(64) PRIMARY KEY,
+          user_code CHAR(9) NOT NULL,
+          product VARCHAR(16) NOT NULL,
+          client_name VARCHAR(128) NULL,
+          status VARCHAR(16) NOT NULL DEFAULT 'pending',
+          user_id VARCHAR(64) NULL,
+          expires_at DATETIME NOT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_mcp_oauth_device_code (user_code),
+          KEY idx_mcp_oauth_device_exp (expires_at)
         ) DEFAULT CHARSET=utf8mb4`);
       })().catch(e => {
         this.schemaReady = null;
@@ -143,6 +195,94 @@ export class OAuthStore {
       ]
     );
     return code;
+  }
+
+  async createDevice(
+    product: Product,
+    clientName: string | null
+  ): Promise<{ device_code: string; user_code: string }> {
+    await this.ensureSchema();
+    // 过期很久的顺手清掉，user_code 唯一键不会越攒越满
+    await this.q(
+      'DELETE FROM mcp_oauth_device WHERE expires_at < DATE_SUB(NOW(), INTERVAL 1 DAY)'
+    ).catch(() => null);
+    for (let i = 0; ; i++) {
+      const device_code = 'jdc_' + randomBytes(24).toString('base64url');
+      const user_code = newUserCode();
+      try {
+        await this.q(
+          `INSERT INTO mcp_oauth_device (device_hash, user_code, product, client_name, expires_at)
+           VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ${DEVICE_TTL_SEC} SECOND))`,
+          [sha256hex(device_code), user_code, product, clientName]
+        );
+        return { device_code, user_code };
+      } catch (e: any) {
+        if (i >= 3 || !/Duplicate/i.test(String(e?.message || e))) throw e;
+      }
+    }
+  }
+
+  private rowToDevice(x: any): OAuthDevice | null {
+    if (!x || !isProduct(x.product)) return null;
+    return {
+      user_code: String(x.user_code),
+      product: x.product,
+      client_name: x.client_name ? String(x.client_name) : null,
+      status: String(x.status) as DeviceStatus,
+      user_id: x.user_id ? String(x.user_id) : null,
+      expired: Number(x.expired) === 1,
+    };
+  }
+
+  async getDeviceByUserCode(userCode: string): Promise<OAuthDevice | null> {
+    if (!userCode) return null;
+    await this.ensureSchema();
+    const rows = await this.q(
+      `SELECT user_code, product, client_name, status, user_id,
+              (expires_at <= NOW()) AS expired
+         FROM mcp_oauth_device WHERE user_code = ? LIMIT 1`,
+      [userCode]
+    );
+    return this.rowToDevice(rows && rows[0]);
+  }
+
+  /** 用户在授权页点「授权 / 拒绝」：只改仍在等待、未过期的那条 */
+  async decideDevice(
+    userCode: string,
+    userId: string,
+    approve: boolean
+  ): Promise<boolean> {
+    await this.ensureSchema();
+    const r = await this.q(
+      `UPDATE mcp_oauth_device SET status = ?, user_id = ?
+        WHERE user_code = ? AND status = 'pending' AND expires_at > NOW()`,
+      [approve ? 'approved' : 'denied', userId, userCode]
+    );
+    return Number(r?.affectedRows ?? 0) === 1;
+  }
+
+  /**
+   * 命令行轮询。已授权的那次原子地改成 consumed 再返回（并发轮询只有一次拿到 Key）。
+   */
+  async pollDevice(deviceCode: string): Promise<OAuthDevice | null> {
+    if (!deviceCode || deviceCode.length > 100) return null;
+    await this.ensureSchema();
+    const h = sha256hex(deviceCode);
+    const rows = await this.q(
+      `SELECT user_code, product, client_name, status, user_id,
+              (expires_at <= NOW()) AS expired
+         FROM mcp_oauth_device WHERE device_hash = ? LIMIT 1`,
+      [h]
+    );
+    const d = this.rowToDevice(rows && rows[0]);
+    if (!d || d.status !== 'approved') return d;
+    const r = await this.q(
+      "UPDATE mcp_oauth_device SET status = 'consumed' WHERE device_hash = ? AND status = 'approved'",
+      [h]
+    );
+    return Number(r?.affectedRows ?? 0) === 1
+      ? d
+      : { ...d, status: 'consumed' };
   }
 
   /** 一次性取用：已用过 / 过期 / 不存在都返回 null（并发换两次只有一次成功）。 */
@@ -325,8 +465,11 @@ export function authServerMetadata(base: string, product: Product | null) {
       : `${base}/mcp/oauth/authorize`,
     token_endpoint: `${base}/mcp/oauth/token`,
     registration_endpoint: `${base}/mcp/oauth/register`,
+    device_authorization_endpoint: product
+      ? `${base}/mcp/oauth/${product}/device`
+      : undefined,
     response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code'],
+    grant_types_supported: ['authorization_code', DEVICE_GRANT],
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
     scopes_supported: ['mcp'],
@@ -640,6 +783,111 @@ export async function handleOAuth(
     });
   }
 
+  // ---- 设备授权：命令行发起 ----
+  const dm = /^\/mcp\/oauth(?:\/(agent|invest))?\/device$/.exec(path);
+  if (dm && method === 'POST') {
+    const d = parseBody(req, body);
+    const product: Product | null =
+      (dm[1] as Product) || (isProduct(d.product) ? d.product : null);
+    if (!product)
+      return oauthErr(res, 400, 'invalid_request', '缺少产品参数');
+    const name =
+      str(d.client_name)
+        .replace(/[\p{Cc}]/gu, '')
+        .trim()
+        .slice(0, 80) || null;
+    const { device_code, user_code } = await rt.oauth.createDevice(
+      product,
+      name
+    );
+    const page = `${SITES[product].origin}${AUTHORIZE_PATH[product]}`;
+    await track(rt, {
+      event: 'oauth_authorize',
+      product,
+      props: { clientName: name, via: 'device' },
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    return sendJson(res, 200, {
+      device_code,
+      user_code,
+      verification_uri: page,
+      verification_uri_complete: withParams(page, { user_code }),
+      expires_in: DEVICE_TTL_SEC,
+      interval: DEVICE_INTERVAL_SEC,
+    });
+  }
+
+  // ---- 设备授权：授权页取信息（公开，只回显用户自己看得到的东西） ----
+  if (path === '/mcp/oauth/device/info' && method === 'GET') {
+    const code = normalizeUserCode(url.searchParams.get('user_code'));
+    const dv = code ? await rt.oauth.getDeviceByUserCode(code) : null;
+    if (!dv)
+      return sendJson(res, 404, {
+        success: false,
+        message: '没有找到这个授权码，请回到 Agent 重新发起登录。',
+      });
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        userCode: dv.user_code,
+        product: dv.product,
+        clientName: displayClientName(dv.client_name),
+        status: dv.expired && dv.status === 'pending' ? 'expired' : dv.status,
+      },
+    });
+  }
+
+  // ---- 设备授权：用户点「授权 / 取消」 ----
+  if (path === '/mcp/me/oauth/device/approve' && method === 'POST') {
+    const userId = await rt.userIdOf(req.headers as any).catch(() => null);
+    if (!userId)
+      return sendJson(res, 401, { success: false, message: '请先登录' });
+    const d = parseBody(req, body);
+    const code = normalizeUserCode(d.user_code);
+    const dv = code ? await rt.oauth.getDeviceByUserCode(code) : null;
+    if (!dv || (isProduct(d.product) && d.product !== dv.product))
+      return sendJson(res, 404, {
+        success: false,
+        message: '没有找到这个授权码，请回到 Agent 重新发起登录。',
+      });
+    const approve = d.deny !== true && d.deny !== 'true';
+    if (dv.expired || dv.status !== 'pending' ||
+        !(await rt.oauth.decideDevice(code, userId, approve)))
+      return sendJson(res, 409, {
+        success: false,
+        message:
+          dv.status === 'pending'
+            ? '这个授权码已过期，请回到 Agent 重新发起登录。'
+            : '这个授权码已经处理过了，回到 Agent 继续即可。',
+      });
+    if (!approve) return sendJson(res, 200, { success: true, data: {} });
+    const { created } = await rt.billing.activate(userId);
+    if (created) {
+      await track(rt, {
+        event: 'account_activated',
+        userId,
+        product: dv.product,
+        props: { created, via: 'device' },
+      });
+      await track(rt, {
+        event: 'trial_granted',
+        userId,
+        product: dv.product,
+        props: { points: TRIAL_POINTS },
+      });
+    }
+    await track(rt, {
+      event: 'oauth_approved',
+      userId,
+      product: dv.product,
+      props: { clientName: dv.client_name, newAccount: created, via: 'device' },
+    });
+    return sendJson(res, 200, {
+      success: true,
+      data: { newAccount: created, trialPoints: created ? TRIAL_POINTS : 0 },
+    });
+  }
+
   // ---- 用户点「授权」（平台登录态） ----
   if (path === '/mcp/me/oauth/approve' && method === 'POST') {
     const userId = await rt.userIdOf(req.headers as any).catch(() => null);
@@ -698,6 +946,30 @@ export async function handleOAuth(
   // ---- 换 token ----
   if (path === '/mcp/oauth/token' && method === 'POST') {
     const d = parseBody(req, body);
+    if (str(d.grant_type) === DEVICE_GRANT) {
+      const dv = await rt.oauth.pollDevice(str(d.device_code));
+      if (!dv) return oauthErr(res, 400, 'invalid_grant', 'device_code 无效');
+      if (dv.status === 'denied')
+        return oauthErr(res, 400, 'access_denied', '用户取消了授权');
+      if (dv.status === 'consumed')
+        return oauthErr(res, 400, 'invalid_grant', '这个授权已经用过了');
+      if (dv.status === 'pending')
+        return dv.expired
+          ? oauthErr(res, 400, 'expired_token', '授权码已过期，请重新登录')
+          : oauthErr(res, 400, 'authorization_pending', '等待用户在浏览器里授权');
+      const key = await issueOAuthKey(
+        rt,
+        dv.user_id!,
+        dv.product,
+        dv.client_name
+      );
+      return sendJson(res, 200, {
+        access_token: key,
+        token_type: 'Bearer',
+        scope: 'mcp',
+        product: dv.product,
+      });
+    }
     if (str(d.grant_type) !== 'authorization_code')
       return oauthErr(
         res,
@@ -719,29 +991,45 @@ export async function handleOAuth(
     )
       return oauthErr(res, 400, 'invalid_grant', 'PKCE 校验失败');
     const client = await rt.oauth.getClient(code.client_id);
-    const acct = await rt.billing.getAccount(code.user_id);
-    const tier = effectiveTier(acct);
-    const created = await rt.store.create({
-      scope: code.product,
-      owner: `user:${code.user_id}`,
-      note: `${(client?.client_name || '客户端').slice(0, 40)} 授权`,
-      dailyLimit: TIERS[tier].dailyLimit,
-      userId: code.user_id,
-      kind: 'oauth',
-    });
-    await rt.store.pruneOAuthKeys(code.user_id, MAX_OAUTH_KEYS).catch(() => 0);
-    await track(rt, {
-      event: 'key_created',
-      userId: code.user_id,
-      product: code.product,
-      props: { tier, via: 'oauth', clientName: client?.client_name || null },
-    });
+    const key = await issueOAuthKey(
+      rt,
+      code.user_id,
+      code.product,
+      client?.client_name || null
+    );
     return sendJson(res, 200, {
-      access_token: created.key,
+      access_token: key,
       token_type: 'Bearer',
       scope: 'mcp',
     });
   }
 
   return oauthErr(res, 404, 'not_found', 'not found');
+}
+
+/** 授权成功发一把 kind=oauth 的 Key（浏览器回调与设备授权共用） */
+async function issueOAuthKey(
+  rt: McpRuntime,
+  userId: string,
+  product: Product,
+  clientName: string | null
+): Promise<string> {
+  const acct = await rt.billing.getAccount(userId);
+  const tier = effectiveTier(acct);
+  const created = await rt.store.create({
+    scope: product,
+    owner: `user:${userId}`,
+    note: `${(clientName || '客户端').slice(0, 40)} 授权`,
+    dailyLimit: TIERS[tier].dailyLimit,
+    userId,
+    kind: 'oauth',
+  });
+  await rt.store.pruneOAuthKeys(userId, MAX_OAUTH_KEYS).catch(() => 0);
+  await track(rt, {
+    event: 'key_created',
+    userId,
+    product,
+    props: { tier, via: 'oauth', clientName },
+  });
+  return created.key;
 }
