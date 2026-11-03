@@ -24,6 +24,12 @@ import {
   ReadingStateBodyDTO,
 } from '../dto/article';
 import { createHash } from 'crypto';
+import { EntitlementService } from '../service/entitlement';
+import {
+  QUOTA_MODULES,
+  READING_QUOTA,
+  decideReading,
+} from '../common/readingQuota';
 
 @Provide()
 export class ArticleHTTPService {
@@ -35,6 +41,9 @@ export class ArticleHTTPService {
 
   @Inject()
   redisService: RedisService;
+
+  @Inject()
+  entitlementService: EntitlementService;
 
   /** @NoAuth 路由不过鉴权中间件，这里按需手动从 token 解析登录用户（用于浏览归因/学习榜）。 */
   private async resolveUserId(): Promise<string | undefined> {
@@ -180,6 +189,58 @@ export class ArticleHTTPService {
       query.pageSize
     );
     return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '非会员阅读额度：能否打开这篇正文（登录非会员每模块 5 篇，终身）',
+    functionName: 'articleAccess',
+    name: 'articleAccess',
+    path: '/article/access',
+    method: 'post',
+  })
+  @NoAuth()
+  async articleAccess(@Body(ALL) body: RecordViewDTO) {
+    const userId = await this.resolveUserId();
+    const module = body.module;
+    // 游客由前端本机计数（3 篇）；这里只负责登录用户
+    if (!userId) {
+      return {
+        success: true,
+        data: { allowed: true, guest: true, quota: READING_QUOTA.guest },
+      };
+    }
+    if (!(QUOTA_MODULES as readonly string[]).includes(module)) {
+      return { success: true, data: { allowed: true, unlimited: true } };
+    }
+    try {
+      if (await this.entitlementService.isMember(userId)) {
+        return { success: true, data: { allowed: true, member: true } };
+      }
+      const keys = await this.articleService.readArticleKeys(userId, module);
+      const d = decideReading(keys, body.articleKey, READING_QUOTA.login);
+      if (d.allowed && d.consumes) {
+        // 立即记一笔浏览，额度以库为准，防止连开多篇时都还没记上
+        const ip =
+          this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+          this.ctx.ip ||
+          '';
+        await this.articleService.recordView(
+          userId,
+          ip,
+          this.ctx.get('user-agent') || '',
+          body.articleKey,
+          module,
+          body.title
+        );
+      }
+      return {
+        success: true,
+        data: { allowed: d.allowed, used: d.used, quota: d.quota },
+      };
+    } catch {
+      // 判定失败放行：宁可多给一篇，也不能因为后端抖动把读者挡在门外
+      return { success: true, data: { allowed: true, degraded: true } };
+    }
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

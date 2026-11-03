@@ -103,6 +103,17 @@ export class ArticleService {
     return { viewCount: article.viewCount };
   }
 
+  /** 某登录用户在某模块看过的不同文章（阅读额度判定用，见 common/readingQuota.ts）。 */
+  async readArticleKeys(userId: string, module: string): Promise<Set<string>> {
+    const rows: Array<{ articleKey: string }> = await this.viewLogModel
+      .createQueryBuilder('v')
+      .select('DISTINCT v.articleKey', 'articleKey')
+      .where('v.fingerprint = :fp', { fp: userId })
+      .andWhere('v.module = :module', { module })
+      .getRawMany();
+    return new Set(rows.map(r => String(r.articleKey)));
+  }
+
   async batchGetArticleStats(articleKeys: string[]) {
     if (!articleKeys.length) return {};
     const articles = await this.articleModel.find({
