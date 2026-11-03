@@ -13,6 +13,7 @@ import { CohortService } from '../cohort';
 import { sanitizeForPrompt } from '../ai/sanitize';
 import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
+import { avatarSeedOf } from '../../common/avatar';
 
 function genShareCode(): string {
   return uuid().replace(/-/g, '').slice(0, 12);
@@ -415,7 +416,7 @@ export class ReviewService {
     });
 
     return {
-      owner: { nickName: user.nickName, avatar: user.avatar, slug, headline: user.portfolioHeadline || '' },
+      owner: { nickName: user.nickName, avatar: user.avatar, avatarSeed: avatarSeedOf(user), slug, headline: user.portfolioHeadline || '' },
       projects,
       skillCurve: await this.skillCurve(userId),
       // 结营徽章（PRD-06 F6 作品档案联动）

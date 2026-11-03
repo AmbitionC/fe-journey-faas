@@ -245,6 +245,19 @@ export class UserHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '上传头像（前端已裁剪压缩，body: { dataBase64 }）',
+    functionName: 'uploadUserAvatar',
+    name: 'uploadUserAvatar',
+    path: '/user/avatar/upload',
+    method: 'post',
+  })
+  async uploadUserAvatar(@Body(ALL) body: { dataBase64?: string }): Promise<any> {
+    const userId = await this.resolveUserId();
+    if (!userId) throw R.unauthorizedError('请先登录');
+    return await this.userService.uploadAvatar(userId, body?.dataBase64);
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '当前用户权益概要（是否会员/到期日/权益键）',
     functionName: 'userEntitlements',
     name: 'userEntitlements',
