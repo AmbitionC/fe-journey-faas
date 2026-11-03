@@ -192,7 +192,7 @@ export class ArticleHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '非会员阅读额度：能否打开这篇正文（登录非会员每模块 5 篇，终身）',
+    description: '非会员阅读额度：能否打开这篇正文（登录非会员每模块每天 5 篇）',
     functionName: 'articleAccess',
     name: 'articleAccess',
     path: '/article/access',
@@ -216,8 +216,8 @@ export class ArticleHTTPService {
       if (await this.entitlementService.isMember(userId)) {
         return { success: true, data: { allowed: true, member: true } };
       }
-      const keys = await this.articleService.readArticleKeys(userId, module);
-      const d = decideReading(keys, body.articleKey, READING_QUOTA.login);
+      const { ever, todayNew } = await this.articleService.readArticleKeys(userId, module);
+      const d = decideReading(ever, todayNew, body.articleKey, READING_QUOTA.login);
       if (d.allowed && d.consumes) {
         // 立即记一笔浏览，额度以库为准，防止连开多篇时都还没记上
         const ip =
