@@ -48,7 +48,7 @@ export class RecordViewDTO {
 
   @Rule(
     RuleType.string()
-      .valid(...MODULE_ENUM)
+      .valid(...MODULE_ENUM, 'algorithm')
       .required()
   )
   module: string;
