@@ -11,6 +11,7 @@ import { GrowthReviewEntity } from '../../entity/growthReview';
 import { buildPdfSalesReport, pdfSalesWindow } from './pdfSales';
 import { InvestDbService } from '../invest/db';
 import { skillSummary } from './skillSummary';
+import { findSku } from '../../mcp/billing';
 import { ArticleViewLogEntity } from '../../entity/articleViewLog';
 import { EntitlementService } from '../entitlement';
 import { BOT_UA, ReadingRow, readerKind, summarizeReading } from './readingQuota';
@@ -220,7 +221,79 @@ export class GrowthService {
       byType[r.type] = { count: Number(r.count), amount: Number(r.amount || 0) };
     }
     byType.book = { count: Number(book?.count || 0), amount: Number(book?.amount || 0) };
+    // 会员 / 加油包（两站共用的 mcp_order，支付宝到账或管理员确认后 status=paid）
+    const mcp = await this.mcpPaid(since, until).catch(() => null);
+    if (mcp) {
+      byType.mcp_plan = mcp.plan;
+      byType.mcp_pack = mcp.pack;
+    }
     return byType;
+  }
+
+  /**
+   * mcp_order 已到账订单的过滤条件（会员月卡/年卡 = plan，加油包 = pack）。
+   * 排除 1 分钱收款测试单、管理员自己下的单和内部账号（GROWTH_INTERNAL_USER_IDS 按手机号）。
+   * 「今天」按库自己的时钟（paid_at 由 NOW() 写入），避免函数与库时区不一致。
+   */
+  private mcpWhere(since: Date | 'today', until?: Date) {
+    const ex = this.excludedUserIds();
+    const params: any[] = since === 'today' ? [] : [since];
+    let w = `m.status = 'paid' AND m.sku <> 'pay_test' AND ${
+      since === 'today' ? 'm.paid_at >= CURDATE()' : 'm.paid_at >= ?'
+    } AND (u.role IS NULL OR u.role <> 'admin')`;
+    if (until) {
+      w += ' AND m.paid_at < ?';
+      params.push(until);
+    }
+    if (ex.length) {
+      w += ` AND (u.phoneNumber IS NULL OR u.phoneNumber NOT IN (${ex.map(() => '?').join(',')}))`;
+      params.push(...ex);
+    }
+    return { w, params };
+  }
+
+  private async mcpPaid(since: Date | 'today', until?: Date) {
+    const { w, params } = this.mcpWhere(since, until);
+    const rows: any[] = await this.orderModel.manager.query(
+      `SELECT m.sku, COUNT(*) n, COALESCE(SUM(m.amount_cents),0) cents
+         FROM mcp_order m LEFT JOIN \`user\` u ON u.id = m.user_id
+        WHERE ${w} GROUP BY m.sku`,
+      params
+    );
+    const out = { plan: { count: 0, amount: 0 }, pack: { count: 0, amount: 0 } };
+    for (const r of rows) {
+      const k = findSku(String(r.sku))?.kind === 'plan' ? 'plan' : 'pack';
+      out[k].count += Number(r.n);
+      out[k].amount = Number((out[k].amount + Number(r.cents) / 100).toFixed(2));
+    }
+    return out;
+  }
+
+  /** 收款流水：最近 N 笔会员/加油包到账 + 今日合计，给个人看板「副业经营」实时展示。 */
+  async recentPayments(limit = 10) {
+    const { w, params } = this.mcpWhere(new Date('2000-01-01'));
+    const rows: any[] = await this.orderModel.manager.query(
+      `SELECT m.order_no, m.sku, m.amount_cents, m.paid_at, m.handled_by
+         FROM mcp_order m LEFT JOIN \`user\` u ON u.id = m.user_id
+        WHERE ${w} ORDER BY m.paid_at DESC LIMIT ?`,
+      [...params, Math.min(50, Math.max(1, limit))]
+    );
+    const today = await this.mcpPaid('today').catch(() => null);
+    return {
+      today: today
+        ? {
+            count: today.plan.count + today.pack.count,
+            amount: Number((today.plan.amount + today.pack.amount).toFixed(2)),
+          }
+        : null,
+      recent: rows.map(r => ({
+        orderNo: r.order_no,
+        name: findSku(String(r.sku))?.name || r.sku,
+        amount: Number(r.amount_cents) / 100,
+        paidAt: r.paid_at,
+        via: String(r.handled_by || '').startsWith('alipay:') ? 'alipay' : 'manual',
+      })),
+    };
   }
 
   /**

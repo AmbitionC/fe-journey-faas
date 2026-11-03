@@ -194,9 +194,10 @@ export class PosDashboardService {
   }
 
   async career() {
-    const [inc, side] = await Promise.all([
+    const [inc, side, pay] = await Promise.all([
       this.finance.incomeSummary(),
       safe(() => this.growthService.overview()),
+      safe(() => this.growthService.recentPayments(10)),
     ]);
     return {
       salary: inc.latestSalary,
@@ -209,6 +210,13 @@ export class PosDashboardService {
             revenueBasis: '含自报付款（未全部核实）',
             verifiedPdf: side.monthManuallyVerifiedPdf,
             orders: side.monthOrderCount,
+            // 会员 / 加油包（两站共用收款，支付宝到账即计入，实时）
+            membership: {
+              plan: side.monthRevenueByType?.mcp_plan || { count: 0, amount: 0 },
+              pack: side.monthRevenueByType?.mcp_pack || { count: 0, amount: 0 },
+              today: isErr(pay) ? null : pay.today,
+              recent: isErr(pay) ? [] : pay.recent,
+            },
             cost: side.monthCost,
             net: side.netCashflow,
             newUsers: side.monthNewUsers,

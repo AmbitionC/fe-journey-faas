@@ -24,6 +24,7 @@ import {
   withinAlipayLimit,
 } from './alipay';
 import { track } from './analytics';
+import { notifySafely, PayEvent } from './payNotify';
 import type { Product } from './store';
 import { isProduct, payReturnUrl, siteOf } from './sites';
 
@@ -141,7 +142,9 @@ async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
     const o = await rt.billing.getOrder(orderNo).catch(() => null);
     // 受邀者开通会员 → 邀请人加点（只认 plan SKU；加油包不算「成为会员」）
     if (o && rt.referral && findSku(o.sku)?.kind === 'plan') {
-      const bonus = await rt.referral.onMemberPaid(String(o.user_id)).catch(() => null);
+      const bonus = await rt.referral
+        .onMemberPaid(String(o.user_id))
+        .catch(() => null);
       if (bonus) {
         await track(rt, {
           event: 'referral_member',
@@ -150,6 +153,9 @@ async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
         });
       }
     }
+    // 收款提醒：只提醒支付宝到账（管理员手动确认是站长自己点的；自报即发在自报那一步已提醒）
+    if (o && actor.startsWith('alipay:'))
+      await notifySafely(rt.payNotify, payEventOf(o, 'paid', 'alipay'));
     await track(rt, {
       event: 'order_paid',
       userId: o?.user_id || null,
@@ -162,6 +168,22 @@ async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
     });
   }
   return r;
+}
+
+function payEventOf(
+  o: any,
+  kind: PayEvent['kind'],
+  channel: PayEvent['channel']
+): PayEvent {
+  return {
+    kind,
+    channel,
+    orderNo: String(o.order_no),
+    sku: String(o.sku),
+    skuName: findSku(o.sku)?.name || String(o.sku),
+    amountCents: Number(o.amount_cents),
+    userId: o.user_id ? String(o.user_id) : null,
+  };
 }
 
 /** 开通：只在真正新建账户时记 account_activated + trial_granted。 */
@@ -477,6 +499,12 @@ export async function handleSelfServe(
         userId,
         props: { orderNo, channel: 'wechat_qr' },
       });
+      const reported = await rt.billing.getOrder(orderNo);
+      if (reported)
+        await notifySafely(
+          rt.payNotify,
+          payEventOf(reported, 'reported', 'wechat')
+        );
       if (rt.autoFulfill) await fulfillTracked(rt, orderNo, 'auto');
       const o = await rt.billing.getOrder(orderNo);
       return send(res, 200, {
@@ -622,6 +650,24 @@ export async function handleBillingAdmin(
       status: r === 'not_found' ? 404 : 200,
       body: { success: r !== 'not_found', result: r, message: msg },
     };
+  }
+  // 收款提醒自检：用一张假订单走一遍短信 / 邮件通道（标【测试】，不碰订单表）
+  if (path === '/mcp/admin/pay-notify/test' && method === 'POST') {
+    if (!rt.payNotify)
+      return {
+        status: 200,
+        body: { success: false, message: '收款提醒未装配' },
+      };
+    const r = await rt.payNotify.notify({
+      kind: data.kind === 'reported' ? 'reported' : 'paid',
+      channel: data.kind === 'reported' ? 'wechat' : 'alipay',
+      orderNo: 'SELFTEST',
+      sku: 'pay_test',
+      skuName: '收款提醒自检',
+      amountCents: 1,
+      userId: null,
+    });
+    return { status: 200, body: { success: true, data: r } };
   }
   if (path === '/mcp/admin/orders/reject' && method === 'POST') {
     const ok = await rt.billing.reject(

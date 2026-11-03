@@ -219,6 +219,38 @@ describe('MCP 支付宝网页收款', () => {
     assert.deepStrictEqual(fulfilled, ['MJ1:alipay:2026103122001']);
   });
 
+  it('支付宝到账后提醒站长一次，重复通知不重复提醒；提醒抛错也照常回 success', async () => {
+    const { rt } = fakeRuntime({
+      MJ2: { order_no: 'MJ2', amount_cents: 2900, status: 'pending', sku: 'member_month', user_id: '42' },
+    });
+    const seen: any[] = [];
+    rt.payNotify = {
+      notify: async (ev: any) => {
+        seen.push(ev);
+        throw new Error('sms down');
+      },
+    };
+    const body = Buffer.from(
+      new URLSearchParams(
+        aliNotify({
+          out_trade_no: 'MJ2',
+          total_amount: '29.00',
+          trade_status: 'TRADE_SUCCESS',
+          trade_no: '2026110322001',
+        })
+      ).toString()
+    );
+    for (let i = 0; i < 2; i++) {
+      const res = fakeRes();
+      await handleAlipayNotify(res, rt, body, 'POST');
+      assert.strictEqual(res.body, 'success');
+    }
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0].kind, 'paid');
+    assert.strictEqual(seen[0].amountCents, 2900);
+    assert.strictEqual(seen[0].userId, '42');
+  });
+
   it('金额不符的通知不发货；伪造通知回 failure', async () => {
     const { rt, fulfilled } = fakeRuntime({
       MJ2: { order_no: 'MJ2', amount_cents: 13900, status: 'pending' },
