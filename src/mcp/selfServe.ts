@@ -80,7 +80,8 @@ export function pricing(
     product,
     rechargeUrl: siteOf(product).recharge,
     tiers: Object.entries(TIERS).map(([id, t]) => ({ id, ...t })),
-    skus: SKUS.map(s => ({
+    // 7 天体验卡目前只在 Agent Journey 卖（Invest 的跟车会员不做试用）
+    skus: SKUS.filter(s => !s.oncePerUser || product === 'agent').map(s => ({
       sku: s.sku,
       name: s.name,
       kind: s.kind,
