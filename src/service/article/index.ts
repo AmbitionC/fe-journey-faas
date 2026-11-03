@@ -104,6 +104,24 @@ export class ArticleService {
   }
 
   /** 某登录用户在某模块看过的不同文章（阅读额度判定用，见 common/readingQuota.ts）。 */
+  /** 只写一行 article_view_log（额度计数用），不碰 article 表 */
+  async logQuotaView(
+    fingerprint: string,
+    ip: string,
+    userAgent: string,
+    articleKey: string,
+    module: string
+  ) {
+    await this.viewLogModel.save({
+      articleKey,
+      module,
+      fingerprint,
+      viewDate: new Date().toISOString().split('T')[0],
+      ip,
+      userAgent: userAgent.substring(0, 500),
+    });
+  }
+
   async readArticleKeys(userId: string, module: string): Promise<Set<string>> {
     const rows: Array<{ articleKey: string }> = await this.viewLogModel
       .createQueryBuilder('v')

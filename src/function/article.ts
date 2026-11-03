@@ -224,14 +224,13 @@ export class ArticleHTTPService {
           this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
           this.ctx.ip ||
           '';
-        await this.articleService.recordView(
-          userId,
-          ip,
-          this.ctx.get('user-agent') || '',
-          body.articleKey,
-          module,
-          body.title
-        );
+        const ua = this.ctx.get('user-agent') || '';
+        if (module === 'algorithm') {
+          // 算法题不是文章：只记一笔浏览日志用于计数，不建 article 行、不涨阅读数
+          await this.articleService.logQuotaView(userId, ip, ua, body.articleKey, module);
+        } else {
+          await this.articleService.recordView(userId, ip, ua, body.articleKey, module, body.title);
+        }
       }
       return {
         success: true,
