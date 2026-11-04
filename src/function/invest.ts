@@ -213,9 +213,8 @@ export class InvestHTTPService {
   })
   async broad() {
     const data = await this.insightService.broad();
-    // 普通用户只看市场级读数：owner 的实盘账本与持仓字段不出接口
-    // （产品一期红线：个人数据不能只靠前端隐藏，见 invest-journey docs/product-plan-v1.md §4.1）
-    if (this.ctx?.userInfo?.role !== 'admin' && data) {
+    // 只出市场级读数：owner 的实盘账本与持仓字段对谁都不出接口（2026-11-04 起管理员同普通用户）
+    if (data) {
       data.ledger = [];
       data.latest = (data.latest || []).map((r: any) => {
         const { shares, mkt_value, cost_price, ...pub } = r;

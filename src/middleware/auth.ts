@@ -18,7 +18,7 @@ import { R } from '../common/base.error.utils';
  * 写接口内的 assertAdmin。
  *
  * 现行为：
- * - `/invest/*`：强制 token + admin（个人持仓/资产/计划，60 个端点统一切面）。
+ * - `/invest/*`：强制 token，按名单放行（管理员与普通用户一致，2026-11-04）。
  * - 其他路径：维持平台历史事实行为（放行），仅尽力解析 token 挂到 ctx.userInfo
  *   供下游 assertAdmin 等使用。全局收紧须先盘点主站哪些端点必须游客可达
  *   （面试/题库公开页），属产品决策，不在本次安全修复内静默切换。
@@ -110,10 +110,10 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
       }
 
       // /invest/*：强制登录（@NoAuth 声明对 invest 路径同样不豁免）。
-      // 角色就两种（owner 2026-08-10 定，产品对外一期）：admin=owner 全量；
-      // 普通用户只能读「市场级」四组只读数据——宽基状态/乖离率/恐慌/杠杆信号，
-      // 其余（计划/持仓/投顾/复盘/套利/美股/模型…）一律 admin。
-      // 名单外的新端点默认落到 admin 分支＝加功能忘配权限时只会更严不会泄露。
+      // owner 2026-11-04「把我的账号和普通账号的区别做彻底」：/invest/* 不再按角色区分，
+      // 管理员与普通用户走同一张名单（市场级只读 + 自己的订阅/账本/跟车/访问记录）。
+      // 计划/持仓/投顾/复盘/套利/美股/模型等原管理员端点已随投顾关闭下线，对谁都 403。
+      // 名单外的新端点默认 403＝加功能忘配权限时只会更严不会泄露。管理员身份只代表后台权限。
       if (!token) throw R.unauthorizedError('未登录');
       const userInfoStr = await this.redisService.get(`token:${token}`);
       if (!userInfoStr) throw R.unauthorizedError('未获取到用户信息');
@@ -122,7 +122,6 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
       ctx.userInfo = userInfo;
       ctx.token = token;
       this.renew(token);
-      if (userInfo.role === 'admin') return next();
       const path = String(ctx.path || '').toLowerCase();
       const method = String(ctx.method).toUpperCase();
       const isMarketRead =
@@ -132,7 +131,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
           path === '/invest/bias' ||
           path === '/invest/allweather' ||
           path === '/invest/leverage' ||
-          path === '/invest/alerts/feed' ||     // 对外预警流（≠ /invest/alerts 个人盯盘，仍 admin）
+          path === '/invest/alerts/feed' ||     // 对外预警流（≠ /invest/alerts 个人盯盘，已下线）
           path === '/invest/macro' ||           // 宏观读数（市场级公开数据）
           path.startsWith('/invest/fear'));
       // 预警订阅设置：登录用户读写自己的（handler 只认 ctx.userInfo，不信任入参）
@@ -146,7 +145,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
         // 访问记录：只记登录态 userId 自己的一行（统计用，2026-10-23）
         (path === '/invest/visit' && method === 'POST');
       // 403 而非 401：前端对 401 一律跳登录，越权用 403 走普通错误提示（防登出循环）
-      if (!isMarketRead && !isOwnPref) throw R.forbiddenError('需要管理员权限');
+      if (!isMarketRead && !isOwnPref) throw R.forbiddenError('该功能已下线');
       return next();
     };
   }
