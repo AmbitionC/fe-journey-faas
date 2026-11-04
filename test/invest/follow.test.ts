@@ -140,6 +140,8 @@ describe('invest/followCalc.ts — 跟车换算（与 Python 端对照）', () =
     assert.deepStrictEqual(nextCheckDates(days, '20261102'), { weekEnd: '20261106', monthEnd: null });
     // 11-03 休市不在列表里：11-02 之后下一交易日 11-04 同周，不算周末
     assert.strictEqual(nextCheckDates(days, '20261102').weekEnd, '20261106');
+    // 判定日本身是周五+月末（10-30）：它的检查已做过，「下次」是 11-06；本月内没有下一个月末 → null
+    assert.deepStrictEqual(nextCheckDates(days, '20261030'), { weekEnd: '20261106', monthEnd: null });
     const holiday = ['20261028', '20261029', '20261102'];
     assert.deepStrictEqual(nextCheckDates(holiday, '20261028'), { weekEnd: '20261029', monthEnd: '20261029' });
   });

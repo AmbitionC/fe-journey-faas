@@ -20,7 +20,7 @@ class FakeDb {
     if (sql.includes('MAX(trade_date) d FROM broad_leg_state')) return [{ d: d.stateDate }];
     if (sql.includes('FROM broad_leg_state WHERE trade_date')) return d.legs || [];
     if (sql.includes('MAX(signal_date) d FROM broad_signal')) return [{ d: d.sigDate }];
-    if (sql.includes('FROM broad_signal WHERE signal_date')) return d.today || [];
+    if (sql.includes('FROM broad_signal WHERE signal_date')) return (d.today || []).filter((r: any) => r.signal_date === params[0]);
     if (sql.includes('FROM broad_signal WHERE exec_date <')) return (d.hist || []).filter((r: any) => r.exec_date < params[0]);
     if (sql.includes("WHERE side = 'buy' AND engine_fired = 1")) {
       return (d.hist || []).filter((r: any) => r.side === 'buy' && r.engine_fired).sort((a: any, b: any) => (a.signal_date < b.signal_date ? 1 : -1));
@@ -91,9 +91,54 @@ describe('invest/follow.ts — 跟车服务层（一个总资金）', () => {
     assert.ok(!('frac' in r.market.today[0]), '非会员不应拿到比例');
     assert.strictEqual((r.market.today[0] as any).side, 'buy');
     assert.strictEqual(r.market.exec_date, '20261102');
-    // 10-30 是周五（下一交易日 11-02 跨周）、也是月末（下一交易日跨月）
-    assert.deepStrictEqual(r.market.next_check, { week_end: '20261030', month_end: '20261030' });
+    // 判定日 10-30 本身的周末/月末检查已经做过（信号已出），「下次」要严格晚于它：11-06 / 11-30
+    assert.deepStrictEqual(r.market.next_check, { week_end: '20261106', month_end: '20261130' });
     assert.strictEqual(r.market.legs[0].leg, '沪深300');
+  });
+
+  it('判定日取状态表与信号表较新者；没信号的日子不再把最后一次信号当「今天」（2026-11-04 实测缺陷）', async () => {
+    // 状态表已到 11-03、信号表最后一行 10-30（11-02/11-03 无信号）
+    const { s } = svc({ ...market, stateDate: '20261103', sigDate: '20261030' });
+    const r = await s.overview('u1', false, null);
+    assert.strictEqual(r.market.date, '20261103');
+    assert.strictEqual(r.market.state_date, '20261103');
+    assert.strictEqual((r.market as any).signal_date, '20261030');
+    assert.strictEqual(r.market.today.length, 0, '10-30 的信号不是 11-03 的「今天」');
+    assert.strictEqual(r.market.exec_date, null, '没有信号就没有执行日');
+    assert.deepStrictEqual(r.market.next_check, { week_end: '20261106', month_end: '20261130' });
+    // 反过来：同一班次信号表先写、状态表还停在前一日 → 以信号表为准
+    const r2 = await svc({ ...market, stateDate: '20261029', sigDate: '20261030' }).s.overview('u1', false, null);
+    assert.strictEqual(r2.market.date, '20261030');
+    assert.strictEqual(r2.market.today.length, 3);
+  });
+
+  it('会员：起步日晚于今日信号的执行日 → 给「起步前触发、不补发」说明，不计入今天要做的动作；估值取今天之前最新收盘', async () => {
+    const data = {
+      ...market,
+      profile: { principal: 100000, start_date: '20261103', status: 'active' },
+      exec: [],
+      closes: {
+        // 收盘表比判定日（10-30）新：估值用 11-02 的价
+        '510300.SH': [{ trade_date: '20261030', close: 4.065 }, { trade_date: '20261102', close: 4.085 }],
+      },
+    };
+    const r = await svc(data).s.overview('u1', true, null);
+    assert.strictEqual(r.totals!.actions_today, 0);
+    const hs = r.legs.find((l: any) => l.leg === '沪深300')!;
+    assert.strictEqual(hs.advice.length, 2);
+    assert.ok(hs.advice.every((a: any) => a.skipped && a.reason === '起步前触发'));
+    assert.ok(hs.advice[0].text.includes('2026-11-03 起步之前触发'), hs.advice[0].text);
+    assert.ok(hs.advice[0].text.includes('执行日 2026-11-02'), hs.advice[0].text);
+    const hl = r.legs.find((l: any) => l.leg === '红利')!;
+    assert.strictEqual(hl.advice.length, 1);
+    assert.strictEqual(hl.advice[0].reason, '起步前触发');
+    assert.deepStrictEqual(hs.price, { close: 4.085, date: '20261102' });
+    assert.strictEqual(r.totals!.as_of, '20261102');
+    assert.strictEqual(r.totals!.nav, 100000);
+    // 暂停：同样给一句话
+    const paused = await svc({ ...data, profile: { principal: 100000, start_date: '20261001', status: 'paused' } }).s.overview('u1', true, null);
+    assert.strictEqual(paused.totals!.actions_today, 0);
+    assert.ok(paused.legs.find((l: any) => l.leg === '沪深300')!.advice.every((a: any) => a.reason === '已暂停'));
   });
 
   it('market.last_buy：每腿取最近一次真触发的买入信号，非会员也可见', async () => {
