@@ -18,10 +18,7 @@ export function normalizeSecCode(raw: unknown): string {
 /** 预警推送通道是否已开通（部署时由 secrets 是否配置算出，只下发布尔）。 */
 export function alertChannels(env: NodeJS.ProcessEnv = process.env): {
   email: boolean;
-  wechat: boolean;
 } {
-  return {
-    email: env.ALERT_MAIL_READY === '1',
-    wechat: env.ALERT_WX_READY === '1',
-  };
+  // 只有邮件：微信（WxPusher）通道 2026-11-04 owner 关闭（token 从未配置、一条没发出去过）
+  return { email: env.ALERT_MAIL_READY === '1' };
 }

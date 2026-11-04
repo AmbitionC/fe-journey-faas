@@ -421,12 +421,19 @@ export class InvestInsightService {
         'SELECT user_id, email, wxpusher_uid, topics, digest FROM user_alert_pref WHERE user_id = ?',
         [userId]
       );
-      const row = rows[0] || { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
-      // channels：推送通道是否已开通——没开时订阅页如实提示「开通中」，不让用户以为已经能收到
-      return { ...row, channels: alertChannels() };
+      const r = rows[0] || {};
+      // channels：推送通道是否已开通——没开时订阅页如实提示「开通中」，不让用户以为已经能收到。
+      // 微信通道已关闭（2026-11-04）：不再下发 UID，只告诉前端「此前填过微信」以便提示改填邮箱。
+      return {
+        user_id: userId,
+        email: r.email || '',
+        topics: r.topics || '',
+        digest: Number(r.digest) || 0,
+        wechat_retired: Boolean(String(r.wxpusher_uid || '').trim()),
+        channels: alertChannels(),
+      };
     } catch {
-      const empty = { user_id: userId, email: '', wxpusher_uid: '', topics: '', digest: 0 };
-      return { ...empty, channels: alertChannels() };
+      return { user_id: userId, email: '', topics: '', digest: 0, wechat_retired: false, channels: alertChannels() };
     }
   }
 
@@ -434,7 +441,8 @@ export class InvestInsightService {
     let email = String(p?.email || '').trim().slice(0, 128);
     // 服务端格式校验（安全审计B）：不合法直接清空，防把任意他人地址当投递目标
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) email = '';
-    const wx = String(p?.wxpusher_uid || '').slice(0, 64);
+    // 微信通道已关闭：保存时一律清空残留的微信 UID（不再收存）
+    const wx = '';
     const topics = String(p?.topics || '').slice(0, 256);
     const digest = p?.digest ? 1 : 0;
     await this.db.q(

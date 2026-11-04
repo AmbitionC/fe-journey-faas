@@ -23,17 +23,10 @@ describe('normalizeSecCode 证券代码补后缀（个人记账手输代码取�
 
 describe('alertChannels 推送通道是否开通（订阅页据此显示「开通中」）', () => {
   it('只认 "1"', () => {
-    assert.deepStrictEqual(alertChannels({}), { email: false, wechat: false });
-    assert.deepStrictEqual(alertChannels({ ALERT_MAIL_READY: '1' }), {
-      email: true,
-      wechat: false,
-    });
-    assert.deepStrictEqual(
-      alertChannels({ ALERT_MAIL_READY: '', ALERT_WX_READY: '1' }),
-      {
-        email: false,
-        wechat: true,
-      }
-    );
+    assert.deepStrictEqual(alertChannels({}), { email: false });
+    assert.deepStrictEqual(alertChannels({ ALERT_MAIL_READY: '1' }), { email: true });
+  });
+  it('微信通道已关闭：环境里残留 ALERT_WX_READY 也不下发 wechat', () => {
+    assert.deepStrictEqual(alertChannels({ ALERT_MAIL_READY: '', ALERT_WX_READY: '1' }), { email: false });
   });
 });
