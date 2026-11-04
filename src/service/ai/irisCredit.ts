@@ -18,6 +18,7 @@ import {
   irisLedgerRef,
 } from '../../mcp/billing';
 import { Analytics } from '../../mcp/analytics';
+import { IrisGuardService } from './irisGuard';
 
 /**
  * Iris 计点（owner 2026-11-02：「Iris 的调用也应该算到 credit，会员提供一定额度的 credit」）。
@@ -120,6 +121,9 @@ export class IrisCreditService {
   @Config('membership')
   membershipConfig: MembershipConfig;
 
+  @Inject()
+  irisGuard: IrisGuardService;
+
   /** 单测可直接赋值替身；生产懒建（库连接在 DataSourceManager 里） */
   billing: BillingStore | null = null;
   analytics: Analytics | null = null;
@@ -198,6 +202,8 @@ export class IrisCreditService {
           `RATE_LIMIT:登录后即可使用${mode === 'think' ? '深度思考' : '这项功能'}，新用户送 ${TRIAL_POINTS} 点体验额度`
         );
       }
+      // 全站游客兜底（与按 IP 的每人 3 次无关，换多少 IP 都绕不过），见 irisGuard.ts
+      if (this.irisGuard) await this.irisGuard.guestPrecheck(userId);
       const n = await this.bump(this.guestKey(userId));
       if (n !== null && n > IRIS_GUEST_DAILY) {
         throw R.forbiddenError(

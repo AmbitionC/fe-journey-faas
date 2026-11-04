@@ -30,6 +30,7 @@ import {
   READING_QUOTA,
   decideReading,
 } from '../common/readingQuota';
+import { clientIpFromCtx } from '../common/clientIp';
 
 @Provide()
 export class ArticleHTTPService {
@@ -221,9 +222,7 @@ export class ArticleHTTPService {
       if (d.allowed && d.consumes) {
         // 立即记一笔浏览，额度以库为准，防止连开多篇时都还没记上
         const ip =
-          this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-          this.ctx.ip ||
-          '';
+          clientIpFromCtx(this.ctx);
         const ua = this.ctx.get('user-agent') || '';
         if (module === 'algorithm') {
           // 算法题不是文章：只记一笔浏览日志用于计数，不建 article 行、不涨阅读数
@@ -253,9 +252,7 @@ export class ArticleHTTPService {
   async recordArticleView(@Body(ALL) body: RecordViewDTO) {
     const userId = await this.resolveUserId();
     const ip =
-      this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      this.ctx.ip ||
-      '';
+      clientIpFromCtx(this.ctx);
     const ua = this.ctx.get('user-agent') || '';
     const fingerprint =
       userId ||

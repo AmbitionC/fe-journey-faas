@@ -11,6 +11,8 @@ const http = require('http');
 const { join } = require('path');
 // 辅助调用判定（与 src/function/ai.ts 共用；编译产物在 dist/common）
 const { auxModuleFor, auxBucketFor } = require('./dist/common/aiPurpose');
+// 可信客户端 IP（只认接入层追加的 XFF 最右段，见 src/common/clientIp.ts）
+const { clientIpFromReq, describeClientIp } = require('./dist/common/clientIp');
 const { BootstrapStarter } = require('@midwayjs/fc-starter');
 const core = require('@midwayjs/core');
 
@@ -137,11 +139,8 @@ async function resolveUser(req) {
       /* ignore */
     }
   }
-  const fwd = req.headers['x-forwarded-for'];
-  const ip =
-    (fwd ? String(fwd).split(',')[0].trim() : '') ||
-    (req.socket && req.socket.remoteAddress) ||
-    'anonymous';
+  // 2026-11-04：不再取 XFF 第一个值（客户端可随意伪造，11-03 被刷 166 万 token）
+  const ip = clientIpFromReq(req);
   return { userId: `guest:${ip}`, isMember: false };
 }
 
@@ -351,63 +350,39 @@ async function bootstrap() {
     console.error('[server] EntitlementService unavailable', e && e.message);
   }
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    if (url.pathname === '/copilotkit') {
-      const { CopilotRuntime, copilotRuntimeNodeHttpEndpoint } = require('@copilotkit/runtime');
-      const { makeServiceAdapter } = require('./dist/copilot/deepseekAdapter');
-      setCors(req, res);
-      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-      const { userId, isMember } = await resolveUser(req);
-      // 共用计点：与 SSE 链路一致（游客每日免费次 / 登录用户按 chat 扣点）；拒绝直接 429
-      try {
-        if (irisCreditService) await irisCreditService.begin(userId, isMember, 'chat');
-        else await aiProxyService.checkRateLimit(userId, isMember);
-      } catch (e) {
-        res.statusCode = 429;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: (e && e.message) || 'RATE_LIMIT' }));
-        return;
+  const server = http.createServer((req, res) => {
+    route(req, res).catch((err) => {
+      console.error('[server] request failed', req.method, req.url && req.url.split('?')[0], err && err.message);
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
       }
-      const actions = [
-        {
-          name: 'getLearnerProfile',
-          description: '查询当前用户在某模块的学情画像(覆盖度/最近/待复习)',
-          parameters: [
-            { name: 'module', type: 'string', description: '模块如 knowledge/interview', required: true },
-          ],
-          handler: async ({ module }) => await articleService.getLearnerProfile(userId, module),
-        },
-        {
-          name: 'listReviewDue',
-          description: '列出当前用户某模块建议复习的文章 key',
-          parameters: [
-            { name: 'module', type: 'string', description: '模块如 knowledge/interview', required: true },
-          ],
-          handler: async ({ module }) => {
-            const p = await articleService.getLearnerProfile(userId, module);
-            return { reviewDue: p.reviewDue };
-          },
-        },
-        {
-          name: 'searchKnowledge',
-          description:
-            '在站内知识库检索与问题相关的文章。回答站内技术问题前应先调用它，并据返回结果作答、在末尾用「延伸阅读」列出引用文章（标题可点击跳转）。不要编造不在结果里的文章。',
-          parameters: [
-            { name: 'query', type: 'string', description: '检索关键词或问题', required: true },
-            { name: 'module', type: 'string', description: '可选，限定模块 knowledge/interview/firstclass', required: false },
-          ],
-          handler: async ({ query, module }) => {
-            const items = await retrieveService.retrieve(query, { module, topK: 3 });
-            return { items };
-          },
-        },
-      ];
-      const runtime = new CopilotRuntime({ actions });
-      const handler = copilotRuntimeNodeHttpEndpoint({
-        endpoint: '/copilotkit', runtime, serviceAdapter: makeServiceAdapter(),
-      });
-      return handler(req, res);
+      try {
+        res.end(JSON.stringify({ success: false, message: '服务内部错误' }));
+      } catch (e) {
+        /* ignore */
+      }
+    });
+  });
+
+  async function route(req, res) {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    // /copilotkit 已下线（@copilotkit/runtime 与 dist/copilot 早已不在包里）：2026-11-04 前访问它会在
+    // require 处抛错、变成未处理的 Promise 拒绝，直接把整个实例打崩（一个请求就能让所有在途请求 502）。
+    if (url.pathname === '/copilotkit') {
+      setCors(req, res);
+      res.statusCode = 410;
+      return res.end();
+    }
+    // 自查可信客户端 IP：只回显调用方自己发来的 XFF 链与服务端认定的 IP（见 src/common/clientIp.ts）
+    if (url.pathname === '/api/ai/whoami') {
+      setCors(req, res);
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end(
+        JSON.stringify(describeClientIp(req.headers['x-forwarded-for'], req.socket && req.socket.remoteAddress))
+      );
     }
     // /.well-known/oauth-*：MCP 授权发现（一句话安装，客户端自己走浏览器授权），实现见 src/mcp/oauth.ts
     if (url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/.well-known/oauth-') || url.pathname.startsWith('/.well-known/openid-configuration'))
@@ -422,12 +397,17 @@ async function bootstrap() {
       if (m === 'POST') return handleStream(req, res);
     }
     return handleFramework(req, res, url);
-  });
+  }
 
   server.listen(PORT, () => {
     console.log(`[server] FC3 web function listening on :${PORT}`);
   });
 }
+
+// 兜底：任何漏网的异步错误只记日志，不让进程退出（Node 15+ 默认未处理拒绝即退出，会打断所有在途请求）
+process.on('unhandledRejection', (err) => {
+  console.error('[server] unhandledRejection', err && (err.stack || err.message || err));
+});
 
 bootstrap().catch((err) => {
   console.error('[server] bootstrap failed', err);

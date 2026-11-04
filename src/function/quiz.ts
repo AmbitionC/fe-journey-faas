@@ -31,6 +31,7 @@ import {
   ReviewDueQueryDTO,
   ReviewFeedbackDTO,
 } from '../dto/quiz';
+import { clientIpFromCtx } from '../common/clientIp';
 
 @Provide()
 export class QuizHTTPService {
@@ -87,8 +88,7 @@ export class QuizHTTPService {
         /* 降级游客 */
       }
     }
-    const fwd = this.ctx.headers['x-forwarded-for'] as string;
-    const ip = (fwd ? fwd.split(',')[0].trim() : '') || this.ctx.ip || 'anonymous';
+    const ip = clientIpFromCtx(this.ctx);
     // 限免期游客也按会员对待，与 ai.ts resolveUser 一致
     return { userId: `guest:${ip}`, isMember: !!isMembershipFree(this.membershipConfig) };
   }
