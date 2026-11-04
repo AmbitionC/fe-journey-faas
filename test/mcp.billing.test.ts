@@ -55,9 +55,9 @@ describe('MCP 计费（真 MySQL）', function () {
   it('扣点原子：余额不足不扣、返回 null；退点恢复', async () => {
     const b = new BillingStore(q);
     await b.activate('u2');
-    assert.strictEqual(await b.charge('u2', 30, 'x'), 20);
-    assert.strictEqual(await b.charge('u2', 30, 'x'), null);
-    assert.strictEqual((await b.getAccount('u2'))!.points, 20);
+    assert.strictEqual(await b.charge('u2', 30, 'x'), TRIAL_POINTS - 30);
+    assert.strictEqual(await b.charge('u2', TRIAL_POINTS, 'x'), null);
+    assert.strictEqual((await b.getAccount('u2'))!.points, TRIAL_POINTS - 30);
     await b.refund('u2', 30, 'x');
     assert.strictEqual((await b.getAccount('u2'))!.points, TRIAL_POINTS);
   });
@@ -80,8 +80,8 @@ describe('MCP 计费（真 MySQL）', function () {
     const b = new BillingStore(q);
     await b.activate('u3');
     const results = await Promise.all(Array.from({ length: 8 }, () => b.charge('u3', 15, 'x')));
-    assert.strictEqual(results.filter(r => r !== null).length, 3);
-    assert.strictEqual((await b.getAccount('u3'))!.points, 5);
+    assert.strictEqual(results.filter(r => r !== null).length, Math.min(8, Math.floor(TRIAL_POINTS / 15)));
+    assert.strictEqual((await b.getAccount('u3'))!.points, TRIAL_POINTS - 15 * Math.min(8, Math.floor(TRIAL_POINTS / 15)));
   });
 
   it('订单：复用未完成单 → 自报 → 确认发货 → 重复确认不重复发点', async () => {
@@ -143,7 +143,7 @@ describe('MCP 计费（真 MySQL）', function () {
     const a = (await b.getAccount('u7'))!;
     assert.strictEqual(effectiveTier(a), 'free');
     assert.strictEqual(a.points, MEMBER_MONTHLY_POINTS); // 月卡：下次发放日 = 到期日，过期后不再补发
-    assert.strictEqual(await b.charge('u7', 2, 'x'), 398);
+    assert.strictEqual(await b.charge('u7', 2, 'x'), MEMBER_MONTHLY_POINTS - 2);
   });
 
   it('加油包加点；驳回的订单不能再确认；看板统计已确认收入', async () => {
