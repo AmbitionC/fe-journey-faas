@@ -312,7 +312,7 @@ describe('MCP 埋点：看板（真 MySQL）', function () {
     assert.deepStrictEqual(mine.map((x: any) => [x.orderNo, x.site, x.entry?.entryCta || null]), [['MJSRC2', 'agent', null], ['MJSRC1', 'agent', 'reading_quota_hint_knowledge']]);
     assert.ok(mine[1].summary.startsWith('知识点限看提示 → Agent Journey 会员页；首次来自 bing.com'));
     assert.ok(!pe.list.some((x: any) => x.sku === 'pay_test'));
-    assert.ok(pe.byCta.some((g: any) => g.key === 'reading_quota_hint_knowledge' && g.n === 1 && g.cents === 1450));
+    assert.ok(pe.byCta.some((g: any) => g.key === 'reading_quota_hint_knowledge' && g.label === '知识点限看提示' && g.n === 1 && g.cents === 1450));
     assert.ok(pe.byFirstTouch.some((g: any) => g.key === 'bing.com'));
     const d = await a.dashboard(30, null);
     assert.ok(Array.isArray(d.paidEntries.list));

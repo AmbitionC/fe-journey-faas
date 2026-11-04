@@ -1,5 +1,10 @@
 import type { QueryFn } from './store';
-import { describeEntry, entryFromProps, type OrderEntry } from './attribution';
+import {
+  ctaLabel,
+  describeEntry,
+  entryFromProps,
+  type OrderEntry,
+} from './attribution';
 
 /**
  * 两个 Skill（Agent Journey / Invest Journey）的全链路埋点（owner 2026-11-01：
@@ -781,7 +786,9 @@ export class Analytics {
     };
     return {
       list: list.slice(0, 50),
-      byCta: group(x => x.entry?.entryCta || x.entry?.entryFrom || '未记录'),
+      byCta: group(
+        x => x.entry?.entryCta || x.entry?.entryFrom || '未记录'
+      ).map(g => ({ ...g, label: ctaLabel(g.key) || g.key })),
       byFirstTouch: group(
         x =>
           x.entry?.ftCh || x.entry?.ftRef || (x.entry ? '直接访问' : '未记录')
