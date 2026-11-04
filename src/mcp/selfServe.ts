@@ -36,11 +36,26 @@ import { isProduct, payReturnUrl, siteOf } from './sites';
  * 收款方式：
  * - 支付宝网页收款（配置了 ALIPAY_* 时）：下单即带付款链接，异步通知验签后自动发货，
  *   用户跳回时再主动查一次单兜底（见 ./alipay.ts）。
- * - 个人微信收款码（兜底）：用户自报「我已支付」+ 管理员人工确认到账后发货。
+ * - 个人微信收款码：已关闭（owner 2026-11-04「微信没有后台检验，微信的付费通道都先关闭」）。
+ *   超过支付宝单笔限额的商品（年卡）标「暂时缺货」、不能下单；用户自报「我已支付」接口一律拒绝。
+ *   以前下的微信单管理员仍可在后台人工确认发放。要重开把 WECHAT_QR_ENABLED 改回 true。
  * 两条路都只调 fulfill（幂等），handled_by 记 `alipay:<支付宝交易号>` 或管理员标识，后台据此区分渠道。
  */
 
 const PAY_QR = 'https://www.agent-journey.cn/payment.png';
+export const WECHAT_QR_ENABLED = false;
+export const SOLD_OUT_MESSAGE = '该商品暂时缺货，可以先选其他套餐';
+
+/** 没有可用收款方式的商品（未开通支付宝，或超过支付宝单笔限额且微信已关）显示缺货。 */
+export function soldOut(
+  amountCents: number,
+  alipay: boolean,
+  alipayMaxCents: number
+): boolean {
+  if (WECHAT_QR_ENABLED) return false;
+  if (!alipay) return true;
+  return alipayMaxCents > 0 && amountCents > alipayMaxCents;
+}
 
 function send(res: ServerResponse, status: number, body: any) {
   res.statusCode = status;
@@ -68,8 +83,11 @@ export function pricing(
 ) {
   const phase = currentPhase(now);
   return {
-    payChannels: alipay ? ['alipay', 'wechat_qr'] : ['wechat_qr'],
-    // 支付宝单笔限额（元）；null＝不限或未开通支付宝。超过的商品前端只给微信扫码。
+    payChannels: [
+      ...(alipay ? ['alipay'] : []),
+      ...(WECHAT_QR_ENABLED ? ['wechat_qr'] : []),
+    ],
+    // 支付宝单笔限额（元）；null＝不限或未开通支付宝。超过的商品 soldOut=true。
     alipayMaxYuan: alipay && alipayMaxCents > 0 ? alipayMaxCents / 100 : null,
     currency: 'CNY',
     phase,
@@ -98,7 +116,10 @@ export function pricing(
       price: phasePrice(s, phase.id) / 100,
       listPrice: s.listCents / 100,
       halfPrice: phasePrice(s, 'half') / 100,
-      purchasable: phase.id !== 'free',
+      purchasable:
+        phase.id !== 'free' &&
+        !soldOut(phasePrice(s, phase.id), alipay, alipayMaxCents),
+      soldOut: soldOut(phasePrice(s, phase.id), alipay, alipayMaxCents),
       desc: s.desc,
     })),
     toolCost: toolCostFor(product),
@@ -133,7 +154,7 @@ function paidVia(handledBy?: string | null): 'alipay' | 'manual' | 'auto' {
 
 const PAYABLE = ['pending', 'self_reported'];
 
-/** 超过支付宝单笔限额的订单（如年卡）不给支付宝链接，只能微信扫码。 */
+/** 超过支付宝单笔限额的订单（如年卡）不给支付宝链接（微信已关，这类商品下单前就标缺货）。 */
 function alipayOverLimit(rt: McpRuntime, o: any): boolean {
   return !!rt.alipay && !withinAlipayLimit(rt.alipay, Number(o.amount_cents));
 }
@@ -471,6 +492,12 @@ export async function handleSelfServe(
       const act = await rt.billing.activate(userId); // 下单即视为开通
       await trackActivation(rt, userId, !!act?.created, 'order');
       const amount = phasePrice(sku, phase.id);
+      if (soldOut(amount, !!rt.alipay, rt.alipay?.maxCents || 0))
+        return send(res, 400, {
+          success: false,
+          code: 'sold_out',
+          message: SOLD_OUT_MESSAGE,
+        });
       const site = siteParam(data);
       const entry = sanitizeEntry(data.entry);
       const o = await rt.billing.createOrder(userId, sku, amount);
@@ -502,15 +529,27 @@ export async function handleSelfServe(
         data: {
           ...orderView({ ...o, created_at: o.created_at || null }),
           alipayUrl: payUrl,
-          qr: PAY_QR,
-          howToPay: `微信扫码支付 ¥${(Number(o.amount_cents) / 100).toFixed(
-            2
-          )}，转账备注填写 ${payCode(o.order_no)}，付完点「我已支付」。`,
+          ...(WECHAT_QR_ENABLED
+            ? {
+                qr: PAY_QR,
+                howToPay: `微信扫码支付 ¥${(
+                  Number(o.amount_cents) / 100
+                ).toFixed(2)}，转账备注填写 ${payCode(
+                  o.order_no
+                )}，付完点「我已支付」。`,
+              }
+            : {}),
         },
       });
     }
 
     if (path === '/mcp/me/orders/paid' && method === 'POST') {
+      if (!WECHAT_QR_ENABLED)
+        return send(res, 410, {
+          success: false,
+          code: 'wechat_closed',
+          message: '微信收款已关闭，请用支付宝付款',
+        });
       const orderNo = String(data.orderNo || '');
       const ok = await rt.billing.reportPaid(orderNo, userId);
       if (!ok) {
@@ -565,7 +604,7 @@ export async function handleSelfServe(
                   2
                 )} 超过支付宝单笔限额 ¥${(rt.alipay!.maxCents / 100).toFixed(
                   0
-                )}，请改用微信扫码`
+                )}，${WECHAT_QR_ENABLED ? '请改用微信扫码' : '暂时缺货'}`
               : '订单已处理，无需再付款',
         });
       await track(rt, {
@@ -731,7 +770,9 @@ export async function handleBillingAdmin(
     await rt.billing.applyPlan(
       userId,
       { ...base, months },
-      `admin_grant:${await actor()}${data.note ? `:${String(data.note).slice(0, 40)}` : ''}`
+      `admin_grant:${await actor()}${
+        data.note ? `:${String(data.note).slice(0, 40)}` : ''
+      }`
     );
     return {
       status: 200,

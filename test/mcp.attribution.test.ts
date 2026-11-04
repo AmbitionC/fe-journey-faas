@@ -7,6 +7,8 @@ import {
 } from '../src/mcp/attribution';
 import { render, PayEvent } from '../src/mcp/payNotify';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
+import { handleAlipayNotify } from '../src/mcp/selfServe';
+import { fakeAlipayCfg, fakeAlipayPaid } from './fakeAlipay';
 import type { TrackInput } from '../src/mcp/analytics';
 
 /** 付费来源（2026-11-04）：下单带 entry → order_created / order_paid / 收款邮件都能看到这一单从哪来。 */
@@ -94,7 +96,7 @@ describe('付费来源：人话描述', () => {
   });
 });
 
-/** 下单 → 自报 → 自动发放：来源写进 order_created，再跟着 order_paid 和提醒走。 */
+/** 下单 → 支付宝到账通知 → 发放：来源写进 order_created，再跟着 order_paid 和提醒走。 */
 function fakeRt() {
   const events: TrackInput[] = [];
   const notified: PayEvent[] = [];
@@ -104,16 +106,19 @@ function fakeRt() {
     billing: {
       activate: async () => ({ created: false }),
       createOrder: async () => ({ ...order, reused: false }),
-      reportPaid: async () => { order.status = 'reported'; return true; },
       getOrder: async () => ({ ...order }),
-      fulfill: async () => { order.status = 'paid'; return 'ok'; },
+      fulfill: async () => {
+        if (order.status === 'paid') return 'already';
+        order.status = 'paid';
+        return 'ok';
+      },
     } as any,
     agentDeps: () => ({} as any),
     investDeps: () => ({} as any),
     isAdmin: async () => false,
     userIdOf: async () => 'u1',
     now: HALF,
-    autoFulfill: true,
+    alipay: fakeAlipayCfg,
     payNotify: { notify: async (ev: PayEvent) => { notified.push(ev); return { sms: 'unconfigured', mail: 'sent', test: false }; } } as any,
     analytics: {
       track: async (e: TrackInput) => { events.push(e); },
@@ -126,6 +131,12 @@ function fakeRt() {
     } as any,
   } as any;
   return { rt, events, notified };
+}
+
+async function alipayPaid(rt: McpRuntime) {
+  const res: any = { statusCode: 0, body: '', setHeader() {}, end(b?: any) { this.body = String(b || ''); } };
+  await handleAlipayNotify(res, rt, fakeAlipayPaid('MJ20261115ABCDEF12', 1450), 'POST');
+  assert.strictEqual(res.body, 'success');
 }
 
 async function post(rt: McpRuntime, path: string, body: any) {
@@ -157,11 +168,11 @@ describe('付费来源：下单到到账全链路', () => {
       ['member', 'reading_quota_hint_knowledge', 'bing.com', '/knowledge', 1, 'desktop', undefined]
     );
 
-    await post(rt, '/mcp/me/orders/paid', { orderNo: 'MJ20261115ABCDEF12' });
+    await alipayPaid(rt);
     const p = events.find(e => e.event === 'order_paid')!;
     assert.strictEqual(p.product, 'agent');
     assert.deepStrictEqual([p.props!.site, p.props!.entryCta, p.props!.ftRef], ['agent', 'reading_quota_hint_knowledge', 'bing.com']);
-    assert.ok(notified.length >= 1);
+    assert.strictEqual(notified.length, 1);
     assert.ok(notified.every(n => /知识点限看提示 → Agent Journey 会员页；首次来自 bing\.com/.test(String(n.source))));
   });
 
@@ -171,7 +182,7 @@ describe('付费来源：下单到到账全链路', () => {
     assert.strictEqual(r.status, 200);
     const c = events.find(e => e.event === 'order_created')!;
     assert.strictEqual(c.props!.entryCta, undefined);
-    await post(rt, '/mcp/me/orders/paid', { orderNo: 'MJ20261115ABCDEF12' });
+    await alipayPaid(rt);
     assert.ok(notified.every(n => n.source === '未记录（下单页面没带来源）'));
   });
 
@@ -179,7 +190,7 @@ describe('付费来源：下单到到账全链路', () => {
     const { rt, events } = fakeRt();
     (rt.analytics as any).orderEntry = async () => { throw new Error('db down'); };
     await post(rt, '/mcp/me/orders', { sku: 'member_month' });
-    await post(rt, '/mcp/me/orders/paid', { orderNo: 'MJ20261115ABCDEF12' });
+    await alipayPaid(rt);
     assert.ok(events.some(e => e.event === 'order_paid'));
   });
 });
