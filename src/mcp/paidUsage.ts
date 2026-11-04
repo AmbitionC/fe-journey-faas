@@ -174,7 +174,8 @@ export async function paidUsage(q: QueryFn, days = 30, nowMs = Date.now()) {
     (await q(
       'SELECT m.user_id, MIN(m.paid_at) first_paid, MAX(m.paid_at) last_paid, COUNT(*) orders, ' +
         "SUM(m.amount_cents) cents, GROUP_CONCAT(DISTINCT m.sku) skus, SUM(m.sku LIKE 'pack%') packs, " +
-        'MAX(u.phoneNumber) phone FROM mcp_order m LEFT JOIN `user` u ON u.id = m.user_id ' +
+        // 账户 id 有的是 user.id，有的就是手机号（短信登录），两种都对一下
+        'MAX(u.phoneNumber) phone FROM mcp_order m LEFT JOIN `user` u ON (u.id = m.user_id OR u.phoneNumber = m.user_id) ' +
         "WHERE m.status = 'paid' AND m.sku <> 'pay_test' AND (u.role IS NULL OR u.role <> 'admin') " +
         'GROUP BY m.user_id ORDER BY first_paid'
     )) || [];
@@ -454,7 +455,7 @@ export async function paidUsage(q: QueryFn, days = 30, nowMs = Date.now()) {
     });
     return {
       userId: u,
-      phone: maskPhone(p.phone),
+      phone: maskPhone(p.phone || (/^1\d{10}$/.test(u) ? u : null)),
       skus: String(p.skus || '')
         .split(',')
         .filter(Boolean),

@@ -230,7 +230,7 @@ describe('付费用户视图（真 MySQL）', function () {
 
   it('旧调用日志表补齐画像列；付费用户的使用、权益、报错、重复、空结果都能出数', async () => {
     await q('CREATE TABLE `user` (id VARCHAR(64) PRIMARY KEY, phoneNumber VARCHAR(20), role VARCHAR(16))');
-    await q("INSERT INTO `user` VALUES ('P','13800001111','user'),('ADM','13900000000','admin'),('F','13700002222','user')");
+    await q("INSERT INTO `user` VALUES ('P','13800001111','user'),('ADM','13900000000','admin'),('F','13700002222','user'),('99','13600009999','admin')");
     const store = new McpStore(q);
     const billing = new BillingStore(q);
     const a = new Analytics(q);
@@ -241,7 +241,9 @@ describe('付费用户视图（真 MySQL）', function () {
 
     // P 付费会员；ADM 管理员付了也不算；F 免费用户只作对照
     for (const u of ['P', 'ADM', 'F']) await billing.activate(u);
-    for (const u of ['P', 'ADM']) {
+    // 13600009999：账户 id 就是手机号的管理员，也要排除
+    await billing.activate('13600009999');
+    for (const u of ['P', 'ADM', '13600009999']) {
       const o = await billing.createOrder(u, { sku: 'member_month', listCents: 2900, kind: 'plan', tier: 'member', months: 1, points: 800 } as any, 1450);
       await billing.fulfill(o.order_no, 'alipay:T');
     }
