@@ -4,6 +4,7 @@ import { cleanQuery, fuseHits, agentServer, AgentDeps, slimTree, cleanSnippet, e
 import { investServer, InvestDeps, findMacroSeries } from '../src/mcp/tools/invest';
 import { METHODOLOGY } from '../src/mcp/methodology';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
+import { fakeAlipayCfg } from './fakeAlipay';
 import { McpStore, extractKey, hashKey, generateKey, beijingYmd, ApiKeyRow } from '../src/mcp/store';
 import { PRODUCT_TOOLS } from '../src/mcp/billing';
 
@@ -680,7 +681,9 @@ describe('MCP HTTP 适配', () => {
       assert.deepStrictEqual(free.json.data.tiers.map((t: any) => t.id), ['free', 'member']);
       assert.ok(free.json.data.skus.filter((x: any) => x.kind === 'plan').every((x: any) => x.tier === 'member'));
       for (const now of [NOV, HALF]) {
-        const half = await run(fakeRuntime({ now }).rt, { path: '/mcp/pricing', method: 'GET' });
+        const halfRt = fakeRuntime({ now }).rt;
+        halfRt.alipay = { ...fakeAlipayCfg, maxCents: 5000 };
+        const half = await run(halfRt, { path: '/mcp/pricing', method: 'GET' });
         assert.strictEqual(half.json.data.phase.id, 'half');
         assert.strictEqual(half.json.data.chargeCalls, true);
         assert.deepStrictEqual(half.json.data.phases.map((p: any) => p.id), ['half', 'full']);
@@ -690,6 +693,10 @@ describe('MCP HTTP 适配', () => {
         assert.ok(!/免费/.test(half.json.data.promo));
         const hm = half.json.data.skus.find((x: any) => x.sku === 'member_month');
         assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [14.5, 29, true]);
+        // 微信收款已关（2026-11-04）：超过支付宝单笔 ¥50 的年卡显示缺货
+        const hy = half.json.data.skus.find((x: any) => x.sku === 'member_year');
+        assert.deepStrictEqual([hy.soldOut, hy.purchasable], [true, false]);
+        assert.deepStrictEqual(half.json.data.payChannels, ['alipay']);
       }
     });
 
@@ -716,13 +723,16 @@ describe('MCP HTTP 适配', () => {
       const r = await run(rt, { path: '/mcp/me/orders', body: { sku: 'member_month' } });
       assert.strictEqual(r.status, 400);
       assert.ok(/免费期/.test(r.json.message) && r.json.message.includes('2026-11-01'));
-      const nov = await run(fakeRuntime({ userIdOf: async () => 'u1', now: NOV }).rt, { path: '/mcp/me/orders', body: { sku: 'member_month' } });
+      const novRt = fakeRuntime({ userIdOf: async () => 'u1', now: NOV }).rt;
+      novRt.alipay = fakeAlipayCfg;
+      const nov = await run(novRt, { path: '/mcp/me/orders', body: { sku: 'member_month' } });
       assert.strictEqual(nov.status, 200);
       assert.strictEqual(nov.json.data.amount, 14.5);
     });
 
-    it('下单返回收款码与备注码，金额为半价；未知商品 400', async () => {
+    it('下单返回支付宝链接与备注码、不再带微信收款码，金额为半价；未知商品 400', async () => {
       const { rt } = fakeRuntime({ userIdOf: async () => 'u1', now: HALF });
+      rt.alipay = fakeAlipayCfg;
       const bad = await run(rt, { path: '/mcp/me/orders', body: { sku: 'nope' } });
       assert.strictEqual(bad.status, 400);
       // 已下架的旧档位商品不能再下单
@@ -731,7 +741,8 @@ describe('MCP HTTP 适配', () => {
       const ok = await run(rt, { path: '/mcp/me/orders', body: { sku: 'member_month' } });
       assert.strictEqual(ok.status, 200);
       assert.strictEqual(ok.json.data.payCode, 'DEF12'.padStart(6, 'C'));
-      assert.ok(ok.json.data.qr.endsWith('payment.png'));
+      assert.ok(ok.json.data.alipayUrl.includes('alipay.trade.page.pay'));
+      assert.strictEqual(ok.json.data.qr, undefined);
       assert.strictEqual(ok.json.data.amount, 14.5);
     });
 
