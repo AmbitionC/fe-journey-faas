@@ -225,17 +225,6 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '五资产配置参考（提示-only，不参与买卖决策）',
-    functionName: 'investAllweather',
-    name: 'investAllweather',
-    path: '/invest/allweather',
-    method: 'get',
-  })
-  async allweather() {
-    return { success: true, data: await this.insightService.allweather() };
-  }
-
-  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '宽基历史回测数据集（库内副本，周更；无则 data=null，前端回退静态文件）',
     functionName: 'investBroadHistory',
     name: 'investBroadHistory',
