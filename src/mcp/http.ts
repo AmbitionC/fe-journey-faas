@@ -27,6 +27,15 @@ import {
 } from './selfServe';
 import { AlipayConfig, loadAlipayConfig } from './alipay';
 import { Analytics, clientOf, sanitizeWebBatch, track } from './analytics';
+import {
+  argsHash,
+  argsJson,
+  BillingKind,
+  countItems,
+  errKind,
+  KNOWN_METHODS,
+  summarizeArgs,
+} from './usage';
 import { ReferralStore } from './referral';
 import { PayNotifier } from './payNotify';
 import {
@@ -268,6 +277,31 @@ export async function handleMcpHttp(
     let charged = 0;
     let chargedTool = '';
     let notice: string | null = null;
+    // 调用日志的使用画像字段（./usage.ts）：档位与计费口径在扣点分支里定
+    let callTier: string | null = userId ? null : 'admin';
+    let billingKind: BillingKind | null = userId ? null : 'admin';
+    if (msg && typeof msg.method === 'string' && msg.id != null) {
+      // 客户端在找我们没有的方法 / 工具：是「客户端期待什么、用户想要什么」的信号
+      if (!KNOWN_METHODS.has(msg.method)) {
+        await track(rt, {
+          ...evBase,
+          event: 'method_unsupported',
+          props: { method: String(msg.method).slice(0, 60), client },
+        });
+      } else if (
+        msg.method === 'tools/call' &&
+        !spec.tools.some(t => t.name === msg.params?.name)
+      ) {
+        await track(rt, {
+          ...evBase,
+          event: 'tool_unknown',
+          props: {
+            name: String(msg.params?.name ?? '').slice(0, 60) || null,
+            client,
+          },
+        });
+      }
+    }
     if (msg && msg.method === 'initialize' && msg.id != null) {
       // Skill 页轮询这个时间点判断「已连通」
       if (typeof rt.store.markConnected === 'function')
@@ -299,6 +333,7 @@ export async function handleMcpHttp(
         try {
           const acct = await rt.billing.getAccount(userId);
           tier = effectiveTier(acct);
+          callTier = tier;
           limit = TIERS[effectiveTier(acct)].dailyLimit;
         } catch {
           return toolError(msg.id, '计费服务暂不可用，请稍后重试');
@@ -319,13 +354,17 @@ export async function handleMcpHttp(
         );
       }
       const name = msg.params?.name;
+      if (userId) billingKind = free ? 'free_phase' : 'free_tool';
       // 按次扣点（2026-10-31 公测免费那一天除外）；点数用完返回带充值链接的错误。用量照常进调用日志
       if (userId && !free && spec.tools.some(t => t.name === name)) {
         let cost = toolCost(name);
         // 历史序列当天已付过：Agent 分段取同一份数据不重复扣（见 billing.DAY_PASS_TOOLS）
         if (cost > 0 && isDayPassTool(name)) {
           try {
-            if (await rt.billing.paidToday(userId, name)) cost = 0;
+            if (await rt.billing.paidToday(userId, name)) {
+              cost = 0;
+              billingKind = 'day_pass';
+            }
           } catch {
             /* 查不到就按正常扣点，不因此放行或报错 */
           }
@@ -365,6 +404,7 @@ export async function handleMcpHttp(
           }
           charged = cost;
           chargedTool = name;
+          billingKind = 'charged';
           notice = lowBalanceNotice(left, cost, product);
           if (notice)
             await track(rt, {
@@ -386,6 +426,14 @@ export async function handleMcpHttp(
         // 失败会退点，所以只有成功调用记实扣
         cost: rec.ok ? charged : 0,
         client,
+        userId,
+        tier: callTier,
+        billing: !rec.ok && charged ? 'refunded' : billingKind,
+        args: argsJson(summarizeArgs(rec.args)),
+        argsHash: rec.args ? argsHash(rec.args) : null,
+        resultChars: rec.resultChars ?? null,
+        resultItems: rec.ok ? countItems(rec.data) : null,
+        errKind: rec.ok ? null : errKind(rec.error),
       })
     );
     // 工具失败（参数错、上游报错）不收费
@@ -527,6 +575,16 @@ async function handleAdmin(
       req
     );
     if (billingOut) return sendJson(res, billingOut.status, billingOut.body);
+    if (path === '/mcp/admin/analytics/paid' && method === 'GET') {
+      if (!rt.analytics)
+        return sendJson(res, 503, { success: false, message: '埋点未启用' });
+      return sendJson(res, 200, {
+        success: true,
+        data: await rt.analytics.paidUsage(
+          Number(url.searchParams.get('days') || 30)
+        ),
+      });
+    }
     if (path === '/mcp/admin/analytics' && method === 'GET') {
       if (!rt.analytics)
         return sendJson(res, 503, { success: false, message: '埋点未启用' });

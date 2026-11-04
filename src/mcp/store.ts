@@ -142,6 +142,26 @@ export class McpStore {
           adds.push('ADD COLUMN cost INT NOT NULL DEFAULT 0');
         if (!logNames.has('client'))
           adds.push('ADD COLUMN client VARCHAR(64) NULL');
+        // 第六版（付费用户使用画像，2026-11-04）：调用时的账户/档位、计费口径、参数摘要、
+        // 参数哈希（判重复调用）、结果长度与条数、报错归类。字段口径见 ./usage.ts
+        if (!logNames.has('user_id'))
+          adds.push(
+            'ADD COLUMN user_id VARCHAR(64) NULL',
+            'ADD KEY idx_mcp_log_user_time (user_id, created_at)'
+          );
+        if (!logNames.has('tier')) adds.push('ADD COLUMN tier VARCHAR(8) NULL');
+        if (!logNames.has('billing'))
+          adds.push('ADD COLUMN billing VARCHAR(12) NULL');
+        if (!logNames.has('args'))
+          adds.push('ADD COLUMN args VARCHAR(300) NULL');
+        if (!logNames.has('args_hash'))
+          adds.push('ADD COLUMN args_hash CHAR(16) NULL');
+        if (!logNames.has('result_chars'))
+          adds.push('ADD COLUMN result_chars INT NULL');
+        if (!logNames.has('result_items'))
+          adds.push('ADD COLUMN result_items INT NULL');
+        if (!logNames.has('err_kind'))
+          adds.push('ADD COLUMN err_kind VARCHAR(16) NULL');
         if (adds.length)
           await this.q(`ALTER TABLE mcp_call_log ${adds.join(', ')}`);
       })().catch(e => {
@@ -328,10 +348,25 @@ export class McpStore {
     cost?: number;
     /** 客户端标识（X-Journey-Client 或 User-Agent 首段） */
     client?: string | null;
+    /** 以下为第六版使用画像字段，口径见 ./usage.ts */
+    userId?: string | null;
+    tier?: string | null;
+    billing?: string | null;
+    args?: string | null;
+    argsHash?: string | null;
+    resultChars?: number | null;
+    resultItems?: number | null;
+    errKind?: string | null;
   }) {
     await this.ensureSchema();
+    const n = (v: any) =>
+      v === undefined || v === null || !Number.isFinite(Number(v))
+        ? null
+        : Math.round(Number(v));
     await this.q(
-      'INSERT INTO mcp_call_log (key_id, product, tool, ok, latency_ms, error, cost, client) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO mcp_call_log (key_id, product, tool, ok, latency_ms, error, cost, client, ' +
+        'user_id, tier, billing, args, args_hash, result_chars, result_items, err_kind) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         p.keyId,
         p.product,
@@ -341,6 +376,14 @@ export class McpStore {
         p.error ? p.error.slice(0, 300) : null,
         Math.max(0, Math.round(p.cost || 0)),
         p.client ? p.client.slice(0, 64) : null,
+        p.userId ? String(p.userId).slice(0, 64) : null,
+        p.tier ? String(p.tier).slice(0, 8) : null,
+        p.billing ? String(p.billing).slice(0, 12) : null,
+        p.args ? String(p.args).slice(0, 300) : null,
+        p.argsHash ? String(p.argsHash).slice(0, 16) : null,
+        n(p.resultChars),
+        n(p.resultItems),
+        p.errKind ? String(p.errKind).slice(0, 16) : null,
       ]
     );
     await this.q('UPDATE mcp_api_key SET last_used_at = NOW() WHERE id = ?', [

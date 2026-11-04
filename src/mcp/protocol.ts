@@ -47,6 +47,14 @@ export interface CallRecord {
   ok: boolean;
   latencyMs: number;
   error?: string;
+  /** 调用参数（原样交给调用方，由调用方摘要后落库，不在这里决定记什么） */
+  args?: Record<string, any>;
+  /** 返回文本长度（字符） */
+  resultChars?: number;
+  /** 返回结果原始数据（调用方据此数条数；不落库） */
+  data?: any;
+  /** 结果是否因过长被截断 */
+  truncated?: boolean;
 }
 
 /** 单条结果文本上限：防止一次调用把 Agent 的上下文塞爆。 */
@@ -176,6 +184,7 @@ export async function handleMessage<D>(
           ok: false,
           latencyMs: 0,
           error: invalid,
+          args,
         });
         return rpcResult(id, {
           content: [{ type: 'text', text: invalid }],
@@ -184,12 +193,19 @@ export async function handleMessage<D>(
       }
       try {
         const data = await tool.handler(args, deps);
+        const latencyMs = Date.now() - t0;
+        const result = toToolResult(data);
+        const text = String(result.content?.[0]?.text || '');
         await safe(onCall, {
           tool: name,
           ok: true,
-          latencyMs: Date.now() - t0,
+          latencyMs,
+          args,
+          data,
+          resultChars: text.length,
+          truncated: text.length > MAX_TEXT_CHARS,
         });
-        return rpcResult(id, toToolResult(data));
+        return rpcResult(id, result);
       } catch (e: any) {
         const message =
           e instanceof ToolError
@@ -200,6 +216,7 @@ export async function handleMessage<D>(
           ok: false,
           latencyMs: Date.now() - t0,
           error: message,
+          args,
         });
         return rpcResult(id, {
           content: [{ type: 'text', text: message }],
