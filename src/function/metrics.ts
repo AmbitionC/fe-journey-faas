@@ -12,6 +12,7 @@ import { RedisService } from '@midwayjs/redis';
 import { MetricsService } from '../service/metrics';
 import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
+import { clientIpFromCtx } from '../common/clientIp';
 
 class TrackDTO {
   event: string;
@@ -61,7 +62,7 @@ export class MetricsHTTPService {
   async track(@Body(ALL) body: TrackDTO) {
     if (!body?.event) return { success: true, data: {} };
     const ip =
-      this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() || this.ctx.ip || '';
+      clientIpFromCtx(this.ctx);
     // 游客要落 `guest:<ip>`——event_log.userId 的列注释从建表起就写着
     // 「手机号 或 guest:ip」，复盘手册 §3.1 的 UV 口径也照此写，但在
     // 2026-09-06 之前**没有任何地方真的写过 guest 形态**：前端 getUserId()

@@ -41,6 +41,8 @@ import {
   hasValidMemberColumn,
   MembershipConfig,
 } from '../common/membership';
+import { clampMessages, clampTask } from '../service/ai/irisGuard';
+import { clientIpFromCtx } from '../common/clientIp';
 
 class AIChatDTO {
   messages: ChatMessage[];
@@ -129,6 +131,16 @@ class AIConversationDTO {
   title?: string;
   page?: number;
   pageSize?: number;
+}
+
+
+/** 客户端传来的长文本一律裁剪（messages 走 clampMessages，其余字符串字段截断），见 irisGuard.ts。 */
+function guardBody<T>(body: T): T {
+  if (!body || typeof body !== 'object') return body;
+  const b: any = clampTask(body as any);
+  if (Array.isArray((body as any).messages)) b.messages = clampMessages((body as any).messages);
+  if ((body as any).task && typeof (body as any).task === 'object') b.task = clampTask((body as any).task);
+  return b as T;
 }
 
 @Provide()
@@ -221,8 +233,7 @@ export class AiHTTPService {
         /* 解析失败则降级为游客 */
       }
     }
-    const fwd = this.ctx.headers['x-forwarded-for'] as string;
-    const ip = (fwd ? fwd.split(',')[0].trim() : '') || this.ctx.ip || 'anonymous';
+    const ip = clientIpFromCtx(this.ctx);
     // 限时免费：游客也按会员对待（AI 无限）
     return { userId: `guest:${ip}`, isMember: !!isMembershipFree(this.membershipConfig) };
   }
@@ -264,6 +275,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiChat(@Body(ALL) body: AIChatDTO) {
+    body = guardBody(body);
     if (!Array.isArray(body.messages)) body.messages = [];
     const { userId, isMember } = await this.resolveUser();
     const charge = await this.irisCredit.begin(userId, isMember, body.deepThink === true ? 'think' : 'chat');
@@ -405,6 +417,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiChatStream(@Body(ALL) body: AIChatDTO) {
+    body = guardBody(body);
     if (!Array.isArray(body.messages)) body.messages = [];
     const { userId, isMember } = await this.resolveUser();
 
@@ -505,6 +518,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiHint(@Body(ALL) body: AIHintDTO) {
+    body = guardBody(body);
     const { userId, isMember } = await this.resolveUser();
     const charge = await this.irisCredit.begin(userId, isMember, 'chat');
     const content = await this.charged(charge, () => this.aiProxyService.hint(body, userId), (c) => !c);
@@ -520,6 +534,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiReview(@Body(ALL) body: AIReviewDTO) {
+    body = guardBody(body);
     const { userId, isMember } = await this.resolveUser();
     const charge = await this.irisCredit.begin(userId, isMember, 'chat');
     const content = await this.charged(charge, () => this.aiProxyService.review(body, userId), (c) => !c);
@@ -551,6 +566,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiQuizGrade(@Body(ALL) body: AIQuizGradeDTO) {
+    body = guardBody(body);
     const { userId, isMember } = await this.resolveUser();
     const charge = await this.irisCredit.begin(userId, isMember, 'chat');
     const member = isEntitled('personalized_feedback', { isMember });
@@ -588,6 +604,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiCoachTip(@Body(ALL) body: AICoachTipDTO) {
+    body = guardBody(body);
     const { userId } = await this.resolveUser();
     // 游客或零学习记录不打扰
     if (!userId || userId.startsWith('guest:')) return { success: true, data: { tip: '' } };
@@ -632,6 +649,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiCoachWeekly(@Body(ALL) body: AICoachWeeklyDTO) {
+    body = guardBody(body);
     const { userId, isMember } = await this.resolveUser();
     // 游客不生成（无学习数据）；登录用户占用 AI 配额
     if (!userId || userId.startsWith('guest:')) return { success: true, data: { report: '' } };
@@ -664,6 +682,7 @@ export class AiHTTPService {
   })
   @NoAuth()
   async aiInterview(@Body(ALL) body: AIInterviewDTO) {
+    body = guardBody(body);
     const { userId, isMember } = await this.resolveUser();
     // 会员权益网关：非会员返回付费入口标记
     if (!isEntitled('mock_interview', { isMember })) {

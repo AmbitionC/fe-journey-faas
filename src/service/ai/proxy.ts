@@ -7,6 +7,7 @@ import { R } from '../../common/base.error.utils';
 import { AiUsageLogEntity } from '../../entity/aiUsageLog';
 import { AiCallLogEntity } from '../../entity/aiCallLog';
 import { isMembershipFree, MembershipConfig } from '../../common/membership';
+import { IrisGuardService, clampMessages, clampTask } from './irisGuard';
 import {
   buildHintPrompt,
   buildReviewPrompt,
@@ -168,6 +169,9 @@ export class AiProxyService {
   @Inject()
   redisService: RedisService;
 
+  @Inject()
+  irisGuard: IrisGuardService;
+
   @InjectEntityModel(AiUsageLogEntity)
   aiUsageLogModel: Repository<AiUsageLogEntity>;
 
@@ -226,6 +230,8 @@ export class AiProxyService {
   async checkRateLimit(userId: string, isMember: boolean, bucket?: 'aux'): Promise<void> {
     if (isMembershipFree(this.membershipConfig)) return; // 限免期：全员不限流
     if (isMember) return; // members have no limit
+    // 游客的辅助调用（猜你想问）同样计入全站游客兜底
+    if (this.irisGuard) await this.irisGuard.guestPrecheck(userId);
     const limit = this.aiConfig.rateLimit.freeUserPerDay;
     const key = bucket ? `ai:rate:day:${bucket}:${userId}` : `ai:rate:day:${userId}`;
     const current = await this.redisService.incr(key);
@@ -700,6 +706,12 @@ export class AiProxyService {
     } catch {
       // Non-critical: don't fail the request if logging fails
     }
+    // 成本闸记账 + 异常告警（见 irisGuard.ts）；失败不影响请求
+    try {
+      if (this.irisGuard) await this.irisGuard.record(userId, module, tokenUsed);
+    } catch {
+      /* ignore */
+    }
   }
 
   async forward(messages: ChatMessage[], context: ChatContext, userId: string): Promise<string> {
@@ -707,7 +719,7 @@ export class AiProxyService {
 
     const systemPrompt = this.buildSystemPrompt(context);
     const { url, headers } = this.getRequestConfig(false);
-    const body = this.buildRequestBody(messages, systemPrompt, false);
+    const body = this.buildRequestBody(clampMessages(messages), systemPrompt, false);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -791,8 +803,9 @@ export class AiProxyService {
     userId: string,
     deepThink = false
   ): AsyncGenerator<{ content?: string; reasoning?: string }> {
-    const systemPrompt = this.buildSystemPrompt(context);
-    yield* this.streamCore(systemPrompt, messages, context.module, userId, deepThink);
+    const systemPrompt = this.buildSystemPrompt(context || ({} as ChatContext));
+    // 客户端传来的历史一律裁剪（irisGuard.clampMessages）：11-03 单次 50 万 token 就是超长历史
+    yield* this.streamCore(systemPrompt, clampMessages(messages), context?.module, userId, deepThink);
   }
 
   /**
@@ -807,6 +820,7 @@ export class AiProxyService {
   ): AsyncGenerator<{ content?: string; reasoning?: string }> {
     let system: string;
     let user: string;
+    task = clampTask(task);
     if (task.kind === 'hint') {
       ({ system, user } = buildHintPrompt(task));
       deepThink = false;

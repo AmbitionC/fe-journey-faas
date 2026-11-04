@@ -17,6 +17,7 @@ import { InvestDbService } from '../service/invest/db';
 import { R } from '../common/base.error.utils';
 import { recordSignupSource } from '../common/signupSite';
 import { ReferralService } from '../service/referral';
+import { clientIpFromCtx } from '../common/clientIp';
 
 @Provide()
 export class UserHTTPService {
@@ -91,7 +92,7 @@ export class UserHTTPService {
   }
 
   private clientIp(): string {
-    return this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() || this.ctx.ip || '';
+    return clientIpFromCtx(this.ctx);
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -136,8 +137,8 @@ export class UserHTTPService {
    */
   private async guardSignupRate(): Promise<void> {
     const ip =
-      this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() || this.ctx.ip || '';
-    if (!ip) return;
+      clientIpFromCtx(this.ctx);
+    if (!ip || ip === 'anonymous') return;
     const now = new Date();
     const buckets: { key: string; limit: number; ttl: number }[] = [
       { key: `signup:h:${now.toISOString().slice(0, 13)}:${ip}`, limit: 5, ttl: 3600 },

@@ -139,7 +139,8 @@ export function render(
 
 async function defaultSendMail(
   env: Record<string, string | undefined>,
-  m: { to: string; subject: string; text: string }
+  m: { to: string; subject: string; text: string },
+  fromName = '收款提醒'
 ) {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const nodemailer = require('nodemailer');
@@ -156,11 +157,30 @@ async function defaultSendMail(
     socketTimeout: 6000,
   });
   await t.sendMail({
-    from: `"收款提醒" <${user}>`,
+    from: `"${fromName}" <${user}>`,
     to: m.to,
     subject: m.subject,
     text: m.text,
   });
+}
+
+/**
+ * 运维告警邮件（Iris 成本闸等复用）：收件人 PAY_NOTIFY_EMAIL → ALERT_SELFTEST_TO；
+ * 未配置发信或收件人时静默跳过，任何失败都不抛。
+ */
+export async function sendAlertMail(
+  env: Record<string, string | undefined>,
+  subject: string,
+  text: string
+): Promise<'sent' | 'unconfigured' | 'failed'> {
+  const to = (env.PAY_NOTIFY_EMAIL || env.ALERT_SELFTEST_TO || '').trim();
+  if (!to || !(env.DM_SMTP_USER || env.SMTP_USER) || !(env.DM_SMTP_PASS || env.SMTP_PASS)) return 'unconfigured';
+  try {
+    await defaultSendMail(env, { to, subject: `【告警】${subject}`, text }, '运维告警');
+    return 'sent';
+  } catch {
+    return 'failed';
+  }
 }
 
 export class PayNotifier {

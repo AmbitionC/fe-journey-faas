@@ -15,6 +15,7 @@ import { EntitlementService } from '../service/entitlement';
 import { MetricsService } from '../service/metrics';
 import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { NoAuth } from '../decorator/noAuth';
+import { clientIpFromCtx } from '../common/clientIp';
 
 @Provide()
 export class MissionHTTPService {
@@ -43,8 +44,7 @@ export class MissionHTTPService {
       const isMember = await this.entitlementService.isMember(info.userId);
       return { userId: info.userId, isMember };
     }
-    const fwd = this.ctx.headers['x-forwarded-for'] as string;
-    const ip = (fwd ? fwd.split(',')[0].trim() : '') || this.ctx.ip || 'anonymous';
+    const ip = clientIpFromCtx(this.ctx);
     const isMember = await this.entitlementService.isMember(`guest:${ip}`);
     return { userId: `guest:${ip}`, isMember };
   }

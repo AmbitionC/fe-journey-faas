@@ -21,6 +21,7 @@ import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
 import { phone as phoneRule } from '../common/common.validate.rules';
 import { recordSignupSource } from '../common/signupSite';
+import { clientIpFromCtx } from '../common/clientIp';
 
 function assertPhone(v: unknown): string {
   const p = String(v || '').trim();
@@ -61,9 +62,7 @@ export class AuthHTTPService {
 
   private clientIp(): string {
     return (
-      this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      this.ctx.ip ||
-      ''
+      clientIpFromCtx(this.ctx)
     );
   }
 
