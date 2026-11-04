@@ -37,15 +37,16 @@ export const TIERS: Record<Tier, TierSpec> = {
   member: { name: '会员', maxKeys: 2, dailyLimit: 1500 },
 };
 
-/** 会员每月发放点数 */
-export const MEMBER_MONTHLY_POINTS = 400;
+/** 会员每月发放点数（2026-11-04 owner：额度加倍，400 → 800） */
+export const MEMBER_MONTHLY_POINTS = 800;
 
 /**
  * 新用户开通赠送的体验点（owner 2026-11-01 改：取消「公测免费不扣点」，改为送少量点、用完充值）。
- * 50 点约够跑通 5~6 次核心场景（一次「搜知识点 + 读两篇 + 查面经」≈ 8 点，
- * 一次「行情快照 + 恐慌 + 乖离率 + 宏观」≈ 7 点）。2026-11-01 前开通的老账户已拿到 100 点，不追回。
+ * 2026-11-04 owner：额度加倍，50 → 100（strategy-builder 这类多步场景一次要十几次调用，50 点跑不完一轮）。
+ * 100 点约够跑通 10 次以上核心场景（一次「搜知识点 + 读两篇 + 查面经」≈ 8 点，
+ * 一次「行情快照 + 恐慌 + 乖离率 + 宏观」≈ 7 点）。存量投资用户已按新额度一次性补齐（invest-model mcp-credit）。
  */
-export const TRIAL_POINTS = 50;
+export const TRIAL_POINTS = 100;
 
 /**
  * @deprecated 充值页按产品取：`siteOf(product).recharge`（./sites.ts）。
@@ -348,6 +349,19 @@ export const TOOL_COST: Record<string, number> = {
   account_usage: 0,
 };
 
+/**
+ * 历史序列类工具「当天只扣一次」（2026-11-04 owner 反馈 strategy-builder 一次没跑完点数就没了）：
+ * 实测一位体验用户在 7 秒里按年分段拉了 25 次 fear_series（全历史一次返回太大，Agent 只能分段取），
+ * 每次 2 点、50 点体验额度全部耗在取同一份数据上，回测还没开始就点数不足。
+ * 同一账户同一工具在同一自然日（库时区＝北京时间）已成功扣过点，再调不扣——按「取一份数据」收费，
+ * 不按 Agent 分几段取收费。失败退点后不算已付（下一次照常扣）。
+ */
+export const DAY_PASS_TOOLS = ['fear_series', 'bias_series', 'macro_series'];
+
+export function isDayPassTool(tool: string): boolean {
+  return DAY_PASS_TOOLS.includes(tool);
+}
+
 export function toolCost(tool: string): number {
   return TOOL_COST[tool] ?? 1;
 }
@@ -591,6 +605,17 @@ export class BillingStore {
   }
 
   /** 工具执行失败时退回已扣点数。 */
+  /** 该工具今天（库时区自然日）是否已净扣过点：扣点次数 > 退点次数。 */
+  async paidToday(userId: string, tool: string): Promise<boolean> {
+    await this.ensureSchema();
+    const rows = await this.q(
+      "SELECT SUM(CASE WHEN reason = 'call' THEN 1 WHEN reason = 'refund' THEN -1 ELSE 0 END) n " +
+        "FROM mcp_points_ledger WHERE user_id = ? AND ref = ? AND reason IN ('call', 'refund') AND created_at >= CURDATE()",
+      [userId, tool]
+    );
+    return Number(rows?.[0]?.n || 0) > 0;
+  }
+
   async refund(userId: string, cost: number, tool: string) {
     if (cost <= 0) return;
     await this.q(

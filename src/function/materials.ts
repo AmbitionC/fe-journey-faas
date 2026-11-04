@@ -58,7 +58,7 @@ export class MaterialsHTTPService {
       listPrice: s.listCents / 100, price: phasePrice(s, phase.id) / 100,
       purchasable: phase.id !== 'free',
     }));
-    // 口径与 Skill 页一致：Skill 已收费（新用户送 50 点），PDF 是会员权益，只有「领取」在 12-01 前对登录用户免费
+    // 口径与 Skill 页一致：Skill 已收费（新用户送体验点），PDF 是会员权益，只有「领取」在 12-01 前对登录用户免费
     const message = freeClaim
       ? '12 月 1 日前登录即可免费领取全部 PDF；之后仅会员可下载。开通会员现在享早期用户半价，Skill 点数一并到账。'
       : '开通会员即可下载全部 PDF；已购 ¥9.9 资料的用户继续可下载。';
