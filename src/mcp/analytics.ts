@@ -5,6 +5,7 @@ import {
   entryFromProps,
   type OrderEntry,
 } from './attribution';
+import { findSku } from './billing';
 
 /**
  * 两个 Skill（Agent Journey / Invest Journey）的全链路埋点（owner 2026-11-01：
@@ -764,6 +765,7 @@ export class Analytics {
         paidAt: r.paid_at,
         orderNo: paid.orderNo || null,
         sku: paid.sku || null,
+        skuName: paid.sku ? findSku(String(paid.sku))?.name || paid.sku : null,
         amountCents: num(paid.amountCents),
         channel: paid.channel || null,
         site: created.site || paid.site || null,
