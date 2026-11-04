@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
 import { fakeAlipayCfg } from './fakeAlipay';
 import { McpStore, ApiKeyRow } from '../src/mcp/store';
-import { BillingStore } from '../src/mcp/billing';
+import { BillingStore, toolCost } from '../src/mcp/billing';
 import {
   Analytics,
   cleanProps,
@@ -150,7 +150,7 @@ describe('MCP 埋点：后端节点', () => {
     const { rt, logs } = fakeRt({ points: 10 });
     await run(rt, { headers: auth, body: call('market_snapshot') });
     assert.strictEqual(logs.length, 1);
-    assert.deepStrictEqual([logs[0].ok, logs[0].cost, logs[0].client], [true, 2, 'plugin/invest-journey@0.2.0']);
+    assert.deepStrictEqual([logs[0].ok, logs[0].cost, logs[0].client], [true, toolCost('market_snapshot'), 'plugin/invest-journey@0.2.0']);
   });
 
   it('失败调用退点，日志实扣记 0', async () => {
@@ -165,7 +165,7 @@ describe('MCP 埋点：后端节点', () => {
     const r = await run(rt, { headers: auth, body: call('market_snapshot') });
     assert.strictEqual(r.json.result.isError, true);
     const e = events.find(x => x.event === 'credit_exhausted')!;
-    assert.deepStrictEqual(e.props, { tool: 'market_snapshot', cost: 2, balance: 1, tier: 'free', phase: 'half' });
+    assert.deepStrictEqual(e.props, { tool: 'market_snapshot', cost: toolCost('market_snapshot'), balance: 1, tier: 'free', phase: 'half' });
     assert.strictEqual(e.userId, 'u1');
   });
 

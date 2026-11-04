@@ -4,6 +4,7 @@ import {
   SKUS,
   TIERS,
   TRIAL_POINTS,
+  TRIAL_DAYS,
   DAY_PASS_TOOLS,
   currentPhase,
   phasePrice,
@@ -101,7 +102,8 @@ export function pricing(
         : '1 点 ≈ ¥0.1，按调用扣点，失败自动退点',
     dayPassTools: product === 'invest' ? DAY_PASS_TOOLS : [],
     trialPoints: TRIAL_POINTS,
-    trialNote: `新用户开通即送 ${TRIAL_POINTS} 点体验额度，用完需开通会员或购买加油包`,
+    trialDays: TRIAL_DAYS,
+    trialNote: `新用户开通即送 ${TRIAL_POINTS} 点体验额度，${TRIAL_DAYS} 天内有效；用完或到期后需开通会员或购买加油包`,
     product,
     rechargeUrl: siteOf(product).recharge,
     tiers: Object.entries(TIERS).map(([id, t]) => ({ id, ...t })),
@@ -392,6 +394,9 @@ export async function handleSelfServe(
                 tierExpireAt: account.active ? account.tier_expire_at : null,
                 nextGrantAt: account.active ? account.next_grant_at : null,
                 monthlyPoints: account.active ? account.monthly_points : 0,
+                // 体验点（到期清零的部分）与到期时间（2026-11-04 体验点 14 天有效）
+                trialPoints: account.trial_points,
+                trialExpireAt: account.trial_expire_at,
                 maxKeys: TIERS[tier].maxKeys,
                 dailyLimit: TIERS[tier].dailyLimit,
               }
@@ -422,7 +427,7 @@ export async function handleSelfServe(
         success: true,
         data: { created, trialPoints: created ? TRIAL_POINTS : 0 },
         message: created
-          ? `已开通，赠送 ${TRIAL_POINTS} 点体验额度`
+          ? `已开通，赠送 ${TRIAL_POINTS} 点体验额度（${TRIAL_DAYS} 天内有效）`
           : '已开通过',
       });
     }

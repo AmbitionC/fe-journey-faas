@@ -682,6 +682,9 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       plan: TIERS[tier].name,
       planExpireAt: acct?.active ? acct.tier_expire_at : null,
       points: acct?.points ?? 0,
+      // 体验点（14 天到期清零的那部分）与到期时间，让 Agent 能告诉用户「还剩几天」
+      trialPoints: acct?.trial_points ?? 0,
+      trialExpireAt: acct?.trial_expire_at ?? null,
       dailyLimit: TIERS[tier].dailyLimit,
       // 管理页与充值页按产品：Invest 的 Key 不把用户引到 Agent Journey
       manage: siteOf(product).manage,

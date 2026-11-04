@@ -311,9 +311,10 @@ export class InvestHTTPService {
     method: 'get',
   })
   async alertPrefGet() {
-    const uid = String(this.ctx?.userInfo?.userId || '');
+    const { uid, isMember } = await this.memberState();
     if (!uid) return { success: false, message: '未登录' };
-    return { success: true, data: await this.insightService.getAlertPref(uid) };
+    // member：邮件/微信外送只投递会员（2026-11-04 owner），订阅页据此提示开会员
+    return { success: true, data: { ...(await this.insightService.getAlertPref(uid)), member: isMember } };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
