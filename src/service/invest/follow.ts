@@ -102,6 +102,10 @@ export class InvestFollowService {
     } catch {
       legs = [];
     }
+    // 判定日＝状态表与信号表两者较新的那一天。信号表只有「有信号的日子」才有行，不能拿它的
+    // MAX 当判定日：没信号的日子一多，页面就会一直把最后一次信号当「今天的动作」
+    // （2026-11-04 实测：11-02/11-03 无信号，页面仍显示 10-30 的两条、「11-02 收盘前完成」）。
+    // 仍兼顾同一班次「信号表先写、状态表后写」的间隙：信号表更新时以它为准。
     let today: any[] = [];
     let sigDate: string | null = null;
     try {
@@ -109,12 +113,20 @@ export class InvestFollowService {
         'SELECT MAX(signal_date) d FROM broad_signal'
       );
       sigDate = last?.d ? String(last.d) : null;
-      // 信号表与状态表都由同一班次写；以信号表自己的最新日为准，避免状态表先写、信号表后写时漏掉当日信号
-      if (sigDate) {
+    } catch {
+      sigDate = null;
+    }
+    const base =
+      [date, sigDate]
+        .filter((d): d is string => !!d)
+        .sort()
+        .pop() || null;
+    try {
+      if (base) {
         today = await this.db.q(
           'SELECT signal_date, leg, kind, seq, exec_date, etf, side, frac, why, close, fear, ref_line, ' +
             'engine_fired FROM broad_signal WHERE signal_date = ? ORDER BY leg, seq',
-          [sigDate]
+          [base]
         );
       }
     } catch {
@@ -141,7 +153,6 @@ export class InvestFollowService {
     } catch {
       /* 无表时不显示 */
     }
-    const base = sigDate || date;
     let openDays: string[] = [];
     try {
       const rows = await this.db.q(
@@ -152,9 +163,8 @@ export class InvestFollowService {
     } catch {
       openDays = [];
     }
-    const execDate = today[0]?.exec_date
-      ? String(today[0].exec_date)
-      : openDays.find(d => d > (base || '')) || null;
+    // 执行日只在有信号时才有意义；没信号就不给（前端据此不显示「X 收盘前完成」）
+    const execDate = today[0]?.exec_date ? String(today[0].exec_date) : null;
     const check = base
       ? nextCheckDates(openDays, base)
       : { weekEnd: null, monthEnd: null };
@@ -180,6 +190,8 @@ export class InvestFollowService {
     return {
       date: base,
       state_date: date,
+      signal_date: sigDate,
+      today_bj: beijingDay(),
       exec_date: execDate,
       next_check: { week_end: check.weekEnd, month_end: check.monthEnd },
       legs,
@@ -312,7 +324,9 @@ export class InvestFollowService {
         // 兜底字段写失败不影响页面
       }
     }
-    const todayBase = market.date || beijingDay();
+    // 估值与换算用「今天（北京）之前最新的 ETF 收盘」，不用判定日：判定日是信号口径，
+    // 收盘价表可能已经比它新（周更/补数场景），估值永远取最新可得的那一天。
+    const todayBase = beijingDay();
     if (!prof) {
       return {
         member: true,
@@ -388,10 +402,47 @@ export class InvestFollowService {
     const recorded = new Set(
       execAll.map(r => `${r.leg}|${r.signal_date}|${r.kind}`)
     );
-    const todo: PlanSignal[] = market.today
+    const unrecorded = market.today.filter(
+      s => !recorded.has(`${s.leg}|${s.signal_date}|${s.kind}`)
+    );
+    const todo: PlanSignal[] = unrecorded
       .filter(s => status === 'active' && (s.exec_date || '') >= startDate)
-      .filter(s => !recorded.has(`${s.leg}|${s.signal_date}|${s.kind}`))
       .map(s => ({ ...s }));
+    // 今天有信号但不在你的账本里的两种情况，也要给出一句话，否则页面只见「有动作」不见金额
+    // （2026-11-04 实测：11-03 起步的人看到 10-30 的信号却没有任何换算与解释）
+    const fmtDay = (d: string) =>
+      d && d.length === 8
+        ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`
+        : d;
+    const mine = new Set(
+      todo.map((t: any) => `${t.leg}|${t.signal_date}|${t.kind}`)
+    );
+    const notMine = unrecorded
+      .filter(s => !mine.has(`${s.leg}|${s.signal_date}|${s.kind}`))
+      .map(s => {
+        const name = `${
+          ETF_NAME[String(s.etf || LEG_ETF[s.leg] || '')] || s.leg
+        }（${String(s.etf || LEG_ETF[s.leg] || '').split('.')[0]}）`;
+        const beforeStart = (s.exec_date || '') < startDate;
+        return {
+          ...(s as any),
+          shares: 0,
+          amount: 0,
+          fee: 0,
+          skipped: true,
+          reason: beforeStart ? '起步前触发' : '已暂停',
+          text: beforeStart
+            ? `${name}：这笔在你 ${fmtDay(
+                startDate
+              )} 起步之前触发（执行日 ${fmtDay(
+                String(s.exec_date || '')
+              )}），不补发，不在你的账本里`
+            : `${name}：跟车已暂停，这笔不换算、不记账`,
+          cashAfter: actual.cash,
+          unitsAfter: actual.units[s.leg] || 0,
+          price_basis: null,
+        };
+      });
     const plan = dayPlan(
       actual.cash,
       actual.units,
@@ -400,8 +451,8 @@ export class InvestFollowService {
       feeRate,
       minFee
     );
-    const adviceOf = (leg: string) =>
-      plan.items
+    const adviceOf = (leg: string) => [
+      ...plan.items
         .filter(i => i.sig.leg === leg)
         .map(i => ({
           ...(i.sig as any),
@@ -414,7 +465,9 @@ export class InvestFollowService {
           cashAfter: i.cashAfter,
           unitsAfter: i.unitsAfter,
           price_basis: priceByLeg[leg],
-        }));
+        })),
+      ...notMine.filter(i => i.leg === leg),
+    ];
     const hasAllPrices = LEG_ORDER.every(
       leg =>
         pxOf(leg) != null ||
@@ -463,7 +516,14 @@ export class InvestFollowService {
       };
     });
     const series = navSeries(principal, execAll, closesByLeg, flows);
-    const lastDate = series.length ? series[series.length - 1].date : todayBase;
+    const latestPriceDay =
+      LEG_ORDER.map(l => priceByLeg[l]?.date || '')
+        .filter(Boolean)
+        .sort()
+        .pop() || null;
+    const lastDate = series.length
+      ? series[series.length - 1].date
+      : latestPriceDay || market.date || todayBase;
     const allFlows: { date: string; amount: number }[] = [
       { date: startDate, amount: -principal },
     ];
@@ -477,9 +537,8 @@ export class InvestFollowService {
               a.date.localeCompare(b.date)
             )
           );
-    const actions = plan.items.filter(
-      i => !(i.skipped && i.reason === '没有该指数持仓')
-    );
+    // 你今天真要动手的笔数：按规则跳过的（没有持仓 / 不足一手）、起步前的、暂停的都不算
+    const actions = plan.items.filter(i => !i.skipped);
     const totals = {
       principal,
       net_in: netIn,

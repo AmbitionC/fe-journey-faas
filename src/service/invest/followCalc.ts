@@ -502,7 +502,9 @@ export function nextCheckDates(
   openDays: string[],
   today: string
 ): { weekEnd: string | null; monthEnd: string | null } {
-  const days = openDays.filter(d => d >= today).sort();
+  // 「下次」检查日：严格晚于判定日。判定日本身是周五/月末时，它的检查已经做过（信号已出），
+  // 再把它当「下次」会让页面在之后几天一直显示一个过去的日期（2026-11-04 实测）。
+  const days = openDays.filter(d => d > today).sort();
   let weekEnd: string | null = null;
   let monthEnd: string | null = null;
   for (let i = 0; i + 1 < days.length; i += 1) {
