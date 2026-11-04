@@ -25,6 +25,7 @@ import {
   withinAlipayLimit,
 } from './alipay';
 import { track } from './analytics';
+import { describeEntry, entryProps, sanitizeEntry } from './attribution';
 import { notifySafely, PayEvent } from './payNotify';
 import type { Product } from './store';
 import { isProduct, payReturnUrl, siteOf } from './sites';
@@ -141,6 +142,15 @@ function alipayOverLimit(rt: McpRuntime, o: any): boolean {
  * 发货的唯一入口（支付宝通知、跳回查单、管理员确认、自报即发都走这里），
  * 真正发货（'ok'）时记 order_paid，重复确认不重复记。
  */
+/** 下单时记下的来源；埋点没装配或查不到都返回 null，绝不影响发货。 */
+async function orderSource(rt: McpRuntime, orderNo: string) {
+  try {
+    return (await rt.analytics?.orderEntry?.(orderNo)) || null;
+  } catch {
+    return null;
+  }
+}
+
 async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
   const r = await rt.billing.fulfill(orderNo, actor);
   if (r === 'ok') {
@@ -158,17 +168,25 @@ async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
         });
       }
     }
+    // 下单时记下的来源，跟着到账事件和收款提醒一起走（查不到不影响发货）
+    const src = await orderSource(rt, orderNo);
     // 收款提醒：只提醒支付宝到账（管理员手动确认是站长自己点的；自报即发在自报那一步已提醒）
     if (o && actor.startsWith('alipay:'))
-      await notifySafely(rt.payNotify, payEventOf(o, 'paid', 'alipay'));
+      await notifySafely(rt.payNotify, {
+        ...payEventOf(o, 'paid', 'alipay'),
+        source: describeEntry(src?.entry),
+      });
     await track(rt, {
       event: 'order_paid',
       userId: o?.user_id || null,
+      product: (src?.site as any) || null,
       props: {
         orderNo,
         sku: o?.sku || null,
         amountCents: o ? Number(o.amount_cents) : null,
         channel: paidVia(actor),
+        site: src?.site || null,
+        ...entryProps(src?.entry || null),
       },
     });
   }
@@ -454,10 +472,13 @@ export async function handleSelfServe(
       await trackActivation(rt, userId, !!act?.created, 'order');
       const amount = phasePrice(sku, phase.id);
       const site = siteParam(data);
+      const entry = sanitizeEntry(data.entry);
       const o = await rt.billing.createOrder(userId, sku, amount);
       await track(rt, {
         event: 'order_created',
         userId,
+        product: site,
+        anonId: entry?.anonId || null,
         props: {
           orderNo: o.order_no,
           sku: sku.sku,
@@ -466,6 +487,7 @@ export async function handleSelfServe(
           phase: phase.id,
           reused: !!o.reused,
           site,
+          ...entryProps(entry),
         },
       });
       const payUrl = alipayUrlOf(rt, o, site, data.returnPath);
@@ -507,11 +529,13 @@ export async function handleSelfServe(
         props: { orderNo, channel: 'wechat_qr' },
       });
       const reported = await rt.billing.getOrder(orderNo);
-      if (reported)
-        await notifySafely(
-          rt.payNotify,
-          payEventOf(reported, 'reported', 'wechat')
-        );
+      if (reported) {
+        const src = await orderSource(rt, orderNo);
+        await notifySafely(rt.payNotify, {
+          ...payEventOf(reported, 'reported', 'wechat'),
+          source: describeEntry(src?.entry),
+        });
+      }
       if (rt.autoFulfill) await fulfillTracked(rt, orderNo, 'auto');
       const o = await rt.billing.getOrder(orderNo);
       return send(res, 200, {

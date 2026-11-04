@@ -1,4 +1,11 @@
 import type { QueryFn } from './store';
+import {
+  ctaLabel,
+  describeEntry,
+  entryFromProps,
+  type OrderEntry,
+} from './attribution';
+import { findSku } from './billing';
 
 /**
  * 两个 Skill（Agent Journey / Invest Journey）的全链路埋点（owner 2026-11-01：
@@ -40,10 +47,12 @@ export interface TrackInput {
  * - quota_exceeded       { tool, limit, tier }
  * - credit_exhausted     { tool, cost, balance, tier, phase }
  * - credit_low           { tool, cost, balance, tier }  余额第一次跌破 10 点，工具结果末尾附提醒
- * - order_created        { orderNo, sku, amountCents, listCents, phase, reused }
+ * - order_created        { orderNo, sku, amountCents, listCents, phase, reused, site,
+ *                          entryPage, entryCta, entryFrom, ftRef, ftLanding, ftCh, ftMedium, ftCampaign, ftDays, device }
+ *                          （来源字段见 attribution.ts；anon_id 列记下单访客，串起下单前的匿名浏览）
  * - pay_link_issued      { orderNo, channel: 'alipay' }
  * - order_reported       { orderNo }
- * - order_paid           { orderNo, sku, amountCents, channel: 'alipay'|'manual'|'auto' }
+ * - order_paid           { orderNo, sku, amountCents, channel: 'alipay'|'manual'|'auto', site, ...同 order_created 的来源字段 }
  * - order_rejected       { orderNo }
  * - oauth_register       { clientName }                       客户端动态注册（一句话安装后第一次连接）
  * - oauth_authorize      { clientName }                       客户端把用户送到授权页
@@ -440,6 +449,7 @@ export class Analytics {
       sources: await this.sources(d, product),
       interactions: await this.interactions(d, product),
       payments: await this.payments(d),
+      paidEntries: await this.paidEntries(d),
       errors: await this.errors(d, product),
       daily: await this.dailyEvents(d, product),
     };
@@ -707,6 +717,85 @@ export class Analytics {
       n: num(r.n),
       visitors: num(r.visitors),
     }));
+  }
+
+  /** 某笔订单下单时记下的来源（order_created 里的 entry 字段）；没有返回 null。 */
+  async orderEntry(
+    orderNo: string
+  ): Promise<{ site: string | null; entry: OrderEntry | null } | null> {
+    try {
+      const rows = await this.q(
+        "SELECT props FROM mcp_event WHERE event = 'order_created' AND props LIKE ? ORDER BY id ASC LIMIT 1",
+        [`%"orderNo":"${String(orderNo).replace(/[^A-Za-z0-9]/g, '')}"%`]
+      );
+      const raw = rows?.[0]?.props;
+      if (!raw) return null;
+      const p = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return { site: p?.site || null, entry: entryFromProps(p) };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 付费来源：窗口内到账的订单逐笔列出（不含 1 分钱测试单），带下单时的来源字段，
+   * 外加按「站内入口」「首触来源」两个维度的汇总。管理后台「漏斗与留存 › 付费来源」。
+   */
+  async paidEntries(d: number) {
+    const rows = await this.q(
+      'SELECT p.created_at paid_at, p.user_id, p.props paid, c.props created FROM mcp_event p ' +
+        "LEFT JOIN mcp_event c ON c.event = 'order_created' AND c.id = (SELECT MIN(c2.id) FROM mcp_event c2 " +
+        "WHERE c2.event = 'order_created' AND JSON_UNQUOTE(JSON_EXTRACT(c2.props, '$.orderNo')) = JSON_UNQUOTE(JSON_EXTRACT(p.props, '$.orderNo'))) " +
+        "WHERE p.event = 'order_paid' AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.props, '$.sku')), '') <> 'pay_test' " +
+        'AND p.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) ORDER BY p.id DESC LIMIT 200',
+      [d]
+    );
+    const parse = (v: any) => {
+      try {
+        return v ? (typeof v === 'string' ? JSON.parse(v) : v) : {};
+      } catch {
+        return {};
+      }
+    };
+    const list = (rows || []).map((r: any) => {
+      const paid = parse(r.paid);
+      const created = parse(r.created);
+      const entry = entryFromProps(created);
+      return {
+        paidAt: r.paid_at,
+        orderNo: paid.orderNo || null,
+        sku: paid.sku || null,
+        skuName: paid.sku ? findSku(String(paid.sku))?.name || paid.sku : null,
+        amountCents: num(paid.amountCents),
+        channel: paid.channel || null,
+        site: created.site || paid.site || null,
+        entry,
+        summary: describeEntry(entry),
+      };
+    });
+    const group = (key: (x: (typeof list)[number]) => string) => {
+      const g = new Map<string, { n: number; cents: number }>();
+      for (const x of list) {
+        const k = key(x);
+        const cur = g.get(k) || { n: 0, cents: 0 };
+        cur.n += 1;
+        cur.cents += x.amountCents;
+        g.set(k, cur);
+      }
+      return [...g.entries()]
+        .map(([k, v]) => ({ key: k, ...v }))
+        .sort((a, b) => b.cents - a.cents);
+    };
+    return {
+      list: list.slice(0, 50),
+      byCta: group(
+        x => x.entry?.entryCta || x.entry?.entryFrom || '未记录'
+      ).map(g => ({ ...g, label: ctaLabel(g.key) || g.key })),
+      byFirstTouch: group(
+        x =>
+          x.entry?.ftCh || x.entry?.ftRef || (x.entry ? '直接访问' : '未记录')
+      ),
+    };
   }
 
   /** 付款：按渠道看下单 → 拿到付款链接 → 自报 → 到账。 */
