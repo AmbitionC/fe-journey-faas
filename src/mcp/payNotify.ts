@@ -30,6 +30,8 @@ export interface PayEvent {
   userId: string | null;
   /** alipay | wechat */
   channel: 'alipay' | 'wechat';
+  /** 一行人话的来源（下单入口 + 首触来源），见 attribution.describeEntry */
+  source?: string | null;
 }
 
 type Query = (sql: string, params?: any[]) => Promise<any>;
@@ -112,13 +114,14 @@ export function render(
       : `${tag}待核对：用户称已微信付款 ¥${amount} · ${ev.skuName}`;
   const lines = [
     ev.kind === 'paid'
-      ? `支付宝已到账，点数/会员已自动发放。`
-      : `用户点了「我已支付」（微信扫码）。请到微信收款记录核对备注，确认到账后在后台「开发者服务 > 订单」点确认发放。`,
+      ? '支付宝已到账，点数/会员已自动发放。'
+      : '用户点了「我已支付」（微信扫码）。请到微信收款记录核对备注，确认到账后在后台「开发者服务 > 订单」点确认发放。',
     '',
     `商品：${ev.skuName}`,
     `金额：¥${amount}`,
     `用户：${who}`,
     `订单号：${ev.orderNo}`,
+    ...(ev.source ? [`来源：${ev.source}`] : []),
     `时间：${bjClock(now)}（北京时间）`,
   ];
   if (test)

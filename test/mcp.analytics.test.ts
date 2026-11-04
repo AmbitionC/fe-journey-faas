@@ -290,4 +290,31 @@ describe('MCP 埋点：看板（真 MySQL）', function () {
     const na = Object.fromEntries(ag.funnel.map((s: any) => [s.step, s.n]));
     assert.deepStrictEqual([na.visit, na.first_call, na.activated], [0, 0, 2]);
   });
+
+  it('付费来源：按订单号取回下单来源，看板逐笔列出并按入口 / 首触汇总', async () => {
+    const a = new Analytics(q);
+    const mk = (no: string, extra: any) =>
+      a.track({ event: 'order_created', userId: 'C', product: 'agent', anonId: 'a_zz123456', props: { orderNo: no, sku: 'member_month', amountCents: 1450, site: 'agent', ...extra } });
+    await mk('MJSRC1', { entryPage: 'member', entryCta: 'reading_quota_hint_knowledge', ftRef: 'bing.com', ftLanding: '/developer', ftDays: 2, device: 'desktop' });
+    // 同一订单号复用时会再记一条 order_created，取最早那条
+    await mk('MJSRC1', { entryPage: 'member', entryCta: 'header_desktop' });
+    await mk('MJSRC2', {});
+    await a.track({ event: 'order_paid', userId: 'C', props: { orderNo: 'MJSRC1', sku: 'member_month', amountCents: 1450, channel: 'alipay' } });
+    await a.track({ event: 'order_paid', userId: 'C', props: { orderNo: 'MJSRC2', sku: 'pack_100', amountCents: 690, channel: 'manual' } });
+    await a.track({ event: 'order_paid', userId: 'C', props: { orderNo: 'MJTEST', sku: 'pay_test', amountCents: 1, channel: 'alipay' } });
+
+    const one = await a.orderEntry('MJSRC1');
+    assert.deepStrictEqual(one, { site: 'agent', entry: { entryPage: 'member', entryCta: 'reading_quota_hint_knowledge', ftRef: 'bing.com', ftLanding: '/developer', ftDays: 2, device: 'desktop' } });
+    assert.strictEqual(await a.orderEntry('MJNONE'), null);
+
+    const pe = await a.paidEntries(30);
+    const mine = pe.list.filter((x: any) => String(x.orderNo).startsWith("MJSRC"));
+    assert.deepStrictEqual(mine.map((x: any) => [x.orderNo, x.site, x.entry?.entryCta || null]), [['MJSRC2', 'agent', null], ['MJSRC1', 'agent', 'reading_quota_hint_knowledge']]);
+    assert.ok(mine[1].summary.startsWith('知识点限看提示 → Agent Journey 会员页；首次来自 bing.com'));
+    assert.ok(!pe.list.some((x: any) => x.sku === 'pay_test'));
+    assert.ok(pe.byCta.some((g: any) => g.key === 'reading_quota_hint_knowledge' && g.n === 1 && g.cents === 1450));
+    assert.ok(pe.byFirstTouch.some((g: any) => g.key === 'bing.com'));
+    const d = await a.dashboard(30, null);
+    assert.ok(Array.isArray(d.paidEntries.list));
+  });
 });
