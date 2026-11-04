@@ -6,6 +6,7 @@ import {
   type OrderEntry,
 } from './attribution';
 import { findSku } from './billing';
+import { paidUsage } from './paidUsage';
 
 /**
  * 两个 Skill（Agent Journey / Invest Journey）的全链路埋点（owner 2026-11-01：
@@ -58,6 +59,11 @@ export interface TrackInput {
  * - oauth_authorize      { clientName }                       客户端把用户送到授权页
  * - oauth_approved       { clientName, newAccount }           用户在授权页点了授权
  * （OAuth 换到 token 时另记 key_created { tier, via: 'oauth', clientName }）
+ * - tool_unknown         { name, client }                     客户端调了我们没有的工具（新需求信号）
+ * - method_unsupported   { method, client }                   客户端调了没实现的 MCP 方法（如 resources/list）
+ *
+ * 每次工具调用的「怎么用」（参数摘要、计费口径、结果条数、报错归类）记在 mcp_call_log，
+ * 口径见 ./usage.ts；付费用户视图见 paidUsage()。
  */
 export const SERVER_EVENTS = [
   'trial_granted',
@@ -80,6 +86,8 @@ export const SERVER_EVENTS = [
   'oauth_register',
   'oauth_authorize',
   'oauth_approved',
+  'tool_unknown',
+  'method_unsupported',
 ] as const;
 
 /**
@@ -453,6 +461,12 @@ export class Analytics {
       errors: await this.errors(d, product),
       daily: await this.dailyEvents(d, product),
     };
+  }
+
+  /** 付费用户视图（管理后台「开发者服务 › 付费用户」），见 ./paidUsage.ts */
+  async paidUsage(days = 30) {
+    await this.ensureSchema();
+    return paidUsage(this.q, days);
   }
 
   /** 周留存：按开通周分批，看第 0~4 周各有多少人有成功调用。 */
