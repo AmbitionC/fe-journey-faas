@@ -70,6 +70,11 @@ describe('付费来源：人话描述', () => {
     assert.strictEqual(describeEntry({ entryPage: 'member' }), 'Agent Journey 会员页；首次是直接访问');
     assert.strictEqual(describeEntry(null), '未记录（下单页面没带来源）');
     assert.strictEqual(describeEntry({ entryCta: 'brand_new_button' }), 'brand_new_button；首次是直接访问');
+    assert.strictEqual(
+      describeEntry({ entryPage: 'invest_skills', entryCta: 'page:/market', ftRef: 'xiaohongshu.com', ftDays: 0, device: 'mobile' }),
+      '市场总览页 → Invest Journey 数据服务页；首次来自 xiaohongshu.com（当天） · 手机'
+    );
+    assert.strictEqual(describeEntry({ entryCta: 'page:/foo' }), '站内 /foo 页；首次是直接访问');
   });
 
   it('从事件 props 取回来源字段，不带订单字段', () => {

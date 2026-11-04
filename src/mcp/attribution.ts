@@ -123,8 +123,24 @@ const PAGE_LABELS: Record<string, string> = {
   invest_skills: 'Invest Journey 数据服务页',
 };
 
+const PATH_LABELS: Record<string, string> = {
+  '/': '首页',
+  '/market': '市场总览页',
+  '/broad': '宽基指数页',
+  '/follow': '跟车页',
+  '/alerts': '预警页',
+  '/macro': '宏观数据页',
+  '/ledger': '我的账本',
+  '/profile': '个人中心',
+};
+
 export function ctaLabel(code?: string | null): string | null {
   if (!code) return null;
+  // Invest Journey：进数据服务页之前所在的页面
+  if (code.startsWith('page:')) {
+    const p = code.slice(5);
+    return PATH_LABELS[p] || `站内 ${p} 页`;
+  }
   for (const [re, label] of CTA_LABELS) if (re.test(code)) return label;
   return code;
 }
