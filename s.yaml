@@ -62,7 +62,6 @@ resources:
         INVEST_ADMIN_PHONE: ${env('INVEST_ADMIN_PHONE', '')}
         # 预警推送通道是否已开通（只下发布尔，密钥只在 invest 定时函数里）：订阅页据此显示「开通中」
         ALERT_MAIL_READY: ${env('ALERT_MAIL_READY', '')}
-        ALERT_WX_READY: ${env('ALERT_WX_READY', '')}
         # 短信验证码（阿里云号码认证·短信认证，src/service/auth/sms.ts）。RAM 子账号只授
         # dypns:SendSmsVerifyCode/CheckSmsVerifyCode；三项缺任一＝功能未开通、前端不展示入口。
         SMS_ACCESS_KEY_ID: ${env('SMS_ACCESS_KEY_ID', '')}
@@ -225,7 +224,6 @@ resources:
         DM_SMTP_HOST: ${env('DM_SMTP_HOST', '')}
         DM_SMTP_USER: ${env('DM_SMTP_USER', '')}
         DM_SMTP_PASS: ${env('DM_SMTP_PASS', '')}
-        WXPUSHER_APP_TOKEN: ${env('WXPUSHER_APP_TOKEN', '')}
       triggers:
         - triggerName: market-hours
           triggerType: timer
@@ -283,7 +281,6 @@ resources:
         DM_SMTP_HOST: ${env('DM_SMTP_HOST', '')}
         DM_SMTP_USER: ${env('DM_SMTP_USER', '')}
         DM_SMTP_PASS: ${env('DM_SMTP_PASS', '')}
-        WXPUSHER_APP_TOKEN: ${env('WXPUSHER_APP_TOKEN', '')}
         # 推送自检（alert_selftest）收件地址；空＝发给发信地址自己
         ALERT_SELFTEST_TO: ${env('ALERT_SELFTEST_TO', '')}
       triggers:
