@@ -578,6 +578,9 @@ async function handleAdmin(
     if (path === '/mcp/admin/analytics/paid' && method === 'GET') {
       if (!rt.analytics)
         return sendJson(res, 503, { success: false, message: '埋点未启用' });
+      // 调用日志的画像列在 McpStore.ensureSchema 里补；新实例还没处理过 MCP 调用时这里先补齐
+      if (typeof (rt.store as any).ensureSchema === 'function')
+        await (rt.store as any).ensureSchema();
       return sendJson(res, 200, {
         success: true,
         data: await rt.analytics.paidUsage(
