@@ -16,6 +16,7 @@ import {
   currentPhase,
   effectiveTier,
   toolCost,
+  isDayPassTool,
   creditExhaustedMessage,
 } from './billing';
 import { siteOf } from './sites';
@@ -320,7 +321,15 @@ export async function handleMcpHttp(
       const name = msg.params?.name;
       // 按次扣点（2026-10-31 公测免费那一天除外）；点数用完返回带充值链接的错误。用量照常进调用日志
       if (userId && !free && spec.tools.some(t => t.name === name)) {
-        const cost = toolCost(name);
+        let cost = toolCost(name);
+        // 历史序列当天已付过：Agent 分段取同一份数据不重复扣（见 billing.DAY_PASS_TOOLS）
+        if (cost > 0 && isDayPassTool(name)) {
+          try {
+            if (await rt.billing.paidToday(userId, name)) cost = 0;
+          } catch {
+            /* 查不到就按正常扣点，不因此放行或报错 */
+          }
+        }
         if (cost > 0) {
           let left: number | null;
           try {

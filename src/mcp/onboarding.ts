@@ -17,7 +17,7 @@ export const rechargeLink = (
   product: Product = 'agent'
 ) => siteRechargeLink(from, product);
 
-/** 余额第一次跌破这个数时提醒一次（体验点 50，一次核心场景约 2~8 点） */
+/** 余额第一次跌破这个数时提醒一次（体验点 100，一次核心场景约 2~8 点） */
 export const LOW_POINTS = 10;
 
 const ENV: Record<Product, string> = {

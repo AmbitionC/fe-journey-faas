@@ -4,6 +4,7 @@ import {
   SKUS,
   TIERS,
   TRIAL_POINTS,
+  DAY_PASS_TOOLS,
   currentPhase,
   phasePrice,
   PRICING_PHASES,
@@ -75,7 +76,11 @@ export function pricing(
     phases: PRICING_PHASES.filter(p => p.id !== 'free' || phase.id === 'free'),
     promo: phase.note,
     // 文案不提另一个产品：余额共用是实现细节，不是卖点
-    unit: '1 点 ≈ ¥0.1，按调用扣点，失败自动退点',
+    unit:
+      product === 'invest'
+        ? '1 点 ≈ ¥0.1，按调用扣点，失败自动退点；历史序列（恐慌、乖离率、宏观）同一天只扣一次'
+        : '1 点 ≈ ¥0.1，按调用扣点，失败自动退点',
+    dayPassTools: product === 'invest' ? DAY_PASS_TOOLS : [],
     trialPoints: TRIAL_POINTS,
     trialNote: `新用户开通即送 ${TRIAL_POINTS} 点体验额度，用完需开通会员或购买加油包`,
     product,

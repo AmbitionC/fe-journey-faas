@@ -376,6 +376,9 @@ function fakeBilling(points = 10, tier: any = 'free') {
       state.points += cost;
       state.refunds.push(tool);
     },
+    // 与 BillingStore.paidToday 同口径：当天该工具扣点次数 > 退点次数
+    paidToday: async (_u: string, tool: string) =>
+      state.charges.filter((t: string) => t === tool).length > state.refunds.filter((t: string) => t === tool).length,
     activate: async () => ({ created: true }),
     ledgerOf: async () => [],
     ordersOf: async () => [],
@@ -611,6 +614,30 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(billing.state.points, 10);
     });
 
+    it('历史序列当天只扣一次：Agent 分 25 段拉恐慌全历史只花 2 点（2026-11-04 strategy-builder 事故）', async () => {
+      const { rt, billing } = userRt(50, NOV);
+      for (let y = 2005; y <= 2029; y++) {
+        const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('fear_series', { start: `${y}0101`, end: `${y}1231` }) });
+        assert.ok(!r.json.result.isError);
+      }
+      assert.strictEqual(billing.state.points, 48);
+      // 不同序列各自计一次；快照不在此列，照常按次扣
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('bias_series') });
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('bias_series', { code: '000300.SH' }) });
+      assert.strictEqual(billing.state.points, 46);
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
+      assert.strictEqual(billing.state.points, 42);
+    });
+
+    it('历史序列首调失败退点后不算已付：下一次成功调用照常扣', async () => {
+      const { rt, billing } = userRt(10, NOV);
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('fear_series', { start: 'bad' }) });
+      assert.strictEqual(billing.state.points, 10);
+      await run(rt, { path: '/mcp/invest', headers: auth, body: call('fear_series', { start: '20250101' }) });
+      assert.strictEqual(billing.state.points, 8);
+    });
+
     it('2026-10-31 公测免费那一天不扣点、调用照常记日志', async () => {
       const { rt, billing } = userRt(0, FREE);
       const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
@@ -657,7 +684,7 @@ describe('MCP HTTP 适配', () => {
         assert.strictEqual(half.json.data.phase.id, 'half');
         assert.strictEqual(half.json.data.chargeCalls, true);
         assert.deepStrictEqual(half.json.data.phases.map((p: any) => p.id), ['half', 'full']);
-        assert.strictEqual(half.json.data.trialPoints, 50);
+        assert.strictEqual(half.json.data.trialPoints, 100);
         assert.strictEqual(half.json.data.rechargeUrl, 'https://www.agent-journey.cn/developer#pricing');
         assert.ok(!/Agent|Invest/.test(half.json.data.unit), half.json.data.unit);
         assert.ok(!/免费/.test(half.json.data.promo));
