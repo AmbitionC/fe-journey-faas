@@ -159,3 +159,28 @@ describe('异常告警', () => {
     assert.deepStrictEqual(alerts, []);
   });
 });
+
+describe('线上流式入口（server.js）在检索与落库之前裁剪', () => {
+  it('handleStream 用 clampMessages / clampTask 处理请求体', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'server.js'),
+      'utf8'
+    );
+    const body = src.slice(
+      src.indexOf('async function handleStream'),
+      src.indexOf('async function handleFramework')
+    );
+    const clampAt = body.indexOf('clampMessages(body.messages');
+    assert.ok(clampAt > 0, '没有裁剪 messages');
+    assert.ok(
+      clampAt < body.indexOf('ensureConversation'),
+      '裁剪必须在会话落库之前'
+    );
+    assert.ok(
+      clampAt < body.indexOf('retrieveService.retrieve'),
+      '裁剪必须在检索之前'
+    );
+    assert.ok(/clampTask\(body\.task\)/.test(body), '没有裁剪 task');
+  });
+});

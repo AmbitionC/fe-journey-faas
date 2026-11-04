@@ -13,6 +13,8 @@ const { join } = require('path');
 const { auxModuleFor, auxBucketFor } = require('./dist/common/aiPurpose');
 // 可信客户端 IP（只认接入层追加的 XFF 最右段，见 src/common/clientIp.ts）
 const { clientIpFromReq, describeClientIp } = require('./dist/common/clientIp');
+// 客户端长文本裁剪（见 src/service/ai/irisGuard.ts）：必须在检索、落库之前做
+const { clampMessages, clampTask } = require('./dist/service/ai/irisGuard');
 const { BootstrapStarter } = require('@midwayjs/fc-starter');
 const core = require('@midwayjs/core');
 
@@ -164,7 +166,8 @@ async function handleStream(req, res) {
   res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
-  const messages = body.messages || [];
+  // 先裁剪再用：检索（向量化）与会话落库都吃这份，原样用会把超长文本送去向量化、写进库
+  const messages = clampMessages(body.messages || []);
   const context = body.context || {};
 
   // 取/建会话并落库用户消息（尽力而为）
@@ -190,7 +193,7 @@ async function handleStream(req, res) {
   const deepThink = body.deepThink === true;
 
   // 结构化任务（算法提示/点评）：提示词服务端拼装，走 forwardTaskStream（PRD-02 F1-3）
-  const task = body.task && body.task.kind ? body.task : null;
+  const task = body.task && body.task.kind ? clampTask(body.task) : null;
 
   // RAG：用最后一条用户消息召回站内资料，注入上下文 + 先下发引用帧（PRD-02 F1-1/F1-2）
   let citations = [];
