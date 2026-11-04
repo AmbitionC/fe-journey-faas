@@ -1,5 +1,5 @@
 import type { QueryFn } from './store';
-import { BillingStore, REFERRAL_REWARD } from './billing';
+import { BillingStore, REFERRAL_REWARD, effectiveTier } from './billing';
 
 /**
  * 邀请拉新（owner 2026-11-02：「引入分享拉新等模式完成产品用户的裂变」）。
@@ -10,7 +10,7 @@ import { BillingStore, REFERRAL_REWARD } from './billing';
  * - 每个邀请人每个自然月最多 monthlyCap 个受邀注册计奖，超出的照样记关系（将来开会员仍给邀请人加点），但注册奖励不发；
  * - 同一邀请人 24 小时内来自同一 IP 的第二个受邀注册视为自邀刷点：记关系、状态 held、双方都不发注册奖励。
  *
- * 奖励用 BillingStore.addPoints：受邀者账户不存在时先 activate（顺手送体验点），
+ * 奖励：受邀者账户不存在时先 activate（顺手送体验点）；注册奖励记体验点（14 天到期，邀请人是会员时记普通点），
  * 所以受邀新用户到手 = 体验点 + 邀请奖励。所有写入失败不影响注册本身（调用方吞错）。
  */
 export interface ReferralRow {
@@ -135,14 +135,22 @@ export class ReferralStore {
     if (hold) return { status: 'held', inviter, reason: hold };
 
     await this.billing.activate(p.inviteeId);
-    await this.billing.addPoints(
+    // 被邀请人这笔与体验点同性质：并入体验桶、一起到期（2026-11-04 方案 A）
+    await this.billing.addTrialPoints(
       p.inviteeId,
       REFERRAL_REWARD.invitee,
       'referral',
       code.slice(0, 64),
       '好友邀请注册奖励'
     );
-    await this.billing.addPoints(
+    // 邀请人注册奖励：非会员同样记体验点、14 天到期（否则拉小号注册＝每月 300 点不过期的白用口子）；
+    // 会员照常发普通点。被邀请人开会员的返点（onMemberPaid）有真实收入对应，始终不过期。
+    const inviterAcc = await this.billing.getAccount(inviter).catch(() => null);
+    const inviterAdd =
+      effectiveTier(inviterAcc) === 'member'
+        ? this.billing.addPoints.bind(this.billing)
+        : this.billing.addTrialPoints.bind(this.billing);
+    await inviterAdd(
       inviter,
       REFERRAL_REWARD.inviter,
       'referral',

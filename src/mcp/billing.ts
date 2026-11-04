@@ -44,9 +44,18 @@ export const MEMBER_MONTHLY_POINTS = 800;
  * 新用户开通赠送的体验点（owner 2026-11-01 改：取消「公测免费不扣点」，改为送少量点、用完充值）。
  * 2026-11-04 owner：额度加倍，50 → 100（strategy-builder 这类多步场景一次要十几次调用，50 点跑不完一轮）。
  * 100 点约够跑通 10 次以上核心场景（一次「搜知识点 + 读两篇 + 查面经」≈ 8 点，
- * 一次「行情快照 + 恐慌 + 乖离率 + 宏观」≈ 7 点）。存量投资用户已按新额度一次性补齐（invest-model mcp-credit）。
+ * 一次 Invest 完整回测「行情快照 + 恐慌 + 乖离率 + 宏观」≈ 30 点（2026-11-04 Invest 单价上调后）。
+ * 同日起 TRIAL_DAYS 天到期清零（见下）。
  */
 export const TRIAL_POINTS = 100;
+
+/**
+ * 体验点有效期（2026-11-04 owner 拍板「方案 A」）：开通起 TRIAL_DAYS 天内有效，到期没用完的体验点清零。
+ * 动机：体验点不过期 + Invest 单价低时，每天看盘的人 100 点能用一个半月、每周看一次的能用半年＝长期白用。
+ * 目标是「14 天内够跑一次完整回测 + 每天看一眼市场」，之后要用就开会员或买加油包。
+ * 只清体验点（mcp_account.trial_points）：买的点、会员月度点、邀请人奖励不受影响。扣点时先扣体验点。
+ */
+export const TRIAL_DAYS = 14;
 
 /**
  * @deprecated 充值页按产品取：`siteOf(product).recharge`（./sites.ts）。
@@ -142,7 +151,7 @@ export const PRICING_PHASES: PricingPhase[] = [
     id: 'half',
     name: '早期用户半价',
     from: '2026-11-01',
-    note: `新用户开通即送 ${TRIAL_POINTS} 点体验额度，用完后开通会员或购买加油包继续使用；早期用户半价，已购会员在有效期内不受后续调价影响。`,
+    note: `新用户开通即送 ${TRIAL_POINTS} 点体验额度（${TRIAL_DAYS} 天内有效），用完或到期后开通会员或购买加油包继续使用；早期用户半价，已购会员在有效期内不受后续调价影响。`,
   },
   {
     id: 'full',
@@ -245,7 +254,7 @@ export function creditExhaustedMessage(
     .filter(Boolean)
     .join('；');
   return (
-    `Journey 点数不足：本次调用需要 ${cost} 点，账户剩余 ${balance} 点（体验额度已用完）。` +
+    `Journey 点数不足：本次调用需要 ${cost} 点，账户剩余 ${balance} 点（体验额度已用完或已到期）。` +
     `请到 ${rechargeLink('credit_exhausted', product)} 充值后继续使用：${options}。` +
     '充值到账后直接重试即可，Key 不用换。'
   );
@@ -325,7 +334,7 @@ export const REFERRAL_REWARD = {
 export function referralPricing() {
   return {
     ...REFERRAL_REWARD,
-    note: `好友通过你的邀请链接注册，双方各得 ${REFERRAL_REWARD.inviter} 点；好友开通会员后你再得 ${REFERRAL_REWARD.memberBonus} 点。每月最多 ${REFERRAL_REWARD.monthlyCap} 位好友计奖。`,
+    note: `好友通过你的邀请链接注册，双方各得 ${REFERRAL_REWARD.inviter} 点（与体验点一样 ${TRIAL_DAYS} 天内有效，会员获得的不过期）；好友开通会员后你再得 ${REFERRAL_REWARD.memberBonus} 点。每月最多 ${REFERRAL_REWARD.monthlyCap} 位好友计奖。`,
   };
 }
 
@@ -340,10 +349,12 @@ export const TOOL_COST: Record<string, number> = {
   mission_list: 1,
   mission_get: 1,
   quiz_get: 1,
-  market_snapshot: 2,
-  fear_series: 2,
-  bias_series: 2,
-  macro_series: 1,
+  // Invest 单价 2026-11-04 owner 拍板上调（2/2/2/1 → 5/10/10/5）：一次完整回测 ≈30 点、
+  // 看一眼市场 5 点，14 天体验期正好够 1 次回测 + 每天看一眼；会员重度用法 ≈370 点/月 < 800。
+  market_snapshot: 5,
+  fear_series: 10,
+  bias_series: 10,
+  macro_series: 5,
   indicator_list: 0,
   methodology_get: 0,
   account_usage: 0,
@@ -411,6 +422,10 @@ export interface Account {
   tier_expire_at: string | null;
   next_grant_at: string | null;
   monthly_points: number;
+  /** 余额里还没用掉的体验点（到期清零的那部分） */
+  trial_points: number;
+  /** 体验点到期时间；null＝没有体验点 */
+  trial_expire_at: string | null;
 }
 
 export function effectiveTier(
@@ -479,6 +494,25 @@ export class BillingStore {
           KEY idx_mcp_order_user (user_id, created_at),
           KEY idx_mcp_order_status (status, created_at)
         ) DEFAULT CHARSET=utf8mb4`);
+        // 体验点有效期（2026-11-04）：线上表已建，补列。MySQL 8 没有 ADD COLUMN IF NOT EXISTS，先查再补。
+        const cols = await this.q(
+          "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mcp_account'"
+        );
+        const names = new Set(
+          (cols || []).map((c: any) => String(c.COLUMN_NAME || c.column_name))
+        );
+        if (!names.has('trial_points')) {
+          await this.q(
+            'ALTER TABLE mcp_account ADD COLUMN trial_points INT NOT NULL DEFAULT 0, ADD COLUMN trial_expire_at DATETIME NULL'
+          );
+          // 存量账户：从没买过点、没当过会员、没被管理员加过点的，余额全部来自体验/补发，
+          // 记为体验点，从今天起算 TRIAL_DAYS 天（不追溯开通日）。
+          await this.q(
+            `UPDATE mcp_account SET trial_points = points, trial_expire_at = DATE_ADD(NOW(), INTERVAL ${TRIAL_DAYS} DAY) ` +
+              'WHERE points > 0 AND tier_expire_at IS NULL AND user_id NOT IN (' +
+              "SELECT user_id FROM mcp_points_ledger WHERE reason IN ('pack', 'plan_grant', 'admin'))"
+          );
+        }
       })().catch(e => {
         this.schemaReady = null;
         throw e;
@@ -508,7 +542,7 @@ export class BillingStore {
 
   private async read(userId: string): Promise<Account | null> {
     const rows = await this.q(
-      'SELECT user_id, points, tier, tier_expire_at, next_grant_at, monthly_points, ' +
+      'SELECT user_id, points, tier, tier_expire_at, next_grant_at, monthly_points, trial_points, trial_expire_at, ' +
         '(tier_expire_at IS NOT NULL AND tier_expire_at > NOW()) AS active ' +
         'FROM mcp_account WHERE user_id = ?',
       [userId]
@@ -523,7 +557,38 @@ export class BillingStore {
       tier_expire_at: r.tier_expire_at ? String(r.tier_expire_at) : null,
       next_grant_at: r.next_grant_at ? String(r.next_grant_at) : null,
       monthly_points: Number(r.monthly_points || 0),
+      trial_points: Number(r.trial_points || 0),
+      trial_expire_at:
+        Number(r.trial_points || 0) > 0 && r.trial_expire_at
+          ? String(r.trial_expire_at)
+          : null,
     };
+  }
+
+  /** 体验点到期清零（懒执行：读账户、扣点前各做一次）。只清体验点那部分，入流水 trial_expire。 */
+  private async expireTrial(userId: string) {
+    const rows = await this.q(
+      'SELECT trial_points FROM mcp_account WHERE user_id = ? AND trial_points > 0 ' +
+        'AND trial_expire_at IS NOT NULL AND trial_expire_at <= NOW()',
+      [userId]
+    );
+    const left = Number(rows?.[0]?.trial_points || 0);
+    if (left <= 0) return;
+    // SET 自左向右求值：points 先按原 trial_points 扣，再把 trial_points 清零；
+    // WHERE 带上读到的值，并发时只有一个请求清得动
+    const r = await this.q(
+      'UPDATE mcp_account SET points = points - LEAST(points, trial_points), trial_points = 0 ' +
+        'WHERE user_id = ? AND trial_points = ? AND trial_expire_at <= NOW()',
+      [userId, left]
+    );
+    if (Number(r?.affectedRows ?? 0) > 0)
+      await this.ledger(
+        userId,
+        -left,
+        'trial_expire',
+        undefined,
+        `体验点 ${TRIAL_DAYS} 天到期清零`
+      );
   }
 
   /** 懒发放会员月度点数：每满一个月补一次，直到追平或到期（最多补 24 次）。 */
@@ -551,6 +616,7 @@ export class BillingStore {
   /** 取账户（含懒发放）；不存在返回 null。 */
   async getAccount(userId: string): Promise<Account | null> {
     await this.ensureSchema();
+    await this.expireTrial(userId);
     await this.catchUpGrants(userId);
     return this.read(userId);
   }
@@ -559,8 +625,9 @@ export class BillingStore {
   async activate(userId: string) {
     await this.ensureSchema();
     const r = await this.q(
-      'INSERT IGNORE INTO mcp_account (user_id, points) VALUES (?, ?)',
-      [userId, TRIAL_POINTS]
+      'INSERT IGNORE INTO mcp_account (user_id, points, trial_points, trial_expire_at) ' +
+        `VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ${TRIAL_DAYS} DAY))`,
+      [userId, TRIAL_POINTS, TRIAL_POINTS]
     );
     const created = Number(r?.affectedRows ?? 0) > 0;
     if (created)
@@ -569,7 +636,7 @@ export class BillingStore {
         TRIAL_POINTS,
         'trial',
         undefined,
-        '新用户体验点'
+        `新用户体验点（${TRIAL_DAYS} 天内有效）`
       );
     return { account: await this.getAccount(userId), created };
   }
@@ -585,12 +652,15 @@ export class BillingStore {
   ): Promise<number | null> {
     if (cost <= 0) return (await this.read(userId))?.points ?? 0;
     await this.ensureSchema();
+    await this.expireTrial(userId);
+    // 先扣体验点：trial_points 跟着减（不低于 0），剩下的才动买来的点
     const tryOnce = async () =>
       Number(
         (
           await this.q(
-            'UPDATE mcp_account SET points = points - ? WHERE user_id = ? AND points >= ?',
-            [cost, userId, cost]
+            'UPDATE mcp_account SET points = points - ?, trial_points = GREATEST(trial_points - ?, 0) ' +
+              'WHERE user_id = ? AND points >= ?',
+            [cost, cost, userId, cost]
           )
         )?.affectedRows ?? 0
       ) > 0;
@@ -618,9 +688,12 @@ export class BillingStore {
 
   async refund(userId: string, cost: number, tool: string) {
     if (cost <= 0) return;
+    // 体验期内退回体验桶（扣点时先扣的就是体验点），过期后退成普通点（量极小，不追究）
     await this.q(
-      'UPDATE mcp_account SET points = points + ? WHERE user_id = ?',
-      [cost, userId]
+      'UPDATE mcp_account SET points = points + ?, ' +
+        'trial_points = IF(trial_expire_at IS NOT NULL AND trial_expire_at > NOW(), LEAST(trial_points + ?, points), trial_points) ' +
+        'WHERE user_id = ?',
+      [cost, cost, userId]
     );
     await this.ledger(userId, cost, 'refund', tool, '调用失败退点');
   }
@@ -640,6 +713,32 @@ export class BillingStore {
     await this.q(
       'UPDATE mcp_account SET points = points + ? WHERE user_id = ?',
       [points, userId]
+    );
+    await this.ledger(userId, points, reason, ref, note);
+  }
+
+  /**
+   * 加一笔体验性质的点（如被邀请人注册奖励）：并入体验桶，与体验点同一到期时间；
+   * 账户没有未到期体验期时从现在起算 TRIAL_DAYS 天。
+   */
+  async addTrialPoints(
+    userId: string,
+    points: number,
+    reason: string,
+    ref?: string,
+    note?: string
+  ) {
+    await this.ensureSchema();
+    await this.q(
+      'INSERT IGNORE INTO mcp_account (user_id, points) VALUES (?, 0)',
+      [userId]
+    );
+    await this.expireTrial(userId);
+    await this.q(
+      'UPDATE mcp_account SET points = points + ?, trial_points = trial_points + ?, ' +
+        'trial_expire_at = IF(trial_expire_at IS NOT NULL AND trial_expire_at > NOW(), trial_expire_at, ' +
+        `DATE_ADD(NOW(), INTERVAL ${TRIAL_DAYS} DAY)) WHERE user_id = ?`,
+      [points, points, userId]
     );
     await this.ledger(userId, points, reason, ref, note);
   }

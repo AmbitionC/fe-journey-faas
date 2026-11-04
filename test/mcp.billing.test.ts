@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { BillingStore, findSku, findSellableSku, effectiveTier, toolCost, SKUS, phasePrice, currentPhase, PAY_TEST_SKU, TRIAL_POINTS, MEMBER_MONTHLY_POINTS } from '../src/mcp/billing';
+import { BillingStore, findSku, findSellableSku, effectiveTier, toolCost, SKUS, phasePrice, currentPhase, PAY_TEST_SKU, TRIAL_POINTS, TRIAL_DAYS, MEMBER_MONTHLY_POINTS } from '../src/mcp/billing';
 import { McpStore } from '../src/mcp/store';
 
 /**
@@ -74,6 +74,59 @@ describe('MCP 计费（真 MySQL）', function () {
     // 昨天的扣点不算今天已付
     await q("INSERT INTO mcp_points_ledger (user_id, delta, reason, ref, created_at) VALUES ('pd1', -2, 'call', 'macro_series', DATE_SUB(CURDATE(), INTERVAL 1 SECOND))");
     assert.strictEqual(await b.paidToday('pd1', 'macro_series'), false);
+  });
+
+  it('体验点：开通记到期时间；先扣体验点；到期只清体验点、入流水，买的点保留', async () => {
+    const b = new BillingStore(q);
+    await b.activate('tr1');
+    let a = (await b.getAccount('tr1'))!;
+    assert.strictEqual(a.trial_points, TRIAL_POINTS);
+    assert.ok(a.trial_expire_at);
+    const days = (await q("SELECT DATEDIFF(trial_expire_at, NOW()) d FROM mcp_account WHERE user_id = 'tr1'"))[0].d;
+    assert.strictEqual(Number(days), TRIAL_DAYS);
+    await b.addPoints('tr1', 100, 'pack', 'MJX', '加油包');
+    await b.charge('tr1', 30, 'fear_series');
+    a = (await b.getAccount('tr1'))!;
+    assert.strictEqual(a.points, TRIAL_POINTS + 100 - 30);
+    assert.strictEqual(a.trial_points, TRIAL_POINTS - 30);
+    // 退点在体验期内回到体验桶
+    await b.refund('tr1', 30, 'fear_series');
+    assert.strictEqual((await b.getAccount('tr1'))!.trial_points, TRIAL_POINTS);
+    await b.charge('tr1', 30, 'fear_series');
+    // 拨到过期
+    await q("UPDATE mcp_account SET trial_expire_at = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE user_id = 'tr1'");
+    a = (await b.getAccount('tr1'))!;
+    assert.strictEqual(a.points, 100);
+    assert.strictEqual(a.trial_points, 0);
+    assert.strictEqual(a.trial_expire_at, null);
+    const exp = await q("SELECT delta FROM mcp_points_ledger WHERE user_id = 'tr1' AND reason = 'trial_expire'");
+    assert.deepStrictEqual(exp.map((r: any) => Number(r.delta)), [-(TRIAL_POINTS - 30)]);
+    // 再读不重复清
+    await b.getAccount('tr1');
+    assert.strictEqual((await q("SELECT COUNT(*) n FROM mcp_points_ledger WHERE user_id = 'tr1' AND reason = 'trial_expire'"))[0].n, 1);
+  });
+
+  it('体验点到期后扣点：只剩体验点的账户直接不足', async () => {
+    const b = new BillingStore(q);
+    await b.activate('tr2');
+    await q("UPDATE mcp_account SET trial_expire_at = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE user_id = 'tr2'");
+    assert.strictEqual(await b.charge('tr2', 5, 'market_snapshot'), null);
+    assert.strictEqual((await b.getAccount('tr2'))!.points, 0);
+  });
+
+  it('体验性质的加点并入体验桶：有未到期体验期沿用，没有则从现在起算', async () => {
+    const b = new BillingStore(q);
+    await b.activate('tr3');
+    const before = (await q("SELECT trial_expire_at t FROM mcp_account WHERE user_id = 'tr3'"))[0].t;
+    await b.addTrialPoints('tr3', 30, 'referral', 'CODE', '好友邀请注册奖励');
+    let r = (await q("SELECT points, trial_points, trial_expire_at t FROM mcp_account WHERE user_id = 'tr3'"))[0];
+    assert.strictEqual(Number(r.trial_points), TRIAL_POINTS + 30);
+    assert.strictEqual(String(r.t), String(before));
+    await b.addTrialPoints('tr4', 30, 'referral', 'CODE', '邀请好友注册奖励');
+    r = (await q("SELECT points, trial_points, DATEDIFF(trial_expire_at, NOW()) d FROM mcp_account WHERE user_id = 'tr4'"))[0];
+    assert.strictEqual(Number(r.points), 30);
+    assert.strictEqual(Number(r.trial_points), 30);
+    assert.strictEqual(Number(r.d), TRIAL_DAYS);
   });
 
   it('并发扣点不会扣成负数', async () => {
@@ -237,6 +290,12 @@ describe('MCP 计价表', () => {
     assert.strictEqual(TRIAL_POINTS, 100);
     assert.strictEqual(MEMBER_MONTHLY_POINTS, 800);
     assert.strictEqual(currentPhase(new Date('2027-06-01T00:00:00+08:00')).next, null);
+    assert.strictEqual(TRIAL_DAYS, 14);
+    // Invest 单价（2026-11-04 owner 方案 A）
+    assert.strictEqual(toolCost('market_snapshot'), 5);
+    assert.strictEqual(toolCost('fear_series'), 10);
+    assert.strictEqual(toolCost('bias_series'), 10);
+    assert.strictEqual(toolCost('macro_series'), 5);
     assert.strictEqual(toolCost('methodology_get'), 0);
     assert.strictEqual(toolCost('unknown_tool'), 1);
   });

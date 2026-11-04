@@ -557,15 +557,15 @@ describe('MCP HTTP 适配', () => {
       const { rt, billing } = userRt(10);
       const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       assert.ok(!r.json.result.isError);
-      assert.strictEqual(billing.state.points, 8);
+      assert.strictEqual(billing.state.points, 5);
     });
 
     it('余额第一次跌破 10 点时结果末尾附一次提醒', async () => {
       const { rt, billing } = userRt(11);
       const r1 = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       const texts = r1.json.result.content.map((c: any) => c.text);
-      assert.strictEqual(billing.state.points, 9);
-      assert.ok(texts.some((t: string) => t.includes('【Journey 提示】') && t.includes('还剩 9 点') && t.includes('from=credit_low')), texts.join('|'));
+      assert.strictEqual(billing.state.points, 6);
+      assert.ok(texts.some((t: string) => t.includes('【Journey 提示】') && t.includes('还剩 6 点') && t.includes('from=credit_low')), texts.join('|'));
       const r2 = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       assert.ok(!r2.json.result.content.some((c: any) => /Journey 提示/.test(c.text)));
     });
@@ -579,14 +579,14 @@ describe('MCP HTTP 适配', () => {
     });
 
     it('11 月起不再免费：体验点用完即拒绝，报错带余额、充值链接与当前价', async () => {
-      const { rt, billing } = userRt(3, NOV);
+      const { rt, billing } = userRt(6, NOV);
       const ok = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       assert.ok(!ok.json.result.isError);
       assert.strictEqual(billing.state.points, 1);
       const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       assert.strictEqual(r.json.result.isError, true);
       const text = r.json.result.content[0].text;
-      assert.ok(text.includes('需要 2 点') && text.includes('剩余 1 点'), text);
+      assert.ok(text.includes('需要 5 点') && text.includes('剩余 1 点'), text);
       // Invest 的调用引到 Invest 自己的站，不再一律引去 Agent Journey
       assert.ok(text.includes('https://invest-journey.vercel.app/skills?from=credit_exhausted#pricing'), text);
       assert.ok(!text.includes('agent-journey.cn'), text);
@@ -614,20 +614,20 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(billing.state.points, 10);
     });
 
-    it('历史序列当天只扣一次：Agent 分 25 段拉恐慌全历史只花 2 点（2026-11-04 strategy-builder 事故）', async () => {
+    it('历史序列当天只扣一次：Agent 分 25 段拉恐慌全历史只扣一次单价（2026-11-04 strategy-builder 事故）', async () => {
       const { rt, billing } = userRt(50, NOV);
       for (let y = 2005; y <= 2029; y++) {
         const r = await run(rt, { path: '/mcp/invest', headers: auth, body: call('fear_series', { start: `${y}0101`, end: `${y}1231` }) });
         assert.ok(!r.json.result.isError);
       }
-      assert.strictEqual(billing.state.points, 48);
+      assert.strictEqual(billing.state.points, 40);
       // 不同序列各自计一次；快照不在此列，照常按次扣
       await run(rt, { path: '/mcp/invest', headers: auth, body: call('bias_series') });
       await run(rt, { path: '/mcp/invest', headers: auth, body: call('bias_series', { code: '000300.SH' }) });
-      assert.strictEqual(billing.state.points, 46);
+      assert.strictEqual(billing.state.points, 30);
       await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
       await run(rt, { path: '/mcp/invest', headers: auth, body: call('market_snapshot') });
-      assert.strictEqual(billing.state.points, 42);
+      assert.strictEqual(billing.state.points, 20);
     });
 
     it('历史序列首调失败退点后不算已付：下一次成功调用照常扣', async () => {
@@ -635,7 +635,7 @@ describe('MCP HTTP 适配', () => {
       await run(rt, { path: '/mcp/invest', headers: auth, body: call('fear_series', { start: 'bad' }) });
       assert.strictEqual(billing.state.points, 10);
       await run(rt, { path: '/mcp/invest', headers: auth, body: call('fear_series', { start: '20250101' }) });
-      assert.strictEqual(billing.state.points, 8);
+      assert.strictEqual(billing.state.points, 0);
     });
 
     it('2026-10-31 公测免费那一天不扣点、调用照常记日志', async () => {
