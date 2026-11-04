@@ -102,13 +102,9 @@ function fakeRes() {
 describe('MCP 支付宝网页收款', () => {
   it('未配置齐三项时视为未开通', () => {
     assert.strictEqual(loadAlipayConfig({ ALIPAY_APP_ID: 'x' }), null);
-    assert.deepStrictEqual(pricing(new Date(), false).payChannels, [
-      'wechat_qr',
-    ]);
-    assert.deepStrictEqual(pricing(new Date(), true).payChannels, [
-      'alipay',
-      'wechat_qr',
-    ]);
+    // 微信收款已关（2026-11-04）：没开通支付宝就没有任何收款方式
+    assert.deepStrictEqual(pricing(new Date(), false).payChannels, []);
+    assert.deepStrictEqual(pricing(new Date(), true).payChannels, ['alipay']);
   });
 
   it('私钥兼容 PKCS#8 与 PKCS#1、带不带 PEM 头尾', () => {
@@ -382,7 +378,7 @@ describe('MCP 支付宝网页收款', () => {
     assert.strictEqual(biz.out_trade_no, 'MJTEST1');
   });
 
-  it('超过单笔限额的订单不给支付宝链接，取链接接口说明改走微信', async () => {
+  it('超过单笔限额的订单不给支付宝链接，取链接接口说明暂时缺货', async () => {
     assert.strictEqual(cfg.maxCents, 5000);
     assert.strictEqual(
       loadAlipayConfig({
@@ -430,7 +426,7 @@ describe('MCP 支付宝网页收款', () => {
     const year = await call('MJY');
     assert.strictEqual(year.status, 400);
     assert.match(year.body.message, /超过支付宝单笔限额 ¥50/);
-    assert.match(year.body.message, /微信/);
+    assert.match(year.body.message, /缺货/);
     const month = await call('MJM');
     assert.strictEqual(month.status, 200);
     assert.ok(month.body.data.alipayUrl.includes('alipay.trade.page.pay'));

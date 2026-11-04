@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
+import { fakeAlipayCfg } from './fakeAlipay';
 import { McpStore, ApiKeyRow } from '../src/mcp/store';
 import { BillingStore } from '../src/mcp/billing';
 import {
@@ -49,6 +50,7 @@ function fakeRt(opts: { points?: number; over?: boolean; analytics?: any; userId
     trackMany: async (l: TrackInput[]) => { events.push(...l); return l.length; },
   };
   const rt: McpRuntime = {
+    alipay: fakeAlipayCfg,
     store: {
       findActive: async (k: string) => (k === KEY ? USER_ROW : null),
       countCall: async (_r: any, _n: any, limit?: number) => ({ used: 1, limit, over: !!opts.over }),
