@@ -22,6 +22,7 @@ import { R } from '../common/base.error.utils';
 import { phone as phoneRule } from '../common/common.validate.rules';
 import { recordSignupSource } from '../common/signupSite';
 import { clientIpFromCtx } from '../common/clientIp';
+import { ReferralService } from '../service/referral';
 
 function assertPhone(v: unknown): string {
   const p = String(v || '').trim();
@@ -39,6 +40,9 @@ export function autoNickName(now: number = Date.now()): string {
 
 @Provide()
 export class AuthHTTPService {
+  @Inject()
+  referralService: ReferralService;
+
   @Inject()
   ctx: Context;
 
@@ -61,9 +65,7 @@ export class AuthHTTPService {
   investDb: InvestDbService;
 
   private clientIp(): string {
-    return (
-      clientIpFromCtx(this.ctx)
-    );
+    return clientIpFromCtx(this.ctx);
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -121,7 +123,15 @@ export class AuthHTTPService {
   })
   @NoAuth()
   async smsLogin(
-    @Body(ALL) body: { phoneNumber?: string; code?: string; agree?: boolean }
+    @Body(ALL)
+    body: {
+      phoneNumber?: string;
+      code?: string;
+      agree?: boolean;
+      /** 好友分享链接带来的邀请码（新号建号后建立邀请关系，见 mcp/referral） */
+      inviteCode?: string;
+      referralProduct?: string;
+    }
   ): Promise<any> {
     const phone = assertPhone(body?.phoneNumber);
     const user = await this.authService.findByPhone(phone);
@@ -157,7 +167,18 @@ export class AuthHTTPService {
       this.ctx.get('origin')
     );
     const { token, expire } = res?.data || {};
-    return { success: true, data: { token, expire, isNew: true } };
+    // 短信登录是默认入口：此前这里不收邀请码，好友链接带来的新用户全部丢了邀请关系（2026-11-05 修）
+    const referral =
+      res?.success && body?.inviteCode
+        ? await this.referralService.recordSignup(
+            phone,
+            String(body.inviteCode),
+            clientIpFromCtx(this.ctx),
+            body.referralProduct,
+            'sms'
+          )
+        : null;
+    return { success: true, data: { token, expire, isNew: true, referral } };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

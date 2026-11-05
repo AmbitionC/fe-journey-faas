@@ -29,4 +29,8 @@ export class UserDTO extends BaseDTO<UserEntity> {
   /** 邀请码（好友分享链接 ?invite= 带来的，注册后双方得点；见 mcp/referral） */
   @Rule(RuleType.string().allow(null, '').max(32))
   inviteCode?: string;
+
+  /** 邀请来自哪个产品（agent / invest / kids，见 mcp/referral REFERRAL_PROGRAMS）；不传按 agent */
+  @Rule(RuleType.string().allow(null, '').max(16))
+  referralProduct?: string;
 }

@@ -331,10 +331,33 @@ export const REFERRAL_REWARD = {
   monthlyCap: 10,
 };
 
+/**
+ * 邀请换来的会员天数（2026-11-05 owner：做「分享码 → 好友注册 → 双方加体验天数」的社群裂变，
+ * 但**权益别给太多**——校招用户本来就只用一段时间，白拿的天数多了就不转付费了）。
+ * 所以注册奖励只给 3 天，邀请人靠拉新拿的天数每月 / 终身都封顶；好友真付费开会员才大方一点（不计上限）。
+ * 天数写 member_entitlement（source=referral），网站会员权益随之放行；不动 Skill 会员档位与月度点数。
+ */
+export const REFERRAL_DAYS = {
+  invitee: 3,
+  inviter: 3,
+  memberBonus: 7,
+  /** 邀请人靠「好友注册」拿到的天数：每自然月上限 / 终身上限（付费返的天数不计） */
+  monthlyCapDays: 15,
+  lifetimeCapDays: 30,
+};
+
 export function referralPricing() {
   return {
     ...REFERRAL_REWARD,
-    note: `好友通过你的邀请链接注册，双方各得 ${REFERRAL_REWARD.inviter} 点（与体验点一样 ${TRIAL_DAYS} 天内有效，会员获得的不过期）；好友开通会员后你再得 ${REFERRAL_REWARD.memberBonus} 点。每月最多 ${REFERRAL_REWARD.monthlyCap} 位好友计奖。`,
+    inviteeDays: REFERRAL_DAYS.invitee,
+    inviterDays: REFERRAL_DAYS.inviter,
+    memberBonusDays: REFERRAL_DAYS.memberBonus,
+    monthlyCapDays: REFERRAL_DAYS.monthlyCapDays,
+    lifetimeCapDays: REFERRAL_DAYS.lifetimeCapDays,
+    note:
+      `好友通过你的邀请链接注册，双方各得 ${REFERRAL_DAYS.inviter} 天会员 + ${REFERRAL_REWARD.inviter} 点（点数与体验点一样 ${TRIAL_DAYS} 天内有效，会员获得的不过期）；` +
+      `好友开通会员后你再得 ${REFERRAL_DAYS.memberBonus} 天会员 + ${REFERRAL_REWARD.memberBonus} 点。` +
+      `每月最多 ${REFERRAL_REWARD.monthlyCap} 位好友计奖，邀请注册换来的会员天数每月最多 ${REFERRAL_DAYS.monthlyCapDays} 天、累计最多 ${REFERRAL_DAYS.lifetimeCapDays} 天。`,
   };
 }
 

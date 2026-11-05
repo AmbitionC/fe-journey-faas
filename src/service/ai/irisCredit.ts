@@ -13,6 +13,7 @@ import {
   IRIS_MEMBER_ONLY,
   MEMBER_MONTHLY_POINTS,
   REFERRAL_REWARD,
+  REFERRAL_DAYS,
   TRIAL_POINTS,
   irisCost,
   irisLedgerRef,
@@ -90,7 +91,7 @@ export function creditExhaustedText(cost: number, balance: number): string {
   return (
     `CREDIT_EXHAUSTED:点数不足：本次需要 ${cost} 点，余额 ${balance} 点。` +
     `开通会员每月领 ${MEMBER_MONTHLY_POINTS} 点，或购买加油包；` +
-    `邀请好友注册，双方各得 ${REFERRAL_REWARD.inviter} 点。`
+    `邀请好友注册，双方各得 ${REFERRAL_DAYS.inviter} 天会员 + ${REFERRAL_REWARD.inviter} 点。`
   );
 }
 

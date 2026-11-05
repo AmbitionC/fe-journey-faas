@@ -187,7 +187,7 @@ async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
         await track(rt, {
           event: 'referral_member',
           userId: bonus.inviter,
-          props: { invitee: String(o.user_id), points: bonus.points, orderNo },
+          props: { invitee: String(o.user_id), points: bonus.points, days: bonus.days, orderNo },
         });
       }
     }
