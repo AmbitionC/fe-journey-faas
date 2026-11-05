@@ -12,6 +12,31 @@ import { maskUser } from '../../mcp/referral';
  * 另出：发出去的会员天数与点数（看权益成本）、无效码 / 互邀等被拒次数、Top 邀请人（脱敏）。
  * 前端事件在 event_log（游客 userId 为 guest:ip），后端事件在 mcp_event。只出计数，不出号码。
  */
+export const REFERRAL_GLOSSARY = {
+  scope:
+    '窗口内发生数（近 days 天），已排除内部账号；值为 null 表示该项查询失败，不是 0。前端事件游客按 guest:ip 去重。',
+  'funnel.cardView': '看到个人页邀请卡的次数/人数（invite_card_view）',
+  'funnel.share':
+    '点了分享（复制链接 / 下载二维码 / 复制文案）的次数/人数（invite_share）',
+  'funnel.landing': '好友带 ?invite= 打开站点的次数/人数（invite_landing）',
+  'funnel.bannerView': '未登录访客看到「XX 邀请你」横幅（invite_banner_view）',
+  'funnel.bannerClick': '点了横幅上的「注册领取」（invite_banner_click）',
+  'funnel.invited': '新建立的邀请关系数（referral 表，含冻结的）',
+  'funnel.rewarded': '其中发了注册奖励的',
+  'funnel.paidMembers': '窗口内被邀请好友开通会员、邀请人拿到付费返利的人数',
+  shareVia: '分享方式：link 链接 / qr 二维码 / text 文案',
+  invitedVia:
+    '建立关系的入口：signup 密码注册 / sms 短信注册 / bind 注册后补填',
+  invitedProduct: '被邀请人从哪个产品来：agent / invest / kids（栗栗学英语）',
+  held: '建了关系但不发注册奖励：sameIp 24 小时内同一网络重复注册（疑似刷号）/ cap 邀请人当月已满 10 人',
+  rejected:
+    '填了码但没建立关系的原因：unknown_code 码无效 / self 自邀 / circular 互邀 / exists 已有邀请人 / too_late 超过 7 天补填期',
+  bind: '注册后补填邀请码的操作次数（含失败）',
+  activeInviters: '窗口内至少带来 1 个邀请关系的邀请人数',
+  cost: '窗口内发出的权益：会员天数（被邀请人 / 邀请人 / 好友付费返）与点数（1 点≈¥0.1）',
+  topInviters: '邀请最多的 10 人（手机号脱敏）',
+};
+
 export async function referralSummary(
   q: QueryFn,
   days: number,
@@ -133,6 +158,8 @@ export async function referralSummary(
 
   return {
     days: d,
+    // 给读导出的人 / AI 的字段说明：复盘时直接据此解读，不用回头翻代码
+    glossary: REFERRAL_GLOSSARY,
     funnel: {
       cardView: ev('invite_card_view'),
       share: ev('invite_share'),
