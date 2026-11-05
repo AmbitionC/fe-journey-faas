@@ -634,6 +634,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
   const { MissionService } = require('../service/mission');
   const { QuizService } = require('../service/quiz');
   const { InvestInsightService } = require('../service/invest/insight');
+  const { InvestMarketDataService } = require('../service/invest/marketData');
   const { resolveUserInfo } = require('../common/admin.guard');
   /* eslint-enable @typescript-eslint/no-var-requires */
 
@@ -654,6 +655,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
   const mission = await appCtx.getAsync(MissionService);
   const quiz = await appCtx.getAsync(QuizService);
   const insight = await appCtx.getAsync(InvestInsightService);
+  const marketData = await appCtx.getAsync(InvestMarketDataService);
 
   const billing = new BillingStore((sql, params) => ds.query(sql, params));
   const analytics = new Analytics((sql, params) => ds.query(sql, params));
@@ -807,6 +809,11 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       bias: () => insight.bias(),
       broad: () => insight.broad(),
       macro: n => insight.macro(n),
+      sentiment: days => marketData.sentiment(days),
+      sectorRank: o => marketData.sectorRank(o),
+      sectorHistory: o => marketData.sectorHistory(o),
+      indexHistory: o => marketData.indexHistory(o),
+      backtest: () => marketData.backtest(),
       usage: usageOf(row, 'invest'),
     }),
   };

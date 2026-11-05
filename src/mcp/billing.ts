@@ -355,6 +355,12 @@ export const TOOL_COST: Record<string, number> = {
   fear_series: 10,
   bias_series: 10,
   macro_series: 5,
+  // 第二批（2026-11-05）：情绪/板块排行与快照同价；历史序列类当天只扣一次；回测成绩免费（拉新用）
+  market_sentiment: 5,
+  sector_rank: 5,
+  sector_history: 5,
+  index_history: 5,
+  rule_backtest: 0,
   indicator_list: 0,
   methodology_get: 0,
   account_usage: 0,
@@ -367,7 +373,14 @@ export const TOOL_COST: Record<string, number> = {
  * 同一账户同一工具在同一自然日（库时区＝北京时间）已成功扣过点，再调不扣——按「取一份数据」收费，
  * 不按 Agent 分几段取收费。失败退点后不算已付（下一次照常扣）。
  */
-export const DAY_PASS_TOOLS = ['fear_series', 'bias_series', 'macro_series'];
+export const DAY_PASS_TOOLS = [
+  'fear_series',
+  'bias_series',
+  'macro_series',
+  'market_sentiment',
+  'sector_history',
+  'index_history',
+];
 
 export function isDayPassTool(tool: string): boolean {
   return DAY_PASS_TOOLS.includes(tool);
@@ -399,6 +412,11 @@ export const PRODUCT_TOOLS: Record<Product, string[]> = {
     'fear_series',
     'bias_series',
     'macro_series',
+    'market_sentiment',
+    'sector_rank',
+    'sector_history',
+    'index_history',
+    'rule_backtest',
     'indicator_list',
     'methodology_get',
     'account_usage',

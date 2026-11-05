@@ -165,4 +165,32 @@ export const INDICATORS = [
     tools: ['macro_series'],
     since: '视序列而定',
   },
+  {
+    id: 'market_sentiment',
+    name: '涨跌停家数、封板率、连板高度、昨日涨停今日表现',
+    frequency: '日',
+    tools: ['market_sentiment'],
+    since: '2023-01（昨日涨停今日表现 2026-08 起）',
+  },
+  {
+    id: 'sector',
+    name: '同花顺行业 / 概念 / 地域指数涨跌排行与日线',
+    frequency: '日',
+    tools: ['sector_rank', 'sector_history'],
+    since: '2023-01',
+  },
+  {
+    id: 'index_daily',
+    name: '主要指数日线（上证、上证50、沪深300、中证500/800/1000、中证红利、创业板指、科创50）',
+    frequency: '日',
+    tools: ['index_history'],
+    since: '2015-01',
+  },
+  {
+    id: 'rule_backtest',
+    name: '宽基跟车规则历史回测成绩（年化、回撤、逐年对照买入持有）',
+    frequency: '周',
+    tools: ['rule_backtest'],
+    since: '各指数发布日起',
+  },
 ];

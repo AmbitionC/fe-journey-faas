@@ -1,6 +1,7 @@
 import { ToolDef, ToolError, ServerSpec } from '../protocol';
 import { METHODOLOGY, INDICATORS } from '../methodology';
 import { ONBOARDING_INSTRUCTIONS } from '../onboarding';
+import { BACKTEST_CAVEATS } from '../../service/invest/marketData';
 
 /**
  * Invest Journey 的 MCP 工具（第一版：只读读数 + 口径）。
@@ -18,6 +19,12 @@ export interface InvestDeps {
   broad(): Promise<{ date: string | null; latest: any[]; dv?: any }>;
   macro(name?: string): Promise<any>;
   usage(): Promise<any>;
+  /** 第二批（2026-11-05）：市场情绪 / 板块 / 指数日线 / 规则回测成绩 */
+  sentiment(days?: number): Promise<any>;
+  sectorRank(opt: { tag?: string; period?: number; top?: number; order?: string }): Promise<any>;
+  sectorHistory(opt: { keyword?: string; code?: string; days?: number }): Promise<any>;
+  indexHistory(opt: { code?: string; start?: string; end?: string }): Promise<any>;
+  backtest(): Promise<{ generated_at?: string | null; legs: any[] }>;
 }
 
 export const DISCLAIMER = '数据与口径说明，仅供研究参考，不构成任何投资建议。';
@@ -340,6 +347,112 @@ export const investTools: ToolDef<InvestDeps>[] = [
     },
   },
   {
+    name: 'market_sentiment',
+    title: '涨跌停与短线情绪',
+    description:
+      '近 N 个交易日的涨停/跌停/炸板家数、封板率、最高连板、二连板与三连板以上家数，' +
+      '以及「昨日涨停股今天平均涨多少、开盘溢价多少」（短线赚钱效应）。days 默认 20，最多 250。',
+    inputSchema: {
+      type: 'object',
+      properties: { days: { type: 'number', description: '交易日数，默认 20' } },
+    },
+    handler: async (a, d) => ({
+      ...(await d.sentiment(a.days)),
+      note: '数据来自同花顺涨停池，每个交易日收盘后更新。',
+      disclaimer: DISCLAIMER,
+    }),
+  },
+  {
+    name: 'sector_rank',
+    title: '板块涨跌排行',
+    description:
+      '同花顺行业 / 概念 / 地域指数在最近 N 个交易日的涨跌幅排行（含成交额）。' +
+      'category: industry 行业（默认）/ concept 概念 / region 地域；period: 1/5/20/60/120 等交易日数，默认 5；' +
+      'order: top 涨幅榜（默认）/ bottom 跌幅榜；top: 返回条数，默认 10、最多 50。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: ['industry', 'concept', 'region'] },
+        period: { type: 'number', description: '交易日数，默认 5' },
+        order: { type: 'string', enum: ['top', 'bottom'] },
+        top: { type: 'number', description: '返回条数，默认 10' },
+      },
+    },
+    handler: async (a, d) => ({
+      ...(await d.sectorRank({ tag: a.category, period: a.period, top: a.top, order: a.order })),
+      disclaimer: DISCLAIMER,
+    }),
+  },
+  {
+    name: 'sector_history',
+    title: '单个板块走势',
+    description:
+      '按名称关键词（如「半导体」「机器人」「浙江」）或代码（如 881121.TI）取一个同花顺板块指数的日线；' +
+      '多个匹配时取名称最短的一个，其余列在 other_matches。days 默认 120，最多 750。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keyword: { type: 'string', description: '板块名关键词' },
+        code: { type: 'string', description: '板块代码，如 881121.TI' },
+        days: { type: 'number', description: '交易日数，默认 120' },
+      },
+    },
+    handler: async (a, d) => {
+      if (!a.keyword && !a.code) throw new ToolError('请传 keyword（板块名关键词）或 code');
+      const r = await d.sectorHistory({ keyword: a.keyword, code: a.code, days: a.days });
+      if (!r.matches?.length && !r.sector)
+        return { ...r, note: '没有匹配的板块，换个关键词试试（如「芯片」「光伏」「银行」）。', disclaimer: DISCLAIMER };
+      return { ...r, disclaimer: DISCLAIMER };
+    },
+  },
+  {
+    name: 'index_history',
+    title: '指数日线',
+    description:
+      '主要指数的日线（开高低收、涨跌幅、成交额），可选：000001.SH 上证指数 / 000016.SH 上证50 / ' +
+      '000300.SH 沪深300（默认）/ 000905.SH 中证500 / 000852.SH 中证1000 / 000906.SH 中证800 / ' +
+      '000922.CSI 中证红利 / 399006.SZ 创业板指 / 000688.SH 科创50。库内 2015 年起；不传日期默认近一年。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: '指数代码，默认 000300.SH' },
+        start: { type: 'string', description: '起始日 YYYYMMDD' },
+        end: { type: 'string', description: '截止日 YYYYMMDD' },
+      },
+    },
+    handler: async (a, d) => {
+      const r = await d.indexHistory({
+        code: a.code,
+        start: ymd(a.start, 'start'),
+        end: ymd(a.end, 'end'),
+      });
+      if (r.error === 'unknown_code')
+        throw new ToolError(
+          `不支持的指数代码，可选：${Object.entries(r.open_indexes)
+            .map(([c, n]) => `${c} ${n}`)
+            .join(' / ')}`
+        );
+      return { ...r, disclaimer: DISCLAIMER };
+    },
+  },
+  {
+    name: 'rule_backtest',
+    title: '宽基跟车规则历史回测成绩',
+    description:
+      '网站「跟车」规则在沪深300 / 中证红利 / 创业板指 / 科创50 上的历史回测：年化收益、累计倍数、最大回撤、' +
+      '平均仓位、买卖次数，以及逐年收益与买入持有的对照。只给成绩不给买卖线；规则原理见 methodology_get(median_anchor) 与网站「跟车」页。免费。',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async (_a, d) => {
+      const r = await d.backtest();
+      return {
+        data_updated_at: r.generated_at || null,
+        legs: r.legs,
+        caveats: BACKTEST_CAVEATS,
+        disclaimer: DISCLAIMER,
+      };
+    },
+  },
+  {
     name: 'account_usage',
     title: '今日用量',
     description:
@@ -353,7 +466,8 @@ export const investServer: ServerSpec<InvestDeps> = {
   name: 'invest-journey',
   version: '0.1.0',
   instructions:
-    'Invest Journey 数据服务：A 股市场加工读数（恐慌指数、宽基相对长期中枢位置、乖离率、股息率、宏观数据）与完整口径。' +
+    'Invest Journey 数据服务：A 股市场加工读数（恐慌指数、宽基相对长期中枢位置、乖离率、股息率、宏观数据）、' +
+    '涨跌停情绪、行业/概念板块排行与走势、主要指数日线、宽基跟车规则的历史回测成绩，以及完整口径。' +
     '先 market_snapshot 看全貌，再按需取历史序列；解释任何数字前用 methodology_get 查口径。' +
     '所有数据仅供研究，不构成投资建议；不要把读数直接说成买卖指令，用户的仓位与风险偏好由用户自己决定。' +
     ONBOARDING_INSTRUCTIONS,
