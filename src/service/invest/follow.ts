@@ -30,6 +30,29 @@ import {
  *
  * 文案契约：不出现内部编号/参数名；数字全部来自库表；回测≠承诺的提示由前端同屏呈现。
  */
+/** 「首个信号免费看全」上线日：此前已注册的老用户也从这天起各有一次体验。 */
+export const TRIAL_LAUNCH = '20261105';
+
+/** 北京时间当前小时 */
+function bjHour(now = Date.now()): number {
+  return new Date(now + 8 * 3600 * 1000).getUTCHours();
+}
+
+/** 执行日收盘（北京 15:00）是否已过；没有执行日（今天没信号）视为已过。 */
+export function execPassed(execDate: string | null | undefined, now = Date.now()): boolean {
+  if (!execDate) return true;
+  const today = beijingDay(now);
+  if (execDate < today) return true;
+  return execDate === today && bjHour(now) >= 15;
+}
+
+/** 非会员可见历史的分界：exec_date 严格小于它的信号已公开（今天 15:00 后今天也算）。 */
+export function publicCutoff(now = Date.now()): string {
+  const today = beijingDay(now);
+  if (bjHour(now) < 15) return today;
+  return beijingDay(now + 24 * 3600 * 1000);
+}
+
 @Provide()
 export class InvestFollowService {
   @Inject()
@@ -235,6 +258,11 @@ export class InvestFollowService {
     };
   }
 
+  /** 非会员在执行日收盘前看到的信号：只知道今天有动作、几点前完成，不知道哪个指数、买还是卖。 */
+  private sigTeaser(s: ReturnType<InvestFollowService['sigOut']>) {
+    return { signal_date: s.signal_date, exec_date: s.exec_date };
+  }
+
   /** 档案（一个总资金、一个现金池）；无表/无行返回 null。 */
   private async readPortfolio(userId: string) {
     try {
@@ -303,16 +331,74 @@ export class InvestFollowService {
   async overview(userId: string, isMember: boolean, memberUntil: Date | null) {
     const market = await this.market();
     if (!isMember) {
+      // 首个信号免费看全（2026-11-05 owner 批「会员分层方案」）：每位用户遇到的第一个信号日，
+      // 在执行日收盘前按会员口径给全（比例 + 按他填的总资金换算），之后的信号日只给「今天有 N 个动作」，
+      // 执行日收盘后明细对所有人公开（规则与历史始终公开，收费的是时效与换算）。
+      const trialDate = await this.trialSignalDate(userId);
+      const todayDate = market.today[0]?.signal_date || null;
+      const execOpen = !execPassed(market.exec_date);
+      if (trialDate && todayDate === trialDate && execOpen) {
+        const full = await this.memberOverview(userId, null, market);
+        return { ...full, trial: true, trial_signal_date: trialDate };
+      }
+      const prof = await this.readPortfolio(userId);
       return {
         member: false,
-        market: { ...market, today: market.today.map(s => this.sigPublic(s)) },
-        profile: null,
+        trial: false,
+        // 还没用掉的首个信号体验：下一个信号日免费看全
+        trial_pending: !trialDate,
+        market: {
+          ...market,
+          today: execOpen
+            ? market.today.map(s => this.sigTeaser(s))
+            : market.today.map(s => this.sigPublic(s)),
+          today_locked: execOpen && market.today.length > 0,
+        },
+        profile: prof
+          ? {
+              principal: prof.principal,
+              start_date: prof.start_date,
+              status: prof.status,
+              fee_rate: prof.fee_rate,
+              min_fee: prof.min_fee,
+            }
+          : null,
         legs: [],
         flows: [],
         curve: [],
         totals: null,
       };
     }
+    return this.memberOverview(userId, memberUntil, market);
+  }
+
+  /**
+   * 该用户的「首个信号体验日」：自他第一次登录访问投资站（user_site_activity）与方案上线日两者较晚的那天起，
+   * 执行日不早于那天的第一个信号日。还没出信号返回 null（= 体验还没用掉）。读失败按「无体验」处理，不放大权限。
+   */
+  async trialSignalDate(userId: string): Promise<string | null> {
+    try {
+      const first = await this.db.one(
+        'SELECT MIN(day) d FROM user_site_activity WHERE user_id = ?',
+        [userId]
+      );
+      const firstDay = first?.d ? String(first.d) : beijingDay();
+      const anchor = firstDay > TRIAL_LAUNCH ? firstDay : TRIAL_LAUNCH;
+      const row = await this.db.one(
+        'SELECT MIN(signal_date) d FROM broad_signal WHERE exec_date >= ?',
+        [anchor]
+      );
+      return row?.d ? String(row.d) : null;
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  private async memberOverview(
+    userId: string,
+    memberUntil: Date | null,
+    market: Awaited<ReturnType<InvestFollowService['market']>>
+  ) {
     const prof = await this.readPortfolio(userId);
     if (prof && memberUntil) {
       try {
@@ -877,7 +963,7 @@ export class InvestFollowService {
     return { ok: true };
   }
 
-  /** 信号流：会员全量（最近 limit 条）；非会员只看 30 天前的历史（作为规则有效性的证据，不带比例）。 */
+  /** 信号流：会员全量（最近 limit 条）；非会员看执行日收盘后已公开的历史（不带比例）。 */
   async signals(isMember: boolean, limit = 60) {
     const n = Math.min(Math.max(Number(limit) || 60, 1), 500);
     try {
@@ -889,7 +975,8 @@ export class InvestFollowService {
         );
         return { member: true, rows: rows.map((r: any) => this.sigOut(r)) };
       }
-      const cutoff = beijingDay(Date.now() - 30 * 86400 * 1000);
+      // 执行日收盘（北京 15:00）后公开；此前只有会员看得到当天明细
+      const cutoff = publicCutoff();
       const rows = await this.db.q(
         'SELECT signal_date, leg, kind, seq, exec_date, etf, side, frac, why, close, fear, ref_line, engine_fired ' +
           'FROM broad_signal WHERE exec_date < ? ORDER BY signal_date DESC, leg, seq LIMIT ?',
