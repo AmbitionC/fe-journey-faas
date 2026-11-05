@@ -380,15 +380,24 @@ export class InvestInsightService {
   }
 
   /** 对外预警流（alert_outbox，市场级——投顾/个人预警物理不入该表）。登录即可读。 */
-  async alertFeed(limit = 50, includeSignal = true) {
+  async alertFeed(limit = 50, isMember = true) {
     try {
       // signal（跟车操作提醒）是会员权益：非会员的预警流里不出现（邮件分发器同口径只投会员）
       const rows = await this.db.q(
         'SELECT alert_key, topic, title, body, trade_date, created_at FROM alert_outbox ' +
-          (includeSignal ? '' : "WHERE topic <> 'signal' ") +
+          (isMember ? '' : "WHERE topic <> 'signal' ") +
           'ORDER BY created_at DESC LIMIT ?',
         [Math.min(Number(limit) || 50, 200)]
       );
+      // 每日市场观察（insight）是会员权益（owner 2026-11-05）：非会员看得到标题和日期、看不到正文，
+      // 前端据 locked 显示「会员专享」，让用户知道有这项内容
+      if (!isMember) {
+        return {
+          rows: (rows || []).map((r: any) =>
+            r.topic === 'insight' ? { ...r, body: '', locked: true } : r
+          ),
+        };
+      }
       return { rows };
     } catch {
       return { rows: [] };
