@@ -401,16 +401,16 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '跟车档案：本金/起步日/暂停/恢复/移除（会员专属，只写自己的）',
+    description: '跟车档案：本金/起步日/暂停/恢复/移除（登录可写，只写自己的；换算明细是否可见由总览按会员判定）',
     functionName: 'investFollowProfile',
     name: 'investFollowProfile',
     path: '/invest/follow/profile',
     method: 'post',
   })
   async followProfile(@Body(ALL) body: any) {
-    const { uid, isMember, until } = await this.memberState();
+    const { uid, until } = await this.memberState();
     if (!uid) return { success: false, message: '未登录' };
-    if (!isMember) return { success: false, code: 'MEMBER_ONLY', message: '开启跟车是会员权益' };
+    // 2026-11-05 会员分层：免费用户也可以先填总资金（首个信号免费看全时按它换算金额）
     try {
       return { success: true, data: await this.followService.saveProfile(uid, until, body) };
     } catch (e: any) {
@@ -454,7 +454,7 @@ export class InvestHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '跟车信号流：会员全量；非会员只看 30 天前的历史',
+    description: '跟车信号流：会员全量；非会员看执行日收盘后已公开的历史',
     functionName: 'investFollowSignals',
     name: 'investFollowSignals',
     path: '/invest/follow/signals',

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { InvestFollowService } from '../../src/service/invest/follow';
+import { InvestFollowService, execPassed, publicCutoff } from '../../src/service/invest/follow';
 import { combineCurves } from '../../src/service/invest/followCalc';
 import { beijingDay } from '../../src/common/signupSite';
 
@@ -10,7 +10,8 @@ import { beijingDay } from '../../src/common/signupSite';
  *  - 档案：总资金下限、起步日不早于今天、改总资金须确认重开账本（记账与流水一起清）；
  *  - 记账修改：只改自己的、edited 重算金额、auto 回到自动值；
  *  - 资金进出组合级：取出上限取「你的现金池 / 基准现金池」较小值；
- *  - 非会员信号流只看 30 天前的历史。
+ *  - 非会员信号流看执行日收盘（北京 15:00）后已公开的历史；
+ *  - 会员分层（2026-11-05）：执行日收盘前非会员只知道「今天有 N 个动作」；每人第一个信号免费看全。
  */
 class FakeDb {
   execs: { sql: string; params: any[] }[] = [];
@@ -18,6 +19,12 @@ class FakeDb {
   async q(sql: string, params: any[] = []) {
     const d = this.data;
     if (sql.includes('MAX(trade_date) d FROM broad_leg_state')) return [{ d: d.stateDate }];
+    if (sql.includes('MIN(day) d FROM user_site_activity')) return [{ d: d.firstDay ?? '20261001' }];
+    if (sql.includes('MIN(signal_date) d FROM broad_signal WHERE exec_date >=')) {
+      if (d.trialFail) throw new Error('db down');
+      const all = [...(d.hist || []), ...(d.today || [])].filter((r: any) => r.exec_date >= params[0]).map((r: any) => r.signal_date).sort();
+      return [{ d: all[0] ?? null }];
+    }
     if (sql.includes('FROM broad_leg_state WHERE trade_date')) return d.legs || [];
     if (sql.includes('MAX(signal_date) d FROM broad_signal')) return [{ d: d.sigDate }];
     if (sql.includes('FROM broad_signal WHERE signal_date')) return (d.today || []).filter((r: any) => r.signal_date === params[0]);
@@ -55,6 +62,18 @@ class FakeDb {
   }
   async exec(sql: string, params: any[] = []) {
     this.execs.push({ sql, params });
+  }
+}
+
+/** 把 Date.now 固定到北京时间某一刻，跑完复原 */
+async function atBj(iso: string, fn: () => Promise<void>) {
+  const real = Date.now;
+  const t = Date.parse(iso + '+08:00');
+  Date.now = () => t;
+  try {
+    await fn();
+  } finally {
+    Date.now = real;
   }
 }
 
@@ -335,7 +354,7 @@ describe('invest/follow.ts — 跟车服务层（一个总资金）', () => {
     assert.strictEqual(e3.fee, 0.96);
   });
 
-  it('信号流：非会员只看 30 天前的历史且不带比例', async () => {
+  it('信号流：非会员看执行日收盘后已公开的历史且不带比例', async () => {
     const hist = [
       { signal_date: '20261030', leg: '红利', kind: 'sell', seq: 0, exec_date: '20261102', etf: '515080.SH', side: 'sell', frac: 0.05 },
       { signal_date: '20260901', leg: '沪深300', kind: 'anchor_buy', seq: 0, exec_date: '20260902', etf: '510300.SH', side: 'buy', frac: 0.2 },
@@ -344,10 +363,94 @@ describe('invest/follow.ts — 跟车服务层（一个总资金）', () => {
     const m = await s.signals(true, 10);
     assert.strictEqual(m.rows.length, 2);
     assert.strictEqual((m.rows[0] as any).frac, 0.05);
-    const n = await s.signals(false, 10);
-    assert.strictEqual(n.rows.length, 1);
-    assert.strictEqual(n.rows[0].signal_date, '20260901');
-    assert.ok(!('frac' in n.rows[0]));
+    await atBj('2026-11-02T14:59:00', async () => {
+      const n = await s.signals(false, 10);
+      assert.strictEqual(n.rows.length, 1, '执行日收盘前当天信号不公开');
+      assert.strictEqual(n.rows[0].signal_date, '20260901');
+      assert.ok(!('frac' in n.rows[0]));
+    });
+    await atBj('2026-11-02T15:00:00', async () => {
+      const n = await s.signals(false, 10);
+      assert.strictEqual(n.rows.length, 2, '执行日 15:00 后公开');
+      assert.ok(!('frac' in n.rows[0]));
+    });
+  });
+
+  it('execPassed / publicCutoff：按北京时间执行日 15:00 分界', () => {
+    const bj = (iso: string) => Date.parse(iso + '+08:00');
+    assert.strictEqual(execPassed(null, bj('2026-11-02T10:00:00')), true);
+    assert.strictEqual(execPassed('20261102', bj('2026-11-01T23:00:00')), false);
+    assert.strictEqual(execPassed('20261102', bj('2026-11-02T14:59:59')), false);
+    assert.strictEqual(execPassed('20261102', bj('2026-11-02T15:00:00')), true);
+    assert.strictEqual(execPassed('20261102', bj('2026-11-03T08:00:00')), true);
+    assert.strictEqual(publicCutoff(bj('2026-11-02T14:00:00')), '20261102');
+    assert.strictEqual(publicCutoff(bj('2026-11-02T15:30:00')), '20261103');
+    // UTC 跨日也按北京日：北京 11-03 07:00 = UTC 11-02 23:00
+    assert.strictEqual(publicCutoff(bj('2026-11-03T07:00:00')), '20261103');
+  });
+
+  it('会员分层：执行日收盘前非会员只拿「今天有几个动作」，不知道哪个指数、买还是卖', async () => {
+    await atBj('2026-11-02T10:00:00', async () => {
+      const { s } = svc({ ...market, firstDay: '20261001' });
+      const r: any = await s.overview('u1', false, null);
+      assert.strictEqual(r.member, false);
+      assert.strictEqual(r.trial, false);
+      assert.strictEqual(r.market.today_locked, true);
+      assert.strictEqual(r.market.today.length, 3, '动作个数照给');
+      for (const t of r.market.today) assert.deepStrictEqual(Object.keys(t).sort(), ['exec_date', 'signal_date']);
+      // 10-30 的信号执行日 11-02 早于方案上线日 → 不算这个人的体验，体验仍待用
+      assert.strictEqual(r.trial_pending, true);
+    });
+  });
+
+  it('会员分层：每人遇到的第一个信号日在执行日收盘前免费看全（比例），之后的信号日回到只给个数', async () => {
+    const shift = (r: any) => ({ ...r, signal_date: '20261127', exec_date: '20261130', trade_date: r.trade_date ? '20261127' : undefined, data_date: r.data_date ? '20261127' : undefined });
+    const nov = {
+      ...market,
+      stateDate: '20261127',
+      sigDate: '20261127',
+      cal: ['20261127', '20261130', '20261201', '20261204', '20261231'],
+      legs: market.legs.map((l: any) => ({ ...l, trade_date: '20261127', data_date: '20261127' })),
+      today: market.today.map(shift),
+      firstDay: '20261110',
+    };
+    await atBj('2026-11-30T09:30:00', async () => {
+      const r: any = await svc(nov).s.overview('u1', false, null);
+      assert.strictEqual(r.member, true, '体验期按会员口径给');
+      assert.strictEqual(r.trial, true);
+      assert.strictEqual(r.trial_signal_date, '20261127');
+      assert.strictEqual(r.market.today[0].frac, 0.5);
+    });
+    await atBj('2026-11-30T15:10:00', async () => {
+      const r: any = await svc(nov).s.overview('u1', false, null);
+      assert.strictEqual(r.trial, false, '执行日收盘后体验结束，明细对所有人公开');
+      assert.strictEqual(r.market.today_locked, false);
+      assert.strictEqual(r.market.today[0].side, 'buy');
+      assert.ok(!('frac' in r.market.today[0]));
+    });
+    // 体验已用在更早的信号上：这次只给个数
+    const used = { ...nov, hist: [{ signal_date: '20261113', leg: '红利', kind: 'sell', seq: 0, exec_date: '20261116', etf: '515080.SH', side: 'sell', frac: 0.05 }] };
+    await atBj('2026-11-30T09:30:00', async () => {
+      const r: any = await svc(used).s.overview('u1', false, null);
+      assert.strictEqual(r.trial, false);
+      assert.strictEqual(r.trial_pending, false);
+      assert.strictEqual(r.market.today_locked, true);
+    });
+    // 读库失败：不放大权限，也不承诺体验
+    await atBj('2026-11-30T09:30:00', async () => {
+      const r: any = await svc({ ...nov, trialFail: true }).s.overview('u1', false, null);
+      assert.strictEqual(r.member, false);
+      assert.strictEqual(r.trial_pending, false);
+      assert.strictEqual(r.market.today_locked, true);
+    });
+  });
+
+  it('非会员也能保存总资金（首个信号体验时按它换算），总览回带档案', async () => {
+    const { s } = svc({ ...market, profile: { principal: 50000, start_date: '20261105', status: 'active', fee_rate: 0.0003, min_fee: 5 } });
+    const r: any = await s.overview('u1', false, null);
+    assert.strictEqual(r.profile.principal, 50000);
+    assert.strictEqual(r.legs.length, 0);
+    assert.strictEqual(r.totals, null);
   });
 
   it('combineCurves：并集日期、前向填充、起步前按本金计', () => {
