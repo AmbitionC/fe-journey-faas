@@ -111,6 +111,8 @@ describe('邀请拉新（真 MySQL）', function () {
     const late = await r.recordSignup({ inviteeId: 'stale', code: 'CODE3', requireWindow: true });
     assert.deepStrictEqual(late, { status: 'ignored', reason: 'too_late' });
     const ok = await r.recordSignup({ inviteeId: 'fresh', code: 'CODE3', ip: '9.9.9.9', requireWindow: true, product: 'agent' });
+    const viaRow = await q("SELECT via FROM referral WHERE invitee_id = 'fresh'");
+    assert.strictEqual(viaRow[0].via, 'bind', '补填入口记为 bind');
     assert.strictEqual(ok.status, 'rewarded');
     const s = await r.stats('fresh');
     assert.strictEqual(s.canBind, false, '绑过之后不能再补填');

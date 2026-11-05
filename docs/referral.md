@@ -33,3 +33,21 @@ Agent Journey、Invest Journey、栗栗学英语（little-circle）共用一套�
 6. 新产品要加一个 `ReferralProduct` 值和一份 `REFERRAL_PROGRAMS` 配置；要送会员天数，先让该产品的会员判定认 `member_entitlement`。
 
 埋点：`referral_signup`（props.via = signup / sms / bind）、`referral_member`。
+
+## 埋点与看板（2026-11-05）
+
+漏斗：看到邀请卡 → 分享 → 好友带码落地 → 横幅曝光 / 点击 → 建立邀请关系 → 好友开会员。
+
+| 步骤 | 事件 / 数据 | 位置 |
+|---|---|---|
+| 看到邀请卡 | `invite_card_view` | 前端 event_log |
+| 分享 | `invite_share { via: link / qr / text }` | 前端 event_log |
+| 带码落地 | `invite_landing { code, page, loggedIn }` | 前端 event_log |
+| 横幅 | `invite_banner_view` / `invite_banner_click` | 前端 event_log |
+| 补填 | `invite_bind { status }` | 前端 event_log |
+| 注册 | `signup_success { method, invited, referral }` | 前端 event_log |
+| 建立关系 | `referral` 表（`via` signup / sms / bind，`hold_reason`）+ `referral_signup`（含被拒的 ignored + reason） | 库 / mcp_event |
+| 好友付费 | `referral.member_reward_at` + `referral_member { points, days }` | 库 / mcp_event |
+
+汇总：`GET /growth/referral?days=30`（管理员），并进 `/growth/export` 的 `referral` 字段（复盘用）。
+口径在 `src/service/growth/referralSummary.ts`：窗口内发生数、排除内部账号、单项失败为 null、邀请人脱敏。

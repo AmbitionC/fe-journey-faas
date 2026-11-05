@@ -245,6 +245,8 @@ export class ReferralStore {
           product VARCHAR(16) NOT NULL DEFAULT 'agent',
           ip VARCHAR(64) NULL,
           status VARCHAR(16) NOT NULL DEFAULT 'rewarded',
+          hold_reason VARCHAR(16) NULL,
+          via VARCHAR(16) NOT NULL DEFAULT 'signup',
           invitee_days INT NOT NULL DEFAULT 0,
           inviter_days INT NOT NULL DEFAULT 0,
           member_bonus_days INT NOT NULL DEFAULT 0,
@@ -270,6 +272,11 @@ export class ReferralStore {
           add.push('ADD COLUMN inviter_days INT NOT NULL DEFAULT 0');
         if (!names.has('member_bonus_days'))
           add.push('ADD COLUMN member_bonus_days INT NOT NULL DEFAULT 0');
+        // 埋点（2026-11-05）：冻结原因、从哪个入口建立的关系（signup 密码注册 / sms 短信建号 / bind 补填）
+        if (!names.has('hold_reason'))
+          add.push('ADD COLUMN hold_reason VARCHAR(16) NULL');
+        if (!names.has('via'))
+          add.push("ADD COLUMN via VARCHAR(16) NOT NULL DEFAULT 'signup'");
         if (add.length) await this.q(`ALTER TABLE referral ${add.join(', ')}`);
       })().catch(e => {
         this.schemaReady = null;
@@ -391,6 +398,8 @@ export class ReferralStore {
     ip?: string | null;
     product?: string | null;
     requireWindow?: boolean;
+    /** 从哪个入口建立的关系：signup / sms / bind（埋点与看板拆分用） */
+    via?: string | null;
   }): Promise<SignupOutcome> {
     const code = sanitizeCode(p.code);
     if (!code)
@@ -424,9 +433,17 @@ export class ReferralStore {
 
     const r = await this.q(
       hold
-        ? "INSERT IGNORE INTO referral (invitee_id, inviter_id, code, product, ip, status, signup_reward_at) VALUES (?, ?, ?, ?, ?, 'held', NULL)"
-        : "INSERT IGNORE INTO referral (invitee_id, inviter_id, code, product, ip, status, signup_reward_at) VALUES (?, ?, ?, ?, ?, 'rewarded', NOW())",
-      [p.inviteeId, inviter, code, product, ip]
+        ? "INSERT IGNORE INTO referral (invitee_id, inviter_id, code, product, ip, via, hold_reason, status, signup_reward_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'held', NULL)"
+        : "INSERT IGNORE INTO referral (invitee_id, inviter_id, code, product, ip, via, hold_reason, status, signup_reward_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'rewarded', NOW())",
+      [
+        p.inviteeId,
+        inviter,
+        code,
+        product,
+        ip,
+        String(p.via || (p.requireWindow ? 'bind' : 'signup')).slice(0, 16),
+        hold,
+      ]
     );
     if (Number(r?.affectedRows ?? 0) === 0)
       return { status: 'ignored', reason: 'exists' };

@@ -43,14 +43,15 @@ export class ReferralService {
     product: string,
     via: string
   ) {
-    if (r.status === 'ignored') return;
+    // 被忽略的（无效码 / 互邀 / 已绑过 / 过了补填期）也记：无效码多说明分享文案或落地页有问题
+    if (r.status === 'ignored' && r.reason === 'no_code') return;
     await this.analytics
       ?.track({
         event: 'referral_signup',
         userId: inviteeId,
         product,
         props: {
-          inviter: r.inviter,
+          inviter: (r as any).inviter || null,
           status: r.status,
           reason: (r as any).reason || null,
           via,
@@ -77,6 +78,7 @@ export class ReferralService {
         code,
         ip,
         product: p,
+        via,
       });
       await this.trackOutcome(inviteeId, r, p, via);
       return r;
@@ -100,6 +102,7 @@ export class ReferralService {
       ip,
       product: p,
       requireWindow: true,
+      via: 'bind',
     });
     await this.trackOutcome(inviteeId, r, p, 'bind');
     return r;
