@@ -11,6 +11,7 @@ import { GrowthReviewEntity } from '../../entity/growthReview';
 import { buildPdfSalesReport, pdfSalesWindow } from './pdfSales';
 import { InvestDbService } from '../invest/db';
 import { skillSummary } from './skillSummary';
+import { referralSummary } from './referralSummary';
 import { findSku } from '../../mcp/billing';
 import { ArticleViewLogEntity } from '../../entity/articleViewLog';
 import { EntitlementService } from '../entitlement';
@@ -816,6 +817,15 @@ export class GrowthService {
       })
     );
     return { days, list };
+  }
+
+  /** 邀请裂变漏斗汇总（口径见 ./referralSummary）。 */
+  async referralSummary(days = 7, exclude?: string[]) {
+    return referralSummary(
+      (sql, params) => this.eventLogModel.manager.query(sql, params),
+      days,
+      this.excludedUserIds(exclude)
+    );
   }
 
   /** Skill / MCP 开发者服务的经营汇总（口径见 ./skillSummary）。 */

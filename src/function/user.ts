@@ -81,11 +81,18 @@ export class UserHTTPService {
     await this.guardSignupRate();
     // 客户端传来的邀请码在建号前取出：toEntity 会把 DTO 原样落库，而 inviteCode 列是**自己的**邀请码
     const invitedBy = String(data.inviteCode || '').trim();
+    const referralProduct = data.referralProduct;
     delete (data as any).inviteCode;
+    delete (data as any).referralProduct;
     const res = await this.userService.createUser(data);
     await this.recordSignupSite(data.phoneNumber);
     if (invitedBy && res?.success) {
-      const referral = await this.referralService.recordSignup(data.phoneNumber, invitedBy, this.clientIp());
+      const referral = await this.referralService.recordSignup(
+        data.phoneNumber,
+        invitedBy,
+        this.clientIp(),
+        referralProduct
+      );
       if (referral && res.data) res.data.referral = referral;
     }
     return res;
@@ -102,10 +109,10 @@ export class UserHTTPService {
     path: '/user/referral',
     method: 'get',
   })
-  async userReferral(): Promise<any> {
+  async userReferral(@Query('product') product?: string): Promise<any> {
     const uid = await this.resolveUserId();
     if (!uid) throw R.unauthorizedError('未登录或登录已过期');
-    const data = await this.referralService.stats(uid);
+    const data = await this.referralService.stats(uid, product);
     return { success: true, data };
   }
 

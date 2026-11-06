@@ -88,6 +88,7 @@ export class GrowthHTTPService {
       serviceModalOpens,
       skill,
       eventBreakdown,
+      referral,
     ] = await Promise.all([
         this.metricsService.overview(excludeUsers).catch(() => null),
         this.growthService.overview(excludeUsers).catch(() => null),
@@ -111,6 +112,7 @@ export class GrowthHTTPService {
         this.growthService.serviceModalOpens(days, excludeUsers).catch(() => null),
         this.growthService.skillSummary(days, excludeUsers).catch(() => null),
         this.growthService.eventBreakdown(days, excludeUsers).catch(() => null),
+        this.growthService.referralSummary(days, excludeUsers).catch(() => null),
       ]);
     return {
       success: true,
@@ -136,8 +138,19 @@ export class GrowthHTTPService {
         serviceModalOpens,
         skill,
         eventBreakdown,
+        referral,
       },
     };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '邀请裂变漏斗（管理员只读，只出计数与脱敏邀请人）',
+    functionName: 'growthReferral', name: 'growthReferral', path: '/growth/referral', method: 'get',
+  })
+  async referral(@Query(ALL) query: { days?: number }) {
+    await assertAdmin(this.ctx, this.redisService);
+    const days = Math.min(Math.max(Number(query?.days) || 30, 1), 180);
+    return { success: true, data: await this.growthService.referralSummary(days) };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
