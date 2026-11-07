@@ -1,6 +1,11 @@
 import { Rule, RuleType } from '@midwayjs/validate';
 
-const CONTENT_MODULES = ['interview', 'knowledge', 'firstclass'] as const;
+const CONTENT_MODULES = [
+  'interview',
+  'knowledge',
+  'firstclass',
+  'soe',
+] as const;
 
 export class TreeQueryDTO {
   @Rule(

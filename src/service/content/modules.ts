@@ -3,7 +3,7 @@
  *
  * 模块名(module) 与仓库/OSS 目录名的映射，以及扁平模块标记。
  *
- * - interview / knowledge: 目录名 == 模块名，路径为 {module}/{filePath}/{key}.md
+ * - interview / knowledge / soe: 目录名 == 模块名，路径为 {module}/{filePath}/{key}.md
  * - firstclass: 目录名 = 'class'，扁平布局，路径为 class/{key}.md（无 filePath）
  */
 
@@ -12,13 +12,15 @@ export const MODULE_DIR: Record<string, string> = {
   interview: 'interview',
   knowledge: 'knowledge',
   firstclass: 'class',
+  // 央国企科技岗目标（2026-11-07）：resource 仓 soe/，布局同 knowledge
+  soe: 'soe',
 };
 
 /** 扁平模块集合（无 filePath 子目录） */
 export const FLAT_MODULES = new Set(['firstclass']);
 
 /** 所有支持的模块 */
-export const ALL_MODULES = ['interview', 'knowledge', 'firstclass'];
+export const ALL_MODULES = ['interview', 'knowledge', 'firstclass', 'soe'];
 
 /** 获取模块对应的仓库/OSS 目录名 */
 export function repoDir(m: string): string {

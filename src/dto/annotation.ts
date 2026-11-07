@@ -1,6 +1,6 @@
 import { Rule, RuleType } from '@midwayjs/validate';
 
-const MODULE_ENUM = ['interview', 'knowledge', 'firstclass'];
+const MODULE_ENUM = ['interview', 'knowledge', 'firstclass', 'soe'];
 
 export class CreateAnnotationDTO {
   @Rule(RuleType.string().max(20).optional())
