@@ -314,6 +314,7 @@ export class AiProxyService {
         latencyMs: Date.now() - started,
         tokenUsed,
         status: 'success',
+        mode: this.aiConfig.model,
       });
       return this.extractContent(result);
     } catch (err: any) {
@@ -527,7 +528,7 @@ export class AiProxyService {
     if (this.isOpenAiStyle()) {
       // 深度思考：DeepSeek V4 起，思考模式改为「请求体参数」而非独立模型名。
       // 旧的 deepseek-reasoner 模型名于 2026-07-24 弃用——统一用 aiConfig.model
-      //（deepseek-flash）+ thinking 参数触发思考；reasoning_content 仍在
+      //（deepseek-flash＝V4.1 Flash）+ thinking 参数触发思考；reasoning_content 仍在
       // delta.reasoning_content 流式返回（extractStreamContent 已读取）。
       const body: Record<string, unknown> = {
         model: this.aiConfig.model,
@@ -626,6 +627,11 @@ export class AiProxyService {
       });
       throw err;
     }
+  }
+
+  /** 主模型名（问答 / 思考 / 模拟面试共用；真源 config/llmModel.ts） */
+  chatModel(): string {
+    return this.aiConfig.model;
   }
 
   /** 报告模型名（配置可覆盖，缺省回退主模型） */

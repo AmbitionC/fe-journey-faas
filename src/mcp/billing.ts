@@ -274,10 +274,10 @@ export function findSku(sku: string): Sku | undefined {
 /**
  * Iris（网站内的 AI 面试教练）各模式扣点（owner 2026-11-02：「Iris 的调用也应该算到 credit」）。
  * 键即点数流水的 ref（`iris_<mode>`），与 Skill 工具并列进经营看板的 topTools。
- * - chat：普通问答 / 考一考 / 划线问 / 算法提示与点评 / 简答判分（deepseek-flash 非思考）
+ * - chat：普通问答 / 考一考 / 划线问 / 算法提示与点评 / 简答判分（DeepSeek V4.1 Flash 非思考）
  * - think：深度思考问答（思考链约再花 2000 tokens，成本翻倍）
  * - interview：模拟面试每一轮（会员专享）
- * - report：模拟面试复盘报告（deepseek-v4-pro，会员专享）
+ * - report：模拟面试复盘报告（2026-11-07 起同为 V4.1 Flash，会员专享）
  * 成本参照（高峰价）：一次问答约 ¥0.016–0.02，1 点名义 ¥0.1、会员实付 ¥0.036–0.0725。
  */
 export type IrisMode = 'chat' | 'think' | 'interview' | 'report';

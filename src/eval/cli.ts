@@ -4,10 +4,11 @@
  * 结果可接入 PRD-04 可观测看板（此处先落地为 JSON 报告）。
  */
 import fetch from 'node-fetch';
+import { resolveLlmModel } from '../config/llmModel';
 import { runEval, CallLLM } from './runner';
 
 const API_KEY = process.env.LLM_API_KEY || '';
-const MODEL = process.env.LLM_MODEL || 'deepseek-flash';
+const MODEL = resolveLlmModel(process.env.LLM_PROVIDER, process.env.LLM_MODEL);
 const BASE = process.env.LLM_BASE || 'https://api.deepseek.com/chat/completions';
 
 const callDeepSeek: CallLLM = async (system, user) => {

@@ -1,4 +1,5 @@
 import { Inject, Provide } from '@midwayjs/core';
+import { resolveLlmModel } from '../../config/llmModel';
 import { RedisService } from '@midwayjs/redis';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -118,7 +119,7 @@ export class OpsExecutorService {
       await this.reviewModel.save(
         this.reviewModel.create({
           taskId: Number(task.id),
-          reviewerModel: process.env.LLM_MODEL || 'deepseek-flash',
+          reviewerModel: resolveLlmModel(process.env.LLM_PROVIDER, process.env.LLM_MODEL),
           verdict: review.verdict,
           confidence: review.confidence,
           issues: review.issues,
