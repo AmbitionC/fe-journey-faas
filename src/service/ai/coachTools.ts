@@ -23,7 +23,7 @@ export interface ToolContext {
   citations: Map<string, Citation>;
 }
 
-const CONTENT_MODULES = ALL_MODULES; // ['interview','knowledge','firstclass']
+const CONTENT_MODULES = ALL_MODULES; // ['interview','knowledge','firstclass','soe']
 
 /**
  * 教练 agentic 工具层（PRD-04 F4 / 检索设计 §2）。

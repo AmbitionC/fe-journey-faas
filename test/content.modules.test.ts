@@ -133,11 +133,21 @@ describe('modules.ts — 核心工具函数', () => {
   // ALL_MODULES
   // ------------------------------------------------------------------
   describe('ALL_MODULES', () => {
-    it('包含三个模块', () => {
+    it('包含四个模块（含央国企科技岗 soe）', () => {
       assert.deepStrictEqual(
         ALL_MODULES.slice().sort(),
-        ['firstclass', 'interview', 'knowledge']
+        ['firstclass', 'interview', 'knowledge', 'soe']
       );
+    });
+
+    it('soe 与 knowledge 同布局：soe/{filePath}/{key}.md', () => {
+      assert.strictEqual(
+        articlePath('soe', 'bank-tech', 'soe-os-mcq'),
+        'soe/bank-tech/soe-os-mcq.md'
+      );
+      assert.strictEqual(manifestPath('soe'), 'soe/_tree.json');
+      assert.strictEqual(moduleOfPath('soe/bank-tech/x.md'), 'soe');
+      assert.strictEqual(isTreeManifest('soe/_tree.json'), true);
     });
   });
 });

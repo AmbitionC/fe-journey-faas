@@ -12,7 +12,12 @@ export const READING_QUOTA = Object.freeze({
 });
 
 /** 受额度约束的模块；其余模块（项目文章等）不拦。 */
-export const QUOTA_MODULES = ['interview', 'knowledge', 'algorithm'] as const;
+export const QUOTA_MODULES = [
+  'interview',
+  'knowledge',
+  'algorithm',
+  'soe',
+] as const;
 
 export interface QuotaDecision {
   allowed: boolean;
