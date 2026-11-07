@@ -1,4 +1,5 @@
 import { MidwayConfig } from '@midwayjs/core';
+import { resolveLlmModelFromEnv } from './llmModel';
 import * as redisStore from 'cache-manager-ioredis';
 import { UserEntity } from '../entity/user';
 import { InterviewEntity } from '../entity/interview';
@@ -79,6 +80,9 @@ const DB_USER = process.env.DB_USER || '';
 const DB_PASS = process.env.DB_PASS || '';
 const REDIS_HOST = process.env.REDIS_HOST || '';
 const REDIS_PASS = process.env.REDIS_PASS || '';
+
+/** 启动期解析一次，供 ai / health.chat 两处复用 */
+const LLM_MODELS = resolveLlmModelFromEnv();
 
 export default {
   cors: {
@@ -164,7 +168,7 @@ export default {
           ? 'https://api.openai.com/v1'
           : 'https://api.deepseek.com'),
       apiKey: process.env.HEALTH_CHAT_API_KEY || process.env.LLM_API_KEY || '',
-      model: process.env.HEALTH_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-flash',
+      model: process.env.HEALTH_CHAT_MODEL || LLM_MODELS.model,
     },
   },
   typeorm: {
@@ -253,13 +257,14 @@ export default {
   ai: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
     apiKey: process.env.LLM_API_KEY || '',
-    // 2026-11-02 起默认 deepseek-flash（DeepSeek V4.1-Flash）。deepseek-v4-flash 已于 2026-09-10 下线，
-    // 官方临时转发到 Flash 并按 Flash 计费；deepseek-chat / deepseek-reasoner 2026-07-24 弃用。
+    // 模型名真源在 ./llmModel.ts：2026-11-07 owner 定全部换到 DeepSeek V4.1 Flash（官方模型名就是
+    // deepseek-flash，当前指向 V4.1-Flash-1017）。线上 LLM_MODEL / IRIS_REPORT_MODEL 若还是
+    // deepseek-chat / deepseek-v4-flash / deepseek-v4-pro 等旧名会被归一到 Flash 并打一行日志。
     // 非思考 / 思考同一个模型名，思考由请求体 thinking 参数控制（见 proxy.buildRequestBody）；
     // ⚠️ DeepSeek 把 thinking 与 reasoning_effort 都省略时默认**开启**思考，所以非思考必须显式传 disabled。
-    model: process.env.LLM_MODEL || 'deepseek-flash',
-    // 面试复盘报告（Iris 会员专享、5 点一份、低频长输出）单独走更强的模型；可用 IRIS_REPORT_MODEL 覆盖
-    reportModel: process.env.IRIS_REPORT_MODEL || 'deepseek-v4-pro',
+    model: LLM_MODELS.model,
+    // 面试复盘报告（Iris 会员专享、5 点一份、低频长输出）：2026-11-07 起同样走 Flash；可用 IRIS_REPORT_MODEL 覆盖
+    reportModel: LLM_MODELS.reportModel,
     rateLimit: {
       freeUserPerDay: parseInt(process.env.AI_RATE_FREE || '10', 10),
       freeWindowSeconds: 86400,

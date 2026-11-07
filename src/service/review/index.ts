@@ -1,4 +1,5 @@
 import { Provide, Inject, Config } from '@midwayjs/core';
+import { resolveLlmModel } from '../../config/llmModel';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository, In } from 'typeorm';
 import fetch from 'node-fetch';
@@ -115,7 +116,7 @@ export class ReviewService {
         report: parsed.report,
         repoSnapshot,
         makeupArticles: parsed.makeupArticles || null,
-        reviewerModel: process.env.LLM_MODEL || 'deepseek-flash',
+        reviewerModel: resolveLlmModel(process.env.LLM_PROVIDER, process.env.LLM_MODEL),
         humanChecked: false,
         shareCode: verdict === 'pass' ? genShareCode() : null,
       })

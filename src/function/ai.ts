@@ -263,7 +263,14 @@ export class AiHTTPService {
   async aiQuota() {
     const { userId, isMember } = await this.resolveUser();
     const quota = await this.irisCredit.quota(userId, isMember);
-    return { success: true, data: quota };
+    // 透出实际生效的模型名（非敏感）：线上模型由环境变量决定、仓库里看不到，这里是唯一能从外部核验的地方
+    return {
+      success: true,
+      data: {
+        ...quota,
+        models: { chat: this.aiProxyService.chatModel(), report: this.aiProxyService.reportModel() },
+      },
+    };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
