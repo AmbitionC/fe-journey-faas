@@ -27,6 +27,7 @@ import {
 } from './selfServe';
 import { AlipayConfig, loadAlipayConfig } from './alipay';
 import { Analytics, clientOf, sanitizeWebBatch, track } from './analytics';
+import { ReferralStore } from './referral';
 import {
   argsHash,
   argsJson,
