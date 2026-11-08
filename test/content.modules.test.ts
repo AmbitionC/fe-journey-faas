@@ -133,11 +133,19 @@ describe('modules.ts — 核心工具函数', () => {
   // ALL_MODULES
   // ------------------------------------------------------------------
   describe('ALL_MODULES', () => {
-    it('包含四个模块（含央国企科技岗 soe）', () => {
+    it('包含五个模块（含央国企科技岗 soe、考公选岗 civil）', () => {
       assert.deepStrictEqual(
         ALL_MODULES.slice().sort(),
-        ['firstclass', 'interview', 'knowledge', 'soe']
+        ['civil', 'firstclass', 'interview', 'knowledge', 'soe']
       );
+    });
+
+    it('civil 与 knowledge 同布局：civil/{filePath}/{key}.md', () => {
+      assert.strictEqual(
+        articlePath('civil', 'guokao', 'civil-guokao-2027-tech-positions'),
+        'civil/guokao/civil-guokao-2027-tech-positions.md'
+      );
+      assert.strictEqual(manifestPath('civil'), 'civil/_tree.json');
     });
 
     it('soe 与 knowledge 同布局：soe/{filePath}/{key}.md', () => {

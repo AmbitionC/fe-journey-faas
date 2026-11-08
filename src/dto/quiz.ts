@@ -1,6 +1,6 @@
 import { Rule, RuleType } from '@midwayjs/validate';
 
-const MODULE_ENUM = ['interview', 'knowledge', 'firstclass', 'soe'];
+const MODULE_ENUM = ['interview', 'knowledge', 'firstclass', 'soe', 'civil'];
 
 export class QuizListQueryDTO {
   @Rule(RuleType.string().valid(...MODULE_ENUM).required())

@@ -17,6 +17,7 @@ export const QUOTA_MODULES = [
   'knowledge',
   'algorithm',
   'soe',
+  'civil',
 ] as const;
 
 export interface QuotaDecision {
