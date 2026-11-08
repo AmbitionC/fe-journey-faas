@@ -31,7 +31,19 @@ export async function skillSummary(q: QueryFn, days: number, exclude: string[]) 
       ? null
       : { orders: num(r, 'orders'), users: num(r, 'users'), yuan: Number(r.cents || 0) / 100 };
 
-  const [page, activated, keys, connected, called, ordered, paid, monthPaid] = await Promise.all([
+  const paidRows = async (): Promise<Record<string, any>[] | null> => {
+    try {
+      const rows = await q(
+        `SELECT props FROM mcp_event WHERE event = 'order_paid' AND ${win('created_at')}${notIn('user_id')} ORDER BY created_at DESC LIMIT 50`,
+        [d, ...ex]
+      );
+      return rows || [];
+    } catch {
+      return null;
+    }
+  };
+
+  const [page, activated, keys, connected, called, ordered, paid, monthPaid, paidEvents] = await Promise.all([
     one(
       "SELECT COUNT(DISTINCT CASE WHEN event = 'page_view' THEN anon_id END) visitors, " +
         "COUNT(DISTINCT CASE WHEN event IN ('install_select','copy_click') THEN anon_id END) installIntent " +
@@ -64,6 +76,7 @@ export async function skillSummary(q: QueryFn, days: number, exclude: string[]) 
         `AND paid_at >= DATE_FORMAT(NOW(), '%Y-%m-01')${notIn('user_id')}`,
       [...ex]
     ),
+    paidRows(),
   ]);
 
   return {
@@ -78,5 +91,50 @@ export async function skillSummary(q: QueryFn, days: number, exclude: string[]) 
     ordered: money(ordered),
     paid: money(paid),
     monthPaid: money(monthPaid),
+    // 每笔到账从哪来（order_paid 带的下单入口与首触来源，见 src/mcp/attribution）；不含订单号和账号
+    paidSources: paidEvents == null ? null : paidSourcesOf(paidEvents),
   };
+}
+
+/** 到账来源里的字符串字段：只放行看得懂的短串（含中文），像号码的、过长的一律「(其他)」，缺失为 null。 */
+function safeStr(v: any): string | null {
+  if (v == null || v === '') return null;
+  const s = String(v);
+  return /^[\w\-./:%@+~\u4e00-\u9fa5]{1,64}$/.test(s) && !/\d{7,}/.test(s) ? s : '(其他)';
+}
+
+/**
+ * 到账来源明细（2026-11-08）：上周写死的读法是「付款 ≥ 1 → 记下渠道和用了几天」。
+ * 一笔一行，最多 20 行，排除 1 分钱测试单；「用了几天」取首触距下单的天数 ftDays。
+ */
+export function paidSourcesOf(rows: { props?: any }[]) {
+  const out: Record<string, any>[] = [];
+  for (const r of rows || []) {
+    let p: any = r?.props;
+    if (typeof p === 'string') {
+      try {
+        p = JSON.parse(p);
+      } catch {
+        p = null;
+      }
+    }
+    if (!p || typeof p !== 'object' || p.sku === 'pay_test') continue;
+    const days = Number(p.ftDays);
+    out.push({
+      site: safeStr(p.site),
+      sku: safeStr(p.sku),
+      yuan: Number.isFinite(Number(p.amountCents)) ? Number(p.amountCents) / 100 : null,
+      channel: safeStr(p.channel),
+      entryPage: safeStr(p.entryPage),
+      entryCta: safeStr(p.entryCta),
+      entryFrom: safeStr(p.entryFrom),
+      ftRef: safeStr(p.ftRef),
+      ftCh: safeStr(p.ftCh),
+      ftLanding: safeStr(p.ftLanding),
+      ftDays: Number.isFinite(days) && days >= 0 ? Math.round(days) : null,
+      device: safeStr(p.device),
+    });
+    if (out.length >= 20) break;
+  }
+  return out;
 }

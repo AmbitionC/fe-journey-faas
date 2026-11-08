@@ -26,4 +26,17 @@ describe('eventBreakdown 属性拆分', () => {
       assert.strictEqual(propValueLabel(raw), '(其他)', raw);
     }
   });
+
+  it('属性是 path 时放行站内路径，仍挡掉像号码的和非路径', () => {
+    assert.strictEqual(propValueLabel('/interview/redbook-ai-21', 'path'), '/interview/redbook-ai-21');
+    assert.strictEqual(propValueLabel('/membership', 'path'), '/membership');
+    assert.strictEqual(propValueLabel('/u/13800138000', 'path'), '(其他)');
+    assert.strictEqual(propValueLabel('https://x.com/a', 'path'), '(其他)');
+    assert.strictEqual(propValueLabel('/interview/redbook-ai-21'), '(其他)');
+  });
+
+  it('渲染错误按页面拆，且只拆 kind=render 的', () => {
+    const entry = EVENT_PROP_BREAKDOWN.find(([e, p]) => e === 'app_error_card' && p === 'path');
+    assert.deepStrictEqual(entry && entry[2], ['kind', 'render']);
+  });
 });

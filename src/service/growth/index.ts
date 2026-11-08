@@ -114,20 +114,27 @@ export function countSignupSites(
  * 白屏是发版后旧分包失效（stale）还是网络（network）；提示卡是不是分包错误；Skill 入口是从哪个位置点进来的。
  * 只拆这里列出的（事件, 属性），值也只放行短标识长相（见 propValueLabel）——props 来自免登录的 /event/track。
  */
-export const EVENT_PROP_BREAKDOWN: [string, string][] = [
+export const EVENT_PROP_BREAKDOWN: [string, string, [string, string]?][] = [
   ['chunk_reload', 'kind'],
   ['app_error_card', 'chunk'],
   ['app_error_card', 'kind'],
+  // 只看渲染错误（不是分包失败）发生在哪个页面——那是改版代码的 bug，要能定位
+  ['app_error_card', 'path', ['kind', 'render']],
   ['home_cta_click', 'cta'],
   ['home_cta_click', 'placement'],
   ['skill_entry_click', 'placement'],
 ];
 
-/** 属性值的展示名：缺失为「(无)」，短标识（字母数字下划线连字符，≤32）原样，其余一律「(其他)」。 */
-export function propValueLabel(raw?: string | null): string {
+/**
+ * 属性值的展示名：缺失为「(无)」，短标识（字母数字下划线连字符，≤32）原样，其余一律「(其他)」。
+ * 属性是 path 时放行站内路径长相（/ 开头，≤80）。
+ */
+export function propValueLabel(raw?: string | null, prop?: string): string {
   if (raw == null || raw === '' || raw === 'null') return '(无)';
   const v = String(raw);
-  return /^[A-Za-z0-9_-]{1,32}$/.test(v) && !/\d{7,}/.test(v) ? v : '(其他)';
+  const ok =
+    prop === 'path' ? /^\/[A-Za-z0-9/_.-]{0,80}$/.test(v) : /^[A-Za-z0-9_-]{1,32}$/.test(v);
+  return ok && !/\d{7,}/.test(v) ? v : '(其他)';
 }
 
 /**
@@ -790,7 +797,7 @@ export class GrowthService {
     const since = new Date(Date.now() - days * 86400000);
     const ex = this.excludedUserIds(exclude);
     const list = await Promise.all(
-      EVENT_PROP_BREAKDOWN.map(async ([event, prop]) => {
+      EVENT_PROP_BREAKDOWN.map(async ([event, prop, filter]) => {
         try {
           const valExpr = `JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.${prop}'))`;
           const qb = this.eventLogModel
@@ -801,16 +808,23 @@ export class GrowthService {
             .where('e.event = :event', { event })
             .andWhere('e.createTime >= :since', { since })
             .groupBy(valExpr);
+          if (filter)
+            qb.andWhere(`JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.${filter[0]}')) = :fv`, { fv: filter[1] });
           if (ex.length) qb.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
           const merged = new Map<string, { value: string; count: number; users: number }>();
           for (const r of await qb.getRawMany()) {
-            const value = propValueLabel(r.value);
+            const value = propValueLabel(r.value, prop);
             const m = merged.get(value) || { value, count: 0, users: 0 };
             m.count += Number(r.count || 0);
             m.users += Number(r.users || 0);
             merged.set(value, m);
           }
-          return { event, prop, values: [...merged.values()].sort((a, b) => b.count - a.count) };
+          return {
+            event,
+            prop,
+            ...(filter ? { where: `${filter[0]}=${filter[1]}` } : {}),
+            values: [...merged.values()].sort((a, b) => b.count - a.count),
+          };
         } catch {
           return { event, prop, values: [], error: 'query_failed' };
         }

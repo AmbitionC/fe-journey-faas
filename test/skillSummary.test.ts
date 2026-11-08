@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { skillSummary } from '../src/service/growth/skillSummary';
+import { paidSourcesOf, skillSummary } from '../src/service/growth/skillSummary';
 
 /**
  * Skill / MCP 经营汇总（2026-11-01）：复盘导出免登录，这组用例钉住三条：
@@ -14,7 +14,7 @@ describe('skillSummary 开发者服务汇总', () => {
       return [{ n: 3, visitors: 9, installIntent: 4, users: 2, calls: 17, orders: 3, cents: 8700 }];
     };
     const out = await skillSummary(q, 7, ['13800000001']);
-    assert.strictEqual(seen.length, 8);
+    assert.strictEqual(seen.length, 9);
     for (const { sql, params } of seen) {
       assert.ok(/NOT IN \(\?\)/.test(sql), sql);
       assert.ok(params.includes('13800000001'), sql);
@@ -47,5 +47,22 @@ describe('skillSummary 开发者服务汇总', () => {
     const out = await skillSummary(q, 30, []);
     assert.ok(seen.every((s) => !/NOT IN/.test(s)));
     assert.ok(!/\d{7,}/.test(JSON.stringify(out)));
+  });
+
+  it('到账来源：一笔一行，排除测试单，不带订单号，怪字符串归「(其他)」', () => {
+    const rows = paidSourcesOf([
+      { props: JSON.stringify({ orderNo: 'MCP123', sku: 'member_month', amountCents: 1450, channel: 'alipay', site: 'agent', entryPage: 'member', entryCta: 'reading_quota_interview', ftRef: 'bing.com', ftDays: 2.4, device: 'mobile' }) },
+      { props: { sku: 'pay_test', amountCents: 1 } },
+      { props: { sku: 'member_month', amountCents: 1450, ftRef: '13800138000', ftDays: -1 } },
+      { props: 'not json' },
+    ]);
+    assert.strictEqual(rows.length, 2);
+    assert.deepStrictEqual(rows[0], {
+      site: 'agent', sku: 'member_month', yuan: 14.5, channel: 'alipay', entryPage: 'member',
+      entryCta: 'reading_quota_interview', entryFrom: null, ftRef: 'bing.com', ftCh: null, ftLanding: null, ftDays: 2, device: 'mobile',
+    });
+    assert.strictEqual(rows[1].ftRef, '(其他)');
+    assert.strictEqual(rows[1].ftDays, null);
+    assert.ok(!JSON.stringify(rows).includes('MCP123'));
   });
 });
