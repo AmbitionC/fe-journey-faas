@@ -1,0 +1,25 @@
+# 一次性排雷：只在 claude/project-thread-fny047 分支推送时运行，不部署、不改线上。
+name: iris-agent-probe
+on:
+  push:
+    branches: [claude/project-thread-fny047]
+    paths: ['spike/iris-agent-probe/**', '.github/workflows/iris-agent-probe.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+      - name: install
+        working-directory: spike/iris-agent-probe
+        run: npm install --no-audit --no-fund
+      - name: probe
+        working-directory: spike/iris-agent-probe
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: node probe.cjs
