@@ -23,6 +23,7 @@
     "eval": "ts-node src/eval/cli.ts"
   },
   "dependencies": {
+    "@ai-sdk/deepseek": "3.0.81",
     "@midwayjs/cache": "^3.12.0",
     "@midwayjs/captcha": "^3.16.5",
     "@midwayjs/core": "^3.12.0",
@@ -36,6 +37,7 @@
     "@midwayjs/swagger": "^3.11.16",
     "@midwayjs/typeorm": "^3.16.5",
     "@midwayjs/validate": "^3.16.5",
+    "ai": "7.0.165",
     "ali-oss": "^6.23.0",
     "bcryptjs": "^2.4.3",
     "cache-manager": "^5.2.3",
