@@ -143,9 +143,11 @@ async function runOne(engine: 'legacy' | 'aisdk', q: Q) {
   );
   const codeChars = [...text.matchAll(/```[\s\S]*?```/g)].reduce((s, m) => s + m[0].length, 0);
   const honestNone =
-    /(站内|本站|资料库|知识库|站点)[^。！\n]{0,20}(没有|暂无|未(找到|检索到|收录|覆盖|涉及)|缺少|并未|不包含)|没有(找到|检索到|搜到|查到)|未(找到|检索到|收录|搜到|查到)|暂无|不在(站内|本站)|超出.*范围/.test(
+    /(站内|本站|资料库|知识库|站点)[^。！\n]{0,40}(没有|暂无|未(找到|检索到|收录|覆盖|涉及)|缺少|并未|不包含)|没有(找到|检索到|搜到|查到)|未(找到|检索到|收录|搜到|查到)|暂无|不在(站内|本站)|超出.*范围/.test(
       text
     );
+  // 模型把工具调用写进正文（DeepSeek 的 DSML 标记或 JSON）并漏给用户
+  const leakedToolCall = /DSML|<\s*tool_call|"name"\s*:\s*"(search_articles|read_article|get_catalog)"/.test(text);
   const hitExpected = (q.expect || []).filter((k) => citations.some((c) => c.articleKey === k)).length;
   return {
     engine,
@@ -159,6 +161,7 @@ async function runOne(engine: 'legacy' | 'aisdk', q: Q) {
     fakeTitles,
     codeChars,
     honestNone,
+    leakedToolCall,
     hitExpected,
     expected: (q.expect || []).length,
     tokenUsed: logged?.tokenUsed ?? null,
@@ -181,6 +184,7 @@ function verdict(rows: any[]) {
     引用率: `${answerable.filter((r) => r.citations.length > 0).length}/${answerable.length}`,
     命中预期文章: `${answerable.reduce((s, r) => s + r.hitExpected, 0)}/${answerable.reduce((s, r) => s + r.expected, 0)}`,
     站内没有如实说: `${none.filter((r) => r.honestNone).length}/${none.length}`,
+    工具调用漏给用户: rows.filter((r) => r.leakedToolCall).map((r) => r.id).join(',') || '无',
     边界题代码字符: boundary.map((r) => r.codeChars).join(','),
     降级次数: rows.filter((r) => r.fallback && (r.fallback.includes('call_error') || r.fallback.includes('final_fallback') || r.fallback.includes('textual_parse'))).length,
     报错: rows.filter((r) => r.error).length,
@@ -194,6 +198,7 @@ function verdict(rows: any[]) {
     v.正文书名号无编造 &&
     answerable.filter((r) => r.citations.length > 0).length / answerable.length >= 0.6 &&
     none.every((r) => r.honestNone) &&
+    rows.every((r) => !r.leakedToolCall) &&
     v.报错 === 0;
   return { pass, ...v };
 }
