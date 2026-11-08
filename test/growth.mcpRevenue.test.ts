@@ -36,6 +36,16 @@ describe('副业经营计入会员 / 加油包收款', () => {
     assert.ok(calls[0].params.includes('19900001101'));
   });
 
+  it('关联 user 表时 id 与手机号都认——mcp_order.user_id 存的是登录态里的手机号', async () => {
+    // 只写 u.id = m.user_id 时一行都关联不上，管理员 / 内部账号排除等于没做（2026-11-08 复盘）
+    const { s, calls } = svc(() => []);
+    await (s as any).mcpPaid(new Date('2026-11-01'));
+    await s.recentPayments(5);
+    const joins = calls.filter(c => /FROM mcp_order m LEFT JOIN/.test(c.sql));
+    assert.ok(joins.length >= 2);
+    for (const c of joins) assert.match(c.sql, /u\.id = m\.user_id OR u\.phoneNumber = m\.user_id/);
+  });
+
   it('收款流水带今日合计，今日用库的 CURDATE()', async () => {
     const { s, calls } = svc(sql =>
       /ORDER BY m.paid_at/.test(sql)

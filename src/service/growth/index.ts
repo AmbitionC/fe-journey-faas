@@ -242,6 +242,8 @@ export class GrowthService {
    * mcp_order 已到账订单的过滤条件（会员月卡/年卡 = plan，加油包 = pack）。
    * 排除 1 分钱收款测试单、管理员自己下的单和内部账号（GROWTH_INTERNAL_USER_IDS 按手机号）。
    * 「今天」按库自己的时钟（paid_at 由 NOW() 写入），避免函数与库时区不一致。
+   * mcp_order.user_id 是登录态里的 userId（即手机号），关联 user 表要两种都认（同 #166 付费用户视图），
+   * 只按 u.id 关联时一行都对不上，管理员 / 内部账号的排除等于没做（2026-11-08 复盘发现）。
    */
   private mcpWhere(since: Date | 'today', until?: Date) {
     const ex = this.excludedUserIds();
@@ -264,7 +266,7 @@ export class GrowthService {
     const { w, params } = this.mcpWhere(since, until);
     const rows: any[] = await this.orderModel.manager.query(
       `SELECT m.sku, COUNT(*) n, COALESCE(SUM(m.amount_cents),0) cents
-         FROM mcp_order m LEFT JOIN \`user\` u ON u.id = m.user_id
+         FROM mcp_order m LEFT JOIN \`user\` u ON (u.id = m.user_id OR u.phoneNumber = m.user_id)
         WHERE ${w} GROUP BY m.sku`,
       params
     );
@@ -282,7 +284,7 @@ export class GrowthService {
     const { w, params } = this.mcpWhere(new Date('2000-01-01'));
     const rows: any[] = await this.orderModel.manager.query(
       `SELECT m.order_no, m.sku, m.amount_cents, m.paid_at, m.handled_by
-         FROM mcp_order m LEFT JOIN \`user\` u ON u.id = m.user_id
+         FROM mcp_order m LEFT JOIN \`user\` u ON (u.id = m.user_id OR u.phoneNumber = m.user_id)
         WHERE ${w} ORDER BY m.paid_at DESC LIMIT ?`,
       [...params, Math.min(50, Math.max(1, limit))]
     );
