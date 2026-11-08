@@ -20,6 +20,9 @@ import { PosFinanceService } from '../service/pos/finance';
 import { PosContextService, MANUAL_METRICS } from '../service/pos/context';
 import { PosSnapshotService } from '../service/pos/snapshot';
 import { todayCN } from '../service/pos/logic';
+import { RedisService } from '@midwayjs/redis';
+import { sendAlertMail } from '../mcp/payNotify';
+import { normalizeOpsAlert, opsAlertCounterKey, OPS_ALERT_DAILY_LIMIT } from '../service/pos/opsAlert';
 
 type Ep = { baseUrl: string; apiKey: string; model: string };
 
@@ -57,6 +60,9 @@ export class PosHTTPService {
 
   @Inject()
   snapshotService: PosSnapshotService;
+
+  @Inject()
+  redisService: RedisService;
 
   private assertToken() {
     const expected = this.healthConfig?.apiToken;
@@ -106,6 +112,20 @@ export class PosHTTPService {
   async alerts() {
     this.assertToken();
     return this.ok(await this.alertService.current());
+  }
+
+  /** 本机自动化的阻塞提醒（牛客运营等）：同一令牌鉴权，转发运维告警邮件，每天最多 30 封。 */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, { path: '/pos/notify/alert', method: 'post', functionName: 'posNotifyAlert', name: 'posNotifyAlert', description: '本机自动化阻塞邮件提醒' })
+  @NoAuth()
+  async notifyAlert(@Body(ALL) body: any) {
+    this.assertToken();
+    const input = normalizeOpsAlert(body);
+    if (!input) throw R.validateError('subject（≤120 字）和 text（≤4000 字）必填');
+    const key = opsAlertCounterKey(new Date());
+    const count = await this.redisService.incr(key);
+    if (count === 1) await this.redisService.expire(key, 2 * 86400);
+    if (count > OPS_ALERT_DAILY_LIMIT) return this.ok({ status: 'rate_limited' });
+    return this.ok({ status: await sendAlertMail(process.env, input.subject, input.text) });
   }
 
   /** 定时函数调用（北京 08:30 / 20:30）：去重后有新预警才推送。dryRun=1 只算不推不记。 */
