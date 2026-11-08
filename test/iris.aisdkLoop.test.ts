@@ -225,7 +225,8 @@ describe('Iris 新引擎（AI SDK）', () => {
   });
 
   it('上游报错时抛出，由调用方走降级链（不白屏）', async () => {
-    const m = await startMock([{ status: 500 }]);
+    // 4xx 不重试，立即抛出；5xx 会按 maxRetries=1 退避重试一次（约 2 秒），这里用 400 保持单测快速
+    const m = await startMock([{ status: 400 }]);
     try {
       await assert.rejects(() => collect(m.url));
     } finally {

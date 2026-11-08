@@ -137,9 +137,15 @@ async function runOne(engine: 'legacy' | 'aisdk', q: Q) {
   await new Promise((r) => setTimeout(r, 50));
   const fakeCitations = citations.filter((c) => !BY_KEY.has(c.articleKey));
   const mentioned = [...text.matchAll(/《([^》]{2,60})》/g)].map((m) => m[1]);
-  const fakeTitles = mentioned.filter((t) => !TITLES.has(t) && ![...TITLES].some((x) => x.includes(t) || t.includes(x)));
+  // 只核对中文书名：站内文章都是中文标题；《ReAct: ...》这类外部英文论文名不算编造站内引用
+  const fakeTitles = mentioned.filter(
+    (t) => /[\u4e00-\u9fa5]/.test(t) && !TITLES.has(t) && ![...TITLES].some((x) => x.includes(t) || t.includes(x))
+  );
   const codeChars = [...text.matchAll(/```[\s\S]*?```/g)].reduce((s, m) => s + m[0].length, 0);
-  const honestNone = /站内(暂)?没有|没有(找到|检索到)|未(找到|检索到|收录)|暂无|不在(站内|本站)|超出.*范围/.test(text);
+  const honestNone =
+    /(站内|本站|资料库|知识库|站点)[^。！\n]{0,20}(没有|暂无|未(找到|检索到|收录|覆盖|涉及)|缺少|并未|不包含)|没有(找到|检索到|搜到|查到)|未(找到|检索到|收录|搜到|查到)|暂无|不在(站内|本站)|超出.*范围/.test(
+      text
+    );
   const hitExpected = (q.expect || []).filter((k) => citations.some((c) => c.articleKey === k)).length;
   return {
     engine,
@@ -214,6 +220,10 @@ function verdict(rows: any[]) {
   const table = rows.map(({ text, ...r }) => r);
   console.log('COACH_EVAL_SUMMARY ' + JSON.stringify(summary, null, 1));
   console.log('COACH_EVAL_ROWS ' + JSON.stringify(table));
+  // artifact 下不来时也能直接在日志里看「站内没有 / 边界」两类题的正文
+  for (const r of rows.filter((x) => x.kind === 'none' || x.kind === 'boundary' || (x.fakeTitles || []).length)) {
+    console.log(`COACH_EVAL_TEXT ${r.id}/${r.engine} fakeTitles=${JSON.stringify(r.fakeTitles || [])} honest=${r.honestNone}\n${String(r.text || '').slice(0, 600)}\n---`);
+  }
   const md = [
     '# Iris 新旧引擎对比评测（正文）',
     '',
