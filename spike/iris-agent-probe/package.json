@@ -1,2 +1,11 @@
-{ "name": "iris-agent-probe", "private": true, "type": "commonjs",
-  "dependencies": { "ai": "7.0.165", "@ai-sdk/deepseek": "3.0.81", "zod": "4.6.7" } }
+{
+  "name": "iris-agent-probe",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "ai": "7.0.165",
+    "@ai-sdk/deepseek": "3.0.81",
+    "zod": "4.6.7",
+    "e2b": "2.50.0"
+  }
+}

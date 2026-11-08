@@ -23,3 +23,25 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: node probe.cjs
+
+  # 云沙箱排雷：仓库 secrets 里配了 E2B_API_KEY（阿里云函数计算控制台 → 云沙箱 → API Key）才会真正跑。
+  sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+      - name: install
+        working-directory: spike/iris-agent-probe
+        run: npm install --no-audit --no-fund
+      - name: sandbox probe
+        if: ${{ env.E2B_API_KEY != '' }}
+        working-directory: spike/iris-agent-probe
+        run: node sandbox-probe.cjs
+      - name: skip notice
+        if: ${{ env.E2B_API_KEY == '' }}
+        run: echo "E2B_API_KEY 未配置，跳过云沙箱排雷"
