@@ -24,7 +24,9 @@ import { AiProxyService } from '../../src/service/ai/proxy';
 type Doc = { module: string; key: string; title: string; content: string };
 const CORPUS: Doc[] = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/llm-corpus.json'), 'utf8'));
 const BY_KEY = new Map(CORPUS.map((d) => [d.key, d]));
-const TITLES = new Set(CORPUS.map((d) => d.title));
+// 模型常把全角标点写成半角（「ReAct:推理与行动框架」），比对前统一去掉标点和空白
+const normTitle = (t: string) => t.replace(/[\s:：,，、·\-—_()（）]/g, '').toLowerCase();
+const TITLES = new Set(CORPUS.map((d) => normTitle(d.title)));
 
 function terms(q: string): string[] {
   const out = new Set<string>();
@@ -136,7 +138,7 @@ async function runOne(engine: 'legacy' | 'aisdk', q: Q) {
   }
   await new Promise((r) => setTimeout(r, 50));
   const fakeCitations = citations.filter((c) => !BY_KEY.has(c.articleKey));
-  const mentioned = [...text.matchAll(/《([^》]{2,60})》/g)].map((m) => m[1]);
+  const mentioned = [...text.matchAll(/《([^》]{2,60})》/g)].map((m) => normTitle(m[1]));
   // 只核对中文书名：站内文章都是中文标题；《ReAct: ...》这类外部英文论文名不算编造站内引用
   const fakeTitles = mentioned.filter(
     (t) => /[\u4e00-\u9fa5]/.test(t) && !TITLES.has(t) && ![...TITLES].some((x) => x.includes(t) || t.includes(x))
