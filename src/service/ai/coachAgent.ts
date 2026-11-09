@@ -4,6 +4,16 @@ import { CoachToolsService, ToolContext, Citation } from './coachTools';
 import { RetrieveService } from './retrieve';
 import { ArticleContentService } from '../content/articleContent';
 import { sanitizeForPrompt } from './sanitize';
+import { runAiSdkLoop } from './aisdkLoop';
+
+/**
+ * 引擎开关（2026-11-08，Iris Agent 化阶段 1）：IRIS_ENGINE=aisdk 时走 AI SDK 新引擎，
+ * 其余情况（含未设置）走旧的手写循环，行为与改动前逐字节一致。新引擎只支持 DeepSeek。
+ * IRIS_THINKING=false 可在新引擎下关掉工具轮思考（默认开启）。
+ */
+export function useAiSdkEngine(provider: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.IRIS_ENGINE || '').trim().toLowerCase() === 'aisdk' && provider === 'deepseek';
+}
 
 /** agentic loop 向外产出的 SSE 事件帧。 */
 export interface AgenticFrame {
@@ -60,7 +70,7 @@ function buildAgenticSystemPrompt(module: string, instructions: string): string 
 }
 
 /** status 帧文案：把工具调用翻译成用户看得懂的「正在做什么」。 */
-function statusLabel(name: string, args: any): string {
+export function statusLabel(name: string, args: any): string {
   switch (name) {
     case 'search_articles':
       return `正在检索「${String(args?.query || '').slice(0, 30)}」…`;
@@ -164,6 +174,22 @@ export class CoachAgentService {
       if (m.role === 'user' || m.role === 'assistant') {
         rawMessages.push({ role: m.role, content: m.content });
       }
+    }
+
+    if (useAiSdkEngine(this.proxy.aiConfig?.provider)) {
+      yield* this.streamWithAiSdk({
+        systemPrompt,
+        history,
+        rawMessages,
+        modeKey,
+        maxRounds,
+        toolDefs,
+        toolCtx,
+        module,
+        userId,
+        started,
+      });
+      return;
     }
 
     const seenCalls = new Set<string>();
@@ -334,6 +360,102 @@ export class CoachAgentService {
           latencyMs: Date.now() - started,
           tokenUsed,
           rounds: round,
+          toolCallCount,
+          fallbackFlags: fallbackFlags.length ? fallbackFlags : null,
+          costEstimate: (tokenUsed / 1e6) * rate,
+          retrievedRefs: [...toolCtx.citations.values()].map((c) => `${c.module}/${c.articleKey}`),
+          status,
+          errorMsg,
+        })
+        .catch(() => {});
+    }
+  }
+
+  /**
+   * 新引擎（AI SDK）：同样的模式、工具、引用、降级链与日志口径，只换掉与模型多轮交互的那一层。
+   * 帧协议与旧引擎完全一致：status / content / question / citations / error。
+   */
+  private async *streamWithAiSdk(p: {
+    systemPrompt: string;
+    history: ChatMessage[];
+    rawMessages: { role: 'user' | 'assistant'; content: string }[];
+    modeKey: string;
+    maxRounds: number;
+    toolDefs: any[];
+    toolCtx: ToolContext;
+    module: string;
+    userId: string;
+    started: number;
+  }): AsyncGenerator<AgenticFrame> {
+    const { history, module, userId, toolCtx } = p;
+    let fallbackFlags: string[] = [];
+    let tokenUsed = 0;
+    let rounds = 0;
+    let toolCallCount = 0;
+    let status = 'success';
+    let errorMsg: string | undefined;
+    let answered = false;
+    let asked = false;
+
+    try {
+      try {
+        for await (const ev of runAiSdkLoop({
+          config: {
+            apiKey: this.proxy.aiConfig.apiKey,
+            model: this.proxy.aiConfig.model,
+            thinking: process.env.IRIS_THINKING !== 'false',
+          },
+          systemPrompt: p.systemPrompt,
+          messages: p.rawMessages,
+          toolDefs: p.toolDefs,
+          executeTool: (name, args) => this.tools.execute(name, args, toolCtx),
+          maxRounds: p.maxRounds,
+        })) {
+          if (ev.type === 'status') yield { status: statusLabel(ev.toolName, ev.args) };
+          else if (ev.type === 'content') yield { content: ev.text };
+          else if (ev.type === 'question') {
+            asked = true;
+            yield { question: ev.question };
+          } else if (ev.type === 'done') {
+            answered = ev.answered;
+            tokenUsed = ev.tokenUsed;
+            rounds = ev.rounds;
+            toolCallCount = ev.toolCallCount;
+            fallbackFlags = ev.fallbackFlags;
+          }
+        }
+      } catch (e: any) {
+        // 引擎层失败（网络 / 上游 4xx5xx）：与旧引擎一样走降级链，不白屏
+        fallbackFlags.push('call_error');
+        errorMsg = e?.message;
+        answered = false;
+      }
+
+      if (!asked) {
+        if (!answered) {
+          yield { status: '正在整理答案…' };
+          yield* this.degradedAnswer(history, module, userId, toolCtx);
+        }
+        const citations = [...toolCtx.citations.values()].slice(0, 6);
+        if (citations.length) yield { citations };
+      }
+      if (tokenUsed) await this.proxy.recordUsage(userId, module, tokenUsed).catch(() => {});
+    } catch (e: any) {
+      status = 'error';
+      errorMsg = e?.message || String(e);
+      yield { error: errorMsg };
+    } finally {
+      const lastUser = [...history].reverse().find((m) => m.role === 'user');
+      const rate = Number(process.env.LLM_COST_PER_MTOKEN || '1');
+      this.proxy
+        .logAgenticCall({
+          userId,
+          module,
+          mode: `${p.modeKey}@aisdk`,
+          inputSummary: lastUser?.content || '',
+          latencyMs: Date.now() - p.started,
+          tokenUsed,
+          rounds,
           toolCallCount,
           fallbackFlags: fallbackFlags.length ? fallbackFlags : null,
           costEstimate: (tokenUsed / 1e6) * rate,

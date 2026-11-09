@@ -1,0 +1,113 @@
+# 一次性排雷：只在 claude/project-thread-fny047 分支推送时运行，不部署、不改线上。
+name: iris-agent-probe
+on:
+  push:
+    branches: [claude/project-thread-fny047]
+    paths: ['spike/iris-agent-probe/**', '.github/workflows/iris-agent-probe.yml', 'src/service/ai/**', 'test/iris.*', 'package.json', 'tsconfig.json']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+      - name: install
+        working-directory: spike/iris-agent-probe
+        run: npm install --no-audit --no-fund
+      - name: probe
+        working-directory: spike/iris-agent-probe
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: node probe.cjs
+
+  # 云沙箱排雷：仓库 secrets 里配了 E2B_API_KEY（阿里云函数计算控制台 → 云沙箱 → API Key）才会真正跑。
+  sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+      - name: install
+        working-directory: spike/iris-agent-probe
+        run: npm install --no-audit --no-fund
+      - name: sandbox probe
+        if: ${{ env.E2B_API_KEY != '' }}
+        working-directory: spike/iris-agent-probe
+        run: node sandbox-probe.cjs
+      - name: skip notice
+        if: ${{ env.E2B_API_KEY == '' }}
+        run: echo "E2B_API_KEY 未配置，跳过云沙箱排雷"
+
+  # 新旧引擎对比评测：用线上同一个 DeepSeek key、真实工具代码 + 站内文章快照
+  coach-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: 'npm'
+      - run: npm ci --no-audit --no-fund
+      - name: build (same as deploy)
+        run: npm run build
+      - name: coach eval
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          EVAL_OUT: ${{ runner.temp }}/coach-eval-result.md
+        run: npx ts-node --transpile-only spike/iris-agent-probe/coach-eval.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coach-eval-result
+          path: ${{ runner.temp }}/coach-eval-result.md
+
+  # 与 test.yml 完全一致的全量测试（MySQL + Redis），确认新引擎没碰坏别的东西
+  full-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: fe-journey
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -ptestpass"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      NODE_ENV: unittest
+      DB_HOST: 127.0.0.1
+      DB_USER: root
+      DB_PASS: testpass
+      REDIS_HOST: 127.0.0.1
+      REDIS_PASS: ''
+      LLM_PROVIDER: openai
+      LLM_API_KEY: dummy-for-tests
+      LLM_MODEL: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+      - run: npm ci
+      - name: TypeScript 编译检查
+        run: npx tsc --noEmit
+      - name: 全量测试（标准入口）
+        run: npm test

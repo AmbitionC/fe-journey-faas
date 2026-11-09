@@ -958,6 +958,11 @@ export class AiProxyService {
     await this.logUsage(userId, module, totalTokens);
   }
 
+  /** 新引擎（aisdkLoop）落用量 + 成本闸记账，口径同 logUsage。 */
+  async recordUsage(userId: string, module: string, tokenUsed: number): Promise<void> {
+    await this.logUsage(userId, module, tokenUsed);
+  }
+
   /** 供 agentic loop 落 aiCallLog（复用私有 logCall）。 */
   async logAgenticCall(p: {
     userId: string;

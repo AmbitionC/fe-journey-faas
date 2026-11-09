@@ -26,6 +26,7 @@
     "dist",
     "node_modules",
     "test",
-    "scripts"
+    "scripts",
+    "spike"
   ]
 }
