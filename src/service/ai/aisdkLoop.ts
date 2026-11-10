@@ -54,6 +54,14 @@ export type LoopEvent =
 /** 一步里的正文先攒这么多字再放给用户：期间若出现工具调用，就说明这段是「我先查一下」之类的过场话，丢弃。 */
 const HOLD_CHARS = 40;
 
+/** 「我先查一下 / 让我检索一下……」这类过场话：长度可能超过 HOLD_CHARS，按句式识别，整句不展示。 */
+const PREFACE_RE = /^\s*(好的[，,]?\s*)?(我先|让我先?|我来|先)(去)?(查|检索|搜|搜索|看|翻|读|找|了解)[^。！？\n]{0,80}[。！？.!?…]+\s*/;
+
+/** 去掉开头的过场话（纯函数，便于单测）。 */
+export function stripPreface(text: string): string {
+  return text.replace(PREFACE_RE, '');
+}
+
 function looksLikeTextualToolCall(text: string, toolNames: string[]): boolean {
   const t = text.trim();
   if (!(t.startsWith('{') || t.startsWith('```'))) return false;
@@ -168,6 +176,13 @@ export async function* runAiSdkLoop(opts: {
           stepTextual = true;
           break;
         }
+        // 过场话开头：等这句说完再判断（说完就剥掉），没说完先别放
+        const looksPreface = /^\s*(好的[，,]?\s*)?(我先|让我先?|我来|先)(去)?(查|检索|搜|看|翻|读|找|了解)/.test(stepBuf);
+        if (looksPreface) {
+          const stripped = stripPreface(stepBuf);
+          if (stripped === stepBuf) break; // 这句还没说完
+          stepBuf = stripped;
+        }
         if (stepBuf.length >= HOLD_CHARS && !stepBuf.trim().startsWith('{') && !stepBuf.trim().startsWith('```')) {
           stepFlushed = true;
           answeredText += stepBuf;
@@ -205,8 +220,11 @@ export async function* runAiSdkLoop(opts: {
           if (looksLikeTextualToolCall(stepBuf, toolNames)) {
             stepTextual = true;
           } else {
-            answeredText += stepBuf;
-            yield { type: 'content', text: stepBuf };
+            const rest = stripPreface(stepBuf);
+            if (rest.trim()) {
+              answeredText += rest;
+              yield { type: 'content', text: rest };
+            }
           }
           stepBuf = '';
         }
