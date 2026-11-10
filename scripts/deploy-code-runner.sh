@@ -21,9 +21,9 @@ if [ ! -x "$RUNTIME_DIR/bin/node" ]; then
 fi
 "$RUNTIME_DIR/bin/node" -v
 
-# s 部署单个资源也会解析整份 s.yaml：其他资源引用、但本 job 没有的变量补成空串（只是占位，不进运行函数）
+# s 部署单个资源也会解析整份 s.yaml：其他资源引用、但本 job 没有的变量补占位值（s 把空串也当未定义；只是占位，不进运行函数）
 for name in $(grep -o "env('[A-Z0-9_]*')" s.yaml | sed "s/env('\(.*\)')/\1/" | sort -u); do
-  [ -n "${!name+x}" ] || export "$name="
+  [ -n "${!name:-}" ] || export "$name=unused"
 done
 
 s irisCodeRunner deploy -y --access aliyun
