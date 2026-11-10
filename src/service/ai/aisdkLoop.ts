@@ -1,13 +1,10 @@
 /**
- * Iris 新引擎（2026-11-08 起灰度，开关 IRIS_ENGINE=aisdk）：用 Vercel AI SDK 驱动工具循环。
+ * Iris 教练工具循环：用 Vercel AI SDK 驱动与 DeepSeek 的多轮工具调用（2026-11-10 起全量，旧的手写循环已删除）。
  *
- * 只替换「怎么跟模型多轮对话」这一层；模式注册、工具实现、引用、降级链、计费、aiCallLog
- * 仍由 CoachAgentService 负责。这里是纯函数，不依赖 Midway 容器，便于单测和离线评测。
- *
- * 与旧引擎（proxy.chatWithTools + 手写 for 循环）的行为差异：
- * - 工具轮可以开启思考（DeepSeek「思考 + 工具」要求回传 reasoning_content，@ai-sdk/deepseek 自动处理；
- *   2026-11-08 已用真实 deepseek-flash 实测单轮 / 多轮 / 流式均通过）。
- * - 终答直接是最后一步的流式输出，不再额外发一次「无工具终答」请求（省一次往返）。
+ * 只负责「怎么跟模型多轮对话」这一层；模式注册、工具实现、引用、降级链、计费、aiCallLog
+ * 由 CoachAgentService 负责。这里是纯函数，不依赖 Midway 容器，便于单测和离线评测。
+ * 工具轮开启思考（DeepSeek「思考 + 工具」要求回传 reasoning_content，@ai-sdk/deepseek 自动处理）；
+ * 终答就是最后一步的流式输出。
  *
  * 兜底五件套的对应关系：
  * ① 去重熔断：同名同参二次调用 → 返回提示 + 下一步收掉工具，强制终答（dedup_stop）
@@ -24,9 +21,9 @@ export interface LoopConfig {
   model: string;
   /** 默认 https://api.deepseek.com ；单测 / 评测可指向模拟服务 */
   baseURL?: string;
-  /** 工具轮是否开启思考（默认 true） */
+  /** 是否开启思考（默认 true；仅单测 / 评测会关） */
   thinking?: boolean;
-  /** 单步最大输出 token（默认 2048，与旧引擎终答一致） */
+  /** 单步最大输出 token（默认 2048） */
   maxOutputTokens?: number;
   /** 单测注入 */
   fetch?: typeof globalThis.fetch;

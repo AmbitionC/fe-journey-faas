@@ -1,19 +1,10 @@
 import { Provide, Inject } from '@midwayjs/core';
-import { AiProxyService, ChatMessage, ToolCall, buildModulePersona } from './proxy';
+import { AiProxyService, ChatMessage, buildModulePersona } from './proxy';
 import { CoachToolsService, ToolContext, Citation } from './coachTools';
 import { RetrieveService } from './retrieve';
 import { ArticleContentService } from '../content/articleContent';
 import { sanitizeForPrompt } from './sanitize';
 import { runAiSdkLoop } from './aisdkLoop';
-
-/**
- * 引擎开关（2026-11-08，Iris Agent 化阶段 1）：IRIS_ENGINE=aisdk 时走 AI SDK 新引擎，
- * 其余情况（含未设置）走旧的手写循环，行为与改动前逐字节一致。新引擎只支持 DeepSeek。
- * IRIS_THINKING=false 可在新引擎下关掉工具轮思考（默认开启）。
- */
-export function useAiSdkEngine(provider: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.IRIS_ENGINE || '').trim().toLowerCase() === 'aisdk' && provider === 'deepseek';
-}
 
 /** agentic loop 向外产出的 SSE 事件帧。 */
 export interface AgenticFrame {
@@ -85,33 +76,11 @@ export function statusLabel(name: string, args: any): string {
   }
 }
 
-/** 兜底②：模型把工具调用写进正文时，尽力从文本里解析出一个调用。 */
-function tryParseTextualToolCall(text: string): ToolCall | null {
-  if (!text) return null;
-  const known = ['search_articles', 'read_article', 'get_catalog', 'get_learner_state'];
-  // 找第一个包含 name 字段的 JSON 对象
-  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '');
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    try {
-      const obj = JSON.parse(cleaned.slice(start, end + 1));
-      const name = obj.name || obj.tool || obj.function;
-      if (name && known.includes(name)) {
-        const argObj = obj.arguments || obj.parameters || obj.args || {};
-        return { id: name, name, arguments: typeof argObj === 'string' ? argObj : JSON.stringify(argObj) };
-      }
-    } catch {
-      /* 非 JSON，继续 */
-    }
-  }
-  return null;
-}
-
 /**
  * 教练 agentic loop（PRD-04 F4 / 检索设计 §3）。
  * 一套工具驱动的多轮循环：模型自主决定查什么，服务端执行工具、推 status 帧，
- * 最终流式产出带引用的答案。自带兜底五件套 + 降级链，DeepSeek 多轮 FC 故障不白屏。
+ * 最终流式产出带引用的答案。与模型的多轮交互由 Vercel AI SDK 驱动（./aisdkLoop，工具轮开思考），
+ * 自带兜底五件套 + 降级链，上游故障不白屏。
  */
 @Provide()
 export class CoachAgentService {
@@ -138,12 +107,6 @@ export class CoachAgentService {
     const toolDefs = this.tools.getToolDefs(modeDef.tools);
     const maxRounds = modeDef.rounds;
     const toolCtx: ToolContext = { userId, module, citations: new Map() };
-    const fallbackFlags: string[] = [];
-    let toolCallCount = 0;
-    let tokenUsed = 0;
-    let status = 'success';
-    let errorMsg: string | undefined;
-    let askedQuestion = false;
 
     let systemPrompt = buildAgenticSystemPrompt(module, modeDef.instructions);
     const rawMessages: any[] = [];
@@ -176,206 +139,22 @@ export class CoachAgentService {
       }
     }
 
-    if (useAiSdkEngine(this.proxy.aiConfig?.provider)) {
-      yield* this.streamWithAiSdk({
-        systemPrompt,
-        history,
-        rawMessages,
-        modeKey,
-        maxRounds,
-        toolDefs,
-        toolCtx,
-        module,
-        userId,
-        started,
-      });
-      return;
-    }
-
-    const seenCalls = new Set<string>();
-    let emptyRetried = false;
-    let degraded = false;
-    let forceFinal = false;
-    let round = 0;
-
-    try {
-      for (round = 0; round < maxRounds && !forceFinal; round++) {
-        let turn;
-        try {
-          turn = await this.proxy.chatWithTools(systemPrompt, rawMessages, toolDefs, {
-            userId,
-            module,
-            toolChoice: 'auto',
-          });
-        } catch (e: any) {
-          fallbackFlags.push('call_error');
-          errorMsg = e?.message;
-          degraded = true;
-          break;
-        }
-        tokenUsed += turn.totalTokens;
-
-        // 兜底③ 空响应重试一次
-        if (!turn.content && turn.toolCalls.length === 0) {
-          if (!emptyRetried) {
-            emptyRetried = true;
-            fallbackFlags.push('empty_retry');
-            round--;
-            continue;
-          }
-          degraded = true;
-          break;
-        }
-
-        // 结构化 tool_calls；无则兜底② 文本化解析
-        let calls: ToolCall[] = turn.toolCalls;
-        if (calls.length === 0 && turn.content) {
-          const parsed = tryParseTextualToolCall(turn.content);
-          if (parsed) {
-            calls = [parsed];
-            fallbackFlags.push('textual_parse');
-          }
-        }
-
-        // 模型不再调工具 → 进入终答
-        if (calls.length === 0) break;
-
-        // 记录 assistant 的 tool_calls 轮（OpenAI 格式，供下一轮上下文）
-        rawMessages.push({
-          role: 'assistant',
-          content: turn.content || '',
-          tool_calls: calls.map((c) => ({
-            id: c.id,
-            type: 'function',
-            function: { name: c.name, arguments: c.arguments },
-          })),
-        });
-
-        for (const call of calls) {
-          // ask_question：教练出结构化选择题 → 发 question 帧、本轮结束等用户作答
-          if (call.name === 'ask_question') {
-            let qa: any = {};
-            try {
-              qa = call.arguments ? JSON.parse(call.arguments) : {};
-            } catch {
-              qa = { question: (turn.content || '请选择').slice(0, 200) };
-            }
-            const options = Array.isArray(qa.options)
-              ? qa.options.map((o: any) => String(o)).slice(0, 4)
-              : [];
-            yield {
-              question: {
-                question: String(qa.question || '').slice(0, 500),
-                options,
-                allowFreeText: qa.allowFreeText !== false,
-              },
-            };
-            askedQuestion = true;
-            forceFinal = true;
-            break;
-          }
-
-          // 兜底① 去重熔断：同名同参重复调用即停并强制终答
-          const sig = `${call.name}:${call.arguments}`;
-          if (seenCalls.has(sig)) {
-            fallbackFlags.push('dedup_stop');
-            rawMessages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: '（已查询过相同内容，请基于已有信息直接作答）',
-            });
-            forceFinal = true;
-            continue;
-          }
-          seenCalls.add(sig);
-          toolCallCount++;
-
-          // 兜底⑤ 参数自纠
-          let args: any = {};
-          try {
-            args = call.arguments ? JSON.parse(call.arguments) : {};
-          } catch {
-            args = salvageArgs(call.arguments);
-            fallbackFlags.push('param_fix');
-          }
-
-          yield { status: statusLabel(call.name, args) };
-
-          let toolResult = '';
-          try {
-            toolResult = await this.tools.execute(call.name, args, toolCtx);
-          } catch (e: any) {
-            toolResult = `工具执行出错：${e?.message || e}`;
-          }
-          rawMessages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            content: String(toolResult).slice(0, 4000),
-          });
-        }
-      }
-
-      // ask_question 已发问 → 本轮以问题结束，不再产出终答/引用（等用户作答）
-      if (!askedQuestion) {
-        if (degraded) {
-          // 兜底④ 强制终答 + 降级链
-          yield { status: '正在整理答案…' };
-          yield* this.degradedAnswer(history, module, userId, toolCtx);
-        } else {
-          yield { status: '正在整理答案…' };
-          let anyContent = false;
-          try {
-            for await (const chunk of this.proxy.streamFinal(systemPrompt, rawMessages, module, userId)) {
-              if (chunk.content) {
-                anyContent = true;
-                yield { content: chunk.content };
-              }
-            }
-          } catch (e: any) {
-            errorMsg = e?.message;
-            anyContent = false;
-          }
-          if (!anyContent) {
-            fallbackFlags.push('final_fallback');
-            yield* this.degradedAnswer(history, module, userId, toolCtx);
-          }
-        }
-
-        const citations = [...toolCtx.citations.values()].slice(0, 6);
-        if (citations.length) yield { citations };
-      }
-    } catch (e: any) {
-      status = 'error';
-      errorMsg = e?.message || String(e);
-      yield { error: errorMsg };
-    } finally {
-      const lastUser = [...history].reverse().find((m) => m.role === 'user');
-      const rate = Number(process.env.LLM_COST_PER_MTOKEN || '1');
-      this.proxy
-        .logAgenticCall({
-          userId,
-          module,
-          mode: modeKey,
-          inputSummary: lastUser?.content || '',
-          latencyMs: Date.now() - started,
-          tokenUsed,
-          rounds: round,
-          toolCallCount,
-          fallbackFlags: fallbackFlags.length ? fallbackFlags : null,
-          costEstimate: (tokenUsed / 1e6) * rate,
-          retrievedRefs: [...toolCtx.citations.values()].map((c) => `${c.module}/${c.articleKey}`),
-          status,
-          errorMsg,
-        })
-        .catch(() => {});
-    }
+    yield* this.runLoop({
+      systemPrompt,
+      history,
+      rawMessages,
+      modeKey,
+      maxRounds,
+      toolDefs,
+      toolCtx,
+      module,
+      userId,
+      started,
+    });
   }
 
-  /**
-   * 新引擎（AI SDK）：同样的模式、工具、引用、降级链与日志口径，只换掉与模型多轮交互的那一层。
-   * 帧协议与旧引擎完全一致：status / content / question / citations / error。
-   */
-  private async *streamWithAiSdk(p: {
+  /** 跑工具循环并转成 SSE 帧：status / content / question / citations / error。 */
+  private async *runLoop(p: {
     systemPrompt: string;
     history: ChatMessage[];
     rawMessages: { role: 'user' | 'assistant'; content: string }[];
@@ -403,7 +182,6 @@ export class CoachAgentService {
           config: {
             apiKey: this.proxy.aiConfig.apiKey,
             model: this.proxy.aiConfig.model,
-            thinking: process.env.IRIS_THINKING !== 'false',
           },
           systemPrompt: p.systemPrompt,
           messages: p.rawMessages,
@@ -425,7 +203,7 @@ export class CoachAgentService {
           }
         }
       } catch (e: any) {
-        // 引擎层失败（网络 / 上游 4xx5xx）：与旧引擎一样走降级链，不白屏
+        // 引擎层失败（网络 / 上游 4xx5xx）：走降级链，不白屏
         fallbackFlags.push('call_error');
         errorMsg = e?.message;
         answered = false;
@@ -451,7 +229,7 @@ export class CoachAgentService {
         .logAgenticCall({
           userId,
           module,
-          mode: `${p.modeKey}@aisdk`,
+          mode: p.modeKey,
           inputSummary: lastUser?.content || '',
           latencyMs: Date.now() - p.started,
           tokenUsed,
@@ -506,12 +284,4 @@ export class CoachAgentService {
       yield { error: e?.message || 'AI 请求失败' };
     }
   }
-}
-
-/** 兜底⑤：坏 JSON 参数里尽力捞出 query。 */
-function salvageArgs(raw: string): any {
-  if (!raw) return {};
-  const m = raw.match(/"?query"?\s*[:：]\s*"?([^",}\n]+)/);
-  if (m) return { query: m[1].trim() };
-  return {};
 }

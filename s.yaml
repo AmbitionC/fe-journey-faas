@@ -39,9 +39,6 @@ resources:
         LLM_PROVIDER: ${env('LLM_PROVIDER')}
         LLM_API_KEY: ${env('LLM_API_KEY')}
         LLM_MODEL: ${env('LLM_MODEL')}
-        # Iris 问答引擎：aisdk = Vercel AI SDK 工具循环（工具轮开思考，仅 deepseek 生效）。
-        # 回退：在 FC 控制台把它改成 legacy（即时生效），或删掉这一行重新部署。
-        IRIS_ENGINE: aisdk
         # 内容管理(content)模块:GitHub 真相源 + OSS 分发 + CI 同步
         GITHUB_TOKEN: ${env('GITHUB_TOKEN')}
         GITHUB_API_BASE: https://api.github.com/repos/AmbitionC/front-end-journey-resource

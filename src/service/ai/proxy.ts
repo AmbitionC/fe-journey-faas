@@ -50,23 +50,6 @@ export interface ChatMessage {
   content: string;
 }
 
-/** 归一化后的工具调用（agentic loop 用）。 */
-export interface ToolCall {
-  id: string;
-  name: string;
-  /** 原始 JSON 字符串参数 */
-  arguments: string;
-}
-
-/** chatWithTools 的返回：本轮模型的正文 + 工具调用 + 计量。 */
-export interface ToolTurnResult {
-  content: string;
-  toolCalls: ToolCall[];
-  totalTokens: number;
-  cacheHitTokens: number;
-  cacheMissTokens: number;
-}
-
 /** 上游 usage 归一化（DeepSeek 带缓存命中与思考 token，OpenAI/DashScope 只有总数）。 */
 export interface AiUsage {
   totalTokens: number;
@@ -848,69 +831,7 @@ export class AiProxyService {
   }
 
   /**
-   * 单轮带工具的补全（非流式）。返回模型正文 + 工具调用列表 + 计量。
-   * agentic loop 的中间轮用它拿 tool_calls；rawMessages 允许包含 tool 角色消息
-   *（OpenAI 格式：assistant.tool_calls + {role:'tool',tool_call_id,content}）。
-   */
-  async chatWithTools(
-    systemPrompt: string,
-    rawMessages: any[],
-    tools: any[],
-    opts: { userId: string; module: string; toolChoice?: 'auto' | 'none' }
-  ): Promise<ToolTurnResult> {
-    if (!this.aiConfig.apiKey) throw R.error('AI 服务未配置，请联系管理员');
-    const { url, headers } = this.getRequestConfig(false);
-    const body: Record<string, unknown> = {
-      model: this.aiConfig.model,
-      messages: [{ role: 'system', content: systemPrompt }, ...rawMessages],
-      max_tokens: 1200,
-      // 工具轮不思考：DeepSeek 默认开思考，且思考 + tools 时要求把 reasoning_content 原样回传
-      ...this.thinkingParams(false),
-    };
-    if (tools && tools.length) {
-      body.tools = tools;
-      body.tool_choice = opts.toolChoice || 'auto';
-    }
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw R.error(`AI 服务请求失败 (${response.status})${text ? ': ' + text : ''}`);
-    }
-    const result = (await response.json()) as Record<string, unknown>;
-    const choices = result?.choices as Array<{
-      message?: { content?: string; tool_calls?: any[] };
-    }>;
-    const msg = choices?.[0]?.message || {};
-    const toolCalls: ToolCall[] = Array.isArray(msg.tool_calls)
-      ? msg.tool_calls
-          .filter((tc: any) => tc?.function?.name)
-          .map((tc: any) => ({
-            id: String(tc.id || tc.function.name),
-            name: String(tc.function.name),
-            arguments: typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments || {}),
-          }))
-      : [];
-    const usage = (result?.usage || {}) as {
-      total_tokens?: number;
-      prompt_cache_hit_tokens?: number;
-      prompt_cache_miss_tokens?: number;
-    };
-    return {
-      content: String(msg.content || ''),
-      toolCalls,
-      totalTokens: usage.total_tokens || 0,
-      cacheHitTokens: usage.prompt_cache_hit_tokens || 0,
-      cacheMissTokens: usage.prompt_cache_miss_tokens || 0,
-    };
-  }
-
-  /**
-   * 终答流式（无工具，非思考）：把累计的对话+工具结果交给模型，流式吐出最终回答。
-   * agentic loop 的最后一步用它，保证用户看到的是流式答案。
+   * 无工具、非思考的流式回答：教练循环的降级链用它兜底。
    */
   async *streamFinal(
     systemPrompt: string,
