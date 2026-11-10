@@ -237,7 +237,7 @@ export class CoachAgentService {
         })) {
           if (ev.type === 'status') {
             yield {
-              status: statusLabel(ev.toolName, ev.args, (m, k) => toolCtx.citations.get(`${m}:${k}`)?.title),
+              status: statusLabel(ev.toolName, ev.args, (m, k) => titleFromCitations(toolCtx.citations, m, k)),
             };
           }
           else if (ev.type === 'content') yield { content: ev.text };
@@ -351,4 +351,16 @@ export function buildMemoryPrompt(
   };
   const list = rows.map((t) => `- ${fmt(t.lastMessageAt)}：${sanitizeForPrompt(t.title, 60)}`).join('\n');
   return `\n\n【这位用户最近问过你的问题】\n${list}\n如果这次的问题和其中某条明显相关（同一知识点、同一个卡点、递进的追问），开头用一句话自然接上，比如「上次你问过 X，这次……」；不相关就完全不要提。不要编造上次你回答了什么。`;
+}
+
+/** 按 module:key 找标题；模型有时把 module 写错（如 llm 写成 knowledge），再按 key 兜底匹配。 */
+export function titleFromCitations(
+  citations: Map<string, { articleKey: string; title: string }>,
+  module: string,
+  key: string
+): string | undefined {
+  const exact = citations.get(`${module}:${key}`)?.title;
+  if (exact) return exact;
+  for (const c of citations.values()) if (c.articleKey === key && c.title) return c.title;
+  return undefined;
 }

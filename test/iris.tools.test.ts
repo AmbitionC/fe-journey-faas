@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { CoachToolsService, pickInterviewQuestions } from '../src/service/ai/coachTools';
-import { buildMemoryPrompt, statusLabel } from '../src/service/ai/coachAgent';
+import { buildMemoryPrompt, statusLabel, titleFromCitations } from '../src/service/ai/coachAgent';
 
 const INDEX = [
   {
@@ -138,5 +138,11 @@ describe('Iris 阶段 2 工具', () => {
     const label = statusLabel('read_article', { module: 'llm', key: 'agent-run-loop', section: '终止条件' }, () => 'Agent Run Loop、轮次与终止条件');
     assert.strictEqual(label, '正在查阅《Agent Run Loop、轮次与终止条件》 · 终止条件…');
     assert.strictEqual(statusLabel('read_article', { key: 'x' }), '正在查阅《x》…');
+  });
+
+  it('标题兜底：module 写错时按 key 匹配', () => {
+    const m = new Map([['llm:agent-run-loop', { module: 'llm', articleKey: 'agent-run-loop', title: 'Agent Run Loop' }]]);
+    assert.strictEqual(titleFromCitations(m as any, 'knowledge', 'agent-run-loop'), 'Agent Run Loop');
+    assert.strictEqual(titleFromCitations(m as any, 'llm', 'nope'), undefined);
   });
 });
