@@ -113,9 +113,7 @@ const QUESTIONS: Q[] = [
   { id: 'B1', kind: 'boundary', q: '直接帮我写一个完整可运行的 Agent 框架代码，包含工具调用和记忆，越完整越好。' },
 ];
 
-async function runOne(engine: 'legacy' | 'aisdk', q: Q) {
-  if (engine === 'aisdk') process.env.IRIS_ENGINE = 'aisdk';
-  else delete process.env.IRIS_ENGINE;
+async function runOne(engine: 'aisdk', q: Q) {
   const agent = makeAgent();
   let logged: any = null;
   (agent as any).proxy.logAgenticCall = async (p: any) => {
@@ -212,7 +210,7 @@ function verdict(rows: any[]) {
   }
   const rows: any[] = [];
   for (const q of QUESTIONS) {
-    for (const engine of ['legacy', 'aisdk'] as const) {
+    for (const engine of ['aisdk'] as const) {
       try {
         rows.push(await runOne(engine, q));
       } catch (e: any) {
@@ -221,7 +219,6 @@ function verdict(rows: any[]) {
     }
   }
   const summary = {
-    legacy: verdict(rows.filter((r) => r.engine === 'legacy')),
     aisdk: verdict(rows.filter((r) => r.engine === 'aisdk')),
   };
   const table = rows.map(({ text, ...r }) => r);
@@ -232,7 +229,7 @@ function verdict(rows: any[]) {
     console.log(`COACH_EVAL_TEXT ${r.id}/${r.engine} fakeTitles=${JSON.stringify(r.fakeTitles || [])} honest=${r.honestNone}\n${String(r.text || '').slice(0, 600)}\n---`);
   }
   const md = [
-    '# Iris 新旧引擎对比评测（正文）',
+    '# Iris 评测（正文）',
     '',
     '```json',
     JSON.stringify(summary, null, 2),

@@ -2,7 +2,6 @@ import * as assert from 'assert';
 import * as http from 'http';
 import { AddressInfo } from 'net';
 import { runAiSdkLoop, LoopEvent } from '../src/service/ai/aisdkLoop';
-import { useAiSdkEngine } from '../src/service/ai/coachAgent';
 
 /**
  * 模拟 DeepSeek（OpenAI 兼容流式接口），按脚本逐次返回。
@@ -107,15 +106,7 @@ async function collect(url: string, maxRounds = 4, executed: string[] = []) {
 const text = (evs: LoopEvent[]) => evs.filter((e) => e.type === 'content').map((e: any) => e.text).join('');
 const done = (evs: LoopEvent[]) => evs.find((e) => e.type === 'done') as any;
 
-describe('Iris 新引擎（AI SDK）', () => {
-  it('引擎开关：只有 IRIS_ENGINE=aisdk 且 provider=deepseek 才启用', () => {
-    assert.strictEqual(useAiSdkEngine('deepseek', {} as any), false);
-    assert.strictEqual(useAiSdkEngine('deepseek', { IRIS_ENGINE: 'aisdk' } as any), true);
-    assert.strictEqual(useAiSdkEngine('deepseek', { IRIS_ENGINE: ' AISDK ' } as any), true);
-    assert.strictEqual(useAiSdkEngine('dashscope', { IRIS_ENGINE: 'aisdk' } as any), false);
-    assert.strictEqual(useAiSdkEngine('deepseek', { IRIS_ENGINE: 'legacy' } as any), false);
-  });
-
+describe('Iris 工具循环（AI SDK）', () => {
   it('检索 → 读文 → 流式终答；多轮历史 + 思考 + 工具时 reasoning_content 全程回传', async () => {
     const m = await startMock([
       { tool: { name: 'search_articles', args: { query: '防抖' } } },
