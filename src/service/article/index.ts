@@ -501,6 +501,21 @@ export class ArticleService {
     return { dueAt: next.dueAt };
   }
 
+  /**
+   * 幂等加入复习计划（Iris 的 schedule_review 工具用）：已有排程不改动，只返回下次到期；
+   * 没有则按 hard 建一条（约 1 天后到期）。模型重复调用不会把间隔越推越远。
+   */
+  async ensureSchedule(
+    userId: string,
+    module: string,
+    articleKey: string
+  ): Promise<{ dueAt: number; created: boolean }> {
+    const existing = await this.reviewScheduleModel.findOne({ where: { userId, module, articleKey } });
+    if (existing) return { dueAt: Number(existing.dueAt), created: false };
+    const r = await this.updateSchedule(userId, module, articleKey, 'hard');
+    return { dueAt: r.dueAt, created: true };
+  }
+
   /** 由测验得分更新排程（封装 score→grade）。 */
   async updateScheduleByScore(
     userId: string,

@@ -4,6 +4,7 @@ import { CoachToolsService, ToolContext, Citation } from './coachTools';
 import { RetrieveService } from './retrieve';
 import { ArticleContentService } from '../content/articleContent';
 import { sanitizeForPrompt } from './sanitize';
+import { AiHistoryService } from './history';
 import { runAiSdkLoop } from './aisdkLoop';
 
 /** agentic loop 向外产出的 SSE 事件帧。 */
@@ -26,8 +27,10 @@ interface ModeDef {
 /** agentic 指令 + 教练边界（PRD-04 F7）：拼在模块画像之后作为系统提示词。 */
 const AGENTIC_INSTRUCTIONS = `\n\n你能调用工具检索站内知识库来支撑回答。工作方式：
 1. 回答站内知识问题前，优先用 search_articles 找依据；需要原文细节再 read_article；想做跨文章推荐用 get_catalog；要个性化就先 get_learner_state。
-2. 回答必须基于站内资料，末尾用「延伸阅读」列出引用到的文章标题；站内确实没有就如实说明、绝不编造 API 或数字。
-3. 用中文，代码用 Markdown。先给最关键的一句，再按需展开。`;
+2. 用户提到自己的实战题 / 作业 / 评审结果 / 项目卡住了，先 get_mission_context 看题目验收标准和评审结论再说；问某公司面试考什么、要练面试题，用 get_interview_bank 找站内真题。
+3. 用户说要复习、记下来，或你判断他刚卡在某个知识点，可以用 schedule_review 把对应文章加入复习计划，并告诉他什么时候复习。
+4. 回答必须基于站内资料，末尾用「延伸阅读」列出引用到的文章标题；站内确实没有就如实说明、绝不编造 API 或数字。
+5. 用中文，代码用 Markdown。先给最关键的一句，再按需展开。`;
 
 const COACH_BOUNDARY = `\n\n（重要边界）你是考官与学习向导，不是代码助手：不要输出成品代码、不替用户调试报错、不给可以直接粘贴运行的完整实现——这些用户自己的 IDE AI（Cursor / Claude Code）做得又快又好。你专注做它们做不到的事：对照站内知识判断用户的方向/方案对不对、指出他还缺哪块知识（并给出站内文章）、教他怎么把需求向 AI 说清楚。`;
 
@@ -40,15 +43,30 @@ const FEYNMAN_INSTR = `\n\n你在做「带你复习·讲给教练听」：让用
 
 const PLAN_REVIEW_INSTR = `\n\n你在做「指挥方案审稿」：对照题目验收标准审用户的指挥方案，只提问不代做——挑出方案里没想清楚的漏洞（用 ask_question 或直接追问），引用站内文章补前置知识，最后给结论：通过 / 需修改。绝不代写方案或给成品 prompt。`;
 
+const INTERVIEWER_INSTR = `\n\n你在做「模拟面试官」：先用 get_interview_bank 按用户的目标公司 / 考点找站内真题，一次只问一道（用 ask_question，可不给选项让用户自由作答）。用户答完后：指出答到了哪些要点、漏了什么（对照题目的答题思路和站内文章），给一个 1-5 的评分，再问下一道或追问一层。不要一次把答案全讲完，引导用户自己说出来。`;
+
 const RESCUE_INSTR = `\n\n你在做「卡点急救」：报错和代码问题让用户自己的 IDE AI 修（更快更强），你只做三件事——①对照题目验收标准判断当前做法/方案能不能过；②指出缺哪块知识并给站内文章；③教用户怎么把需求向 AI 说清楚。绝不代写代码、不代调试。`;
 
 const MODES: Record<string, ModeDef> = {
-  qa: { tools: ['search_articles', 'read_article', 'get_catalog', 'get_learner_state'], rounds: 4, instructions: AGENTIC_INSTRUCTIONS },
   placement: { tools: ['get_catalog', 'get_learner_state', 'ask_question'], rounds: 3, instructions: PLACEMENT_INSTR },
   article_check: { tools: ['read_article', 'ask_question'], rounds: 3, instructions: ARTICLE_CHECK_INSTR },
   feynman: { tools: ['read_article', 'get_learner_state', 'ask_question'], rounds: 3, instructions: FEYNMAN_INSTR },
-  plan_review: { tools: ['search_articles', 'read_article', 'ask_question'], rounds: 3, instructions: PLAN_REVIEW_INSTR },
-  rescue: { tools: ['search_articles', 'read_article', 'get_learner_state'], rounds: 4, instructions: RESCUE_INSTR },
+  qa: {
+    tools: [
+      'search_articles',
+      'read_article',
+      'get_catalog',
+      'get_learner_state',
+      'get_mission_context',
+      'get_interview_bank',
+      'schedule_review',
+    ],
+    rounds: 4,
+    instructions: AGENTIC_INSTRUCTIONS,
+  },
+  plan_review: { tools: ['get_mission_context', 'search_articles', 'read_article', 'ask_question'], rounds: 3, instructions: PLAN_REVIEW_INSTR },
+  rescue: { tools: ['get_mission_context', 'search_articles', 'read_article', 'get_learner_state'], rounds: 4, instructions: RESCUE_INSTR },
+  interviewer: { tools: ['get_interview_bank', 'search_articles', 'read_article', 'ask_question'], rounds: 3, instructions: INTERVIEWER_INSTR },
 };
 
 function resolveMode(mode?: string): { key: string; def: ModeDef } {
@@ -61,12 +79,22 @@ function buildAgenticSystemPrompt(module: string, instructions: string): string 
 }
 
 /** status 帧文案：把工具调用翻译成用户看得懂的「正在做什么」。 */
-export function statusLabel(name: string, args: any): string {
+export function statusLabel(name: string, args: any, titleOf?: (module: string, key: string) => string | undefined): string {
   switch (name) {
     case 'search_articles':
       return `正在检索「${String(args?.query || '').slice(0, 30)}」…`;
-    case 'read_article':
-      return `正在查阅《${String(args?.key || '').slice(0, 40)}》…`;
+    case 'read_article': {
+      // 检索过的文章用标题展示（key 是英文 slug，用户看不懂）
+      const title = titleOf?.(String(args?.module || ''), String(args?.key || '')) || String(args?.key || '');
+      const section = args?.section ? ` · ${String(args.section).slice(0, 20)}` : '';
+      return `正在查阅《${title.slice(0, 40)}》${section}…`;
+    }
+    case 'get_mission_context':
+      return '正在查看你的实战题进度…';
+    case 'get_interview_bank':
+      return `正在翻面经题库${args?.company ? `（${String(args.company).slice(0, 10)}）` : ''}…`;
+    case 'schedule_review':
+      return '正在加入复习计划…';
     case 'get_catalog':
       return '正在浏览站内目录…';
     case 'get_learner_state':
@@ -94,11 +122,14 @@ export class CoachAgentService {
   retrieveService: RetrieveService;
 
   @Inject()
+  historyService: AiHistoryService;
+
+  @Inject()
   articleContentService: ArticleContentService;
 
   async *streamAgentic(
     history: ChatMessage[],
-    context: { module?: string; articleKey?: string; mode?: string; extra?: string },
+    context: { module?: string; articleKey?: string; mode?: string; extra?: string; conversationId?: number },
     userId: string
   ): AsyncGenerator<AgenticFrame> {
     const started = Date.now();
@@ -133,6 +164,10 @@ export class CoachAgentService {
       }
     }
 
+    // 跨会话记忆：「上次你问过 / 卡在……」。只取标题（= 当时的第一个问题），不读旧回答，省 token 也不放大旧错误
+    const memory = await this.recallMemory(userId, context.conversationId);
+    if (memory) systemPrompt += memory;
+
     for (const m of history) {
       if (m.role === 'user' || m.role === 'assistant') {
         rawMessages.push({ role: m.role, content: m.content });
@@ -151,6 +186,17 @@ export class CoachAgentService {
       userId,
       started,
     });
+  }
+
+  /** 最近聊过的话题（不含本会话），拼成系统提示词的一段；游客 / 无记录 / 读库失败返回空串。 */
+  private async recallMemory(userId: string, conversationId?: number): Promise<string> {
+    if (!userId || userId.startsWith('guest:') || !this.historyService) return '';
+    try {
+      const topics = await this.historyService.recentTopics(userId, { excludeId: conversationId, limit: 5, days: 30 });
+      return buildMemoryPrompt(topics, Date.now());
+    } catch {
+      return '';
+    }
   }
 
   /** 跑工具循环并转成 SSE 帧：status / content / question / citations / error。 */
@@ -189,7 +235,11 @@ export class CoachAgentService {
           executeTool: (name, args) => this.tools.execute(name, args, toolCtx),
           maxRounds: p.maxRounds,
         })) {
-          if (ev.type === 'status') yield { status: statusLabel(ev.toolName, ev.args) };
+          if (ev.type === 'status') {
+            yield {
+              status: statusLabel(ev.toolName, ev.args, (m, k) => toolCtx.citations.get(`${m}:${k}`)?.title),
+            };
+          }
           else if (ev.type === 'content') yield { content: ev.text };
           else if (ev.type === 'question') {
             asked = true;
@@ -284,4 +334,21 @@ export class CoachAgentService {
       yield { error: e?.message || 'AI 请求失败' };
     }
   }
+}
+
+/** 跨会话记忆提示词（纯函数，便于单测）。 */
+export function buildMemoryPrompt(
+  topics: { title: string; module?: string | null; lastMessageAt?: Date | string | null }[],
+  now: number
+): string {
+  const rows = topics.filter((t) => t && t.title && t.title !== '新对话').slice(0, 5);
+  if (!rows.length) return '';
+  const fmt = (d: any) => {
+    const ms = d ? new Date(d).getTime() : NaN;
+    if (!Number.isFinite(ms)) return '';
+    const days = Math.floor((now - ms) / 86400000);
+    return days <= 0 ? '今天' : days === 1 ? '昨天' : `${days} 天前`;
+  };
+  const list = rows.map((t) => `- ${fmt(t.lastMessageAt)}：${sanitizeForPrompt(t.title, 60)}`).join('\n');
+  return `\n\n【这位用户最近问过你的问题】\n${list}\n如果这次的问题和其中某条明显相关（同一知识点、同一个卡点、递进的追问），开头用一句话自然接上，比如「上次你问过 X，这次……」；不相关就完全不要提。不要编造上次你回答了什么。`;
 }

@@ -6,6 +6,12 @@ import { EmbeddingService } from '../embedding';
 import { OssService } from '../content/oss';
 import { sanitizeForPrompt } from './sanitize';
 import { ALL_MODULES } from '../content/modules';
+import { InjectEntityModel } from '@midwayjs/typeorm';
+import { In, Repository } from 'typeorm';
+import { MissionEntity } from '../../entity/mission';
+import { MissionSubmissionEntity } from '../../entity/missionSubmission';
+import { MissionReviewEntity } from '../../entity/missionReview';
+import { InterviewQuestionIndexService } from '../interview/questionIndex';
 
 /** 一条引用（回答末尾「延伸阅读」候选）。 */
 export interface Citation {
@@ -43,6 +49,18 @@ export class CoachToolsService {
 
   @Inject()
   embeddingService: EmbeddingService;
+
+  @Inject()
+  questionIndex: InterviewQuestionIndexService;
+
+  @InjectEntityModel(MissionEntity)
+  missionModel: Repository<MissionEntity>;
+
+  @InjectEntityModel(MissionSubmissionEntity)
+  submissionModel: Repository<MissionSubmissionEntity>;
+
+  @InjectEntityModel(MissionReviewEntity)
+  reviewModel: Repository<MissionReviewEntity>;
 
   /** OpenAI function-calling 格式的工具定义。传 whitelist 则只返回其中的工具。 */
   getToolDefs(whitelist?: string[]): any[] {
@@ -137,6 +155,52 @@ export class CoachToolsService {
           parameters: { type: 'object', properties: {} },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'get_mission_context',
+          description:
+            '获取用户正在做的实战题：题目需求、验收标准、当前进度，以及最近一次评审结论（逐条验收判定 + 补课清单）。用户问起自己的实战项目 / 作业 / 评审结果、或说卡住了时用它。不传 slug 则取最近在做的一道。',
+          parameters: {
+            type: 'object',
+            properties: {
+              slug: { type: 'string', description: '可选：题卡 slug；留空取用户最近在做的题' },
+            },
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_interview_bank',
+          description:
+            '从站内面经题库里按公司和/或考点关键词找真实面试题（附出处面经与答题思路要点）。用户要模拟面试、问某公司考什么、问某知识点在面试里怎么问时用它。',
+          parameters: {
+            type: 'object',
+            properties: {
+              company: { type: 'string', description: '可选：公司名，如 字节、阿里、腾讯' },
+              topic: { type: 'string', description: '可选：考点关键词，如 RAG、Function Calling、防抖' },
+              limit: { type: 'number', description: '返回题数，默认 6，最多 10' },
+            },
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'schedule_review',
+          description:
+            '把一篇站内文章加入用户的复习计划（间隔重复，已在计划里则不改动、只返回下次复习时间）。用户明确说要复习/记下来，或你判断他刚卡在这个知识点、值得过两天再巩固时用它。游客不可用。',
+          parameters: {
+            type: 'object',
+            properties: {
+              module: { type: 'string', description: '文章所属模块' },
+              key: { type: 'string', description: '文章 key' },
+            },
+            required: ['module', 'key'],
+          },
+        },
+      },
     ];
   }
 
@@ -151,6 +215,12 @@ export class CoachToolsService {
         return this.getCatalog(args?.module);
       case 'get_learner_state':
         return this.getLearnerState(ctx);
+      case 'get_mission_context':
+        return this.getMissionContext(args?.slug ? String(args.slug) : undefined, ctx);
+      case 'get_interview_bank':
+        return this.getInterviewBank(args?.company, args?.topic, args?.limit, ctx);
+      case 'schedule_review':
+        return this.scheduleReview(String(args?.module || ''), String(args?.key || ''), ctx);
       default:
         return `未知工具：${name}`;
     }
@@ -339,6 +409,110 @@ export class CoachToolsService {
     }
   }
 
+  /** get_mission_context：用户的实战题进度 + 验收标准 + 最近一次评审结论。 */
+  private async getMissionContext(slug: string | undefined, ctx: ToolContext): Promise<string> {
+    if (isGuest(ctx.userId)) return '当前是游客，没有实战题记录。可引导登录后领取实战题。';
+    try {
+      const where: any = { userId: ctx.userId, status: In(ACTIVE_SUBMISSION) };
+      if (slug) where.missionSlug = slug;
+      const subs = await this.submissionModel.find({ where, order: { updateTime: 'DESC' }, take: 3 });
+      if (!subs.length) {
+        return slug ? `用户没有在做 ${slug} 这道实战题。` : '用户目前没有进行中的实战题。';
+      }
+      const sub = subs[0];
+      const mission = await this.missionModel.findOne({ where: { id: sub.missionId as any } });
+      const lines: string[] = [];
+      lines.push(`实战题：${mission?.title || sub.missionSlug}（slug=${sub.missionSlug}），状态：${SUBMISSION_STATUS[sub.status] || sub.status}，返工 ${sub.reworkCount || 0} 次。`);
+      if (mission?.summary) lines.push(`简介：${sanitizeForPrompt(mission.summary, 200)}`);
+      const reqs = asStringList(mission?.requirements);
+      if (reqs.length) lines.push(`需求：\n${reqs.slice(0, 8).map((r, i) => `${i + 1}. ${sanitizeForPrompt(r, 160)}`).join('\n')}`);
+      const criteria = Array.isArray(mission?.acceptanceCriteria) ? mission.acceptanceCriteria : [];
+      if (criteria.length) {
+        lines.push(
+          `验收标准：\n${criteria
+            .slice(0, 10)
+            .map((c: any) => `- [${c.id}] ${sanitizeForPrompt(String(c.text || ''), 160)}${c.mustPass ? '（必过）' : ''}`)
+            .join('\n')}`
+        );
+      }
+      if (sub.planFeedback) lines.push(`方案审稿意见：${sanitizeForPrompt(sub.planFeedback, 400)}`);
+      const review = await this.reviewModel.findOne({
+        where: { submissionId: sub.id as any, userId: ctx.userId },
+        order: { createTime: 'DESC' },
+      });
+      if (review) {
+        lines.push(`最近一次评审：${REVIEW_VERDICT[review.verdict] || review.verdict}，总分 ${review.totalScore ?? '-'}。`);
+        const items = Array.isArray(review.criteriaVerdicts) ? review.criteriaVerdicts : [];
+        const notPassed = items.filter((it: any) => it && it.verdict && it.verdict !== 'pass');
+        if (notPassed.length) {
+          lines.push(
+            `未通过的验收项：\n${notPassed
+              .slice(0, 8)
+              .map((it: any) => `- [${it.id}] ${sanitizeForPrompt(String(it.text || ''), 120)}：${sanitizeForPrompt(String(it.note || ''), 200)}`)
+              .join('\n')}`
+          );
+        }
+        const remedial = Array.isArray(review.makeupArticles) ? review.makeupArticles : [];
+        if (remedial.length) {
+          lines.push(`评审给的补课清单：${remedial.slice(0, 6).map((a: any) => `《${a.title}》(${a.module}/${a.key})`).join('、')}`);
+          for (const a of remedial.slice(0, 6)) {
+            if (a?.module && a?.key) ctx.citations.set(`${a.module}:${a.key}`, { module: a.module, articleKey: a.key, title: a.title || a.key });
+          }
+        }
+      }
+      for (const a of (Array.isArray(mission?.prereqArticles) ? mission.prereqArticles : []).slice(0, 4)) {
+        if (a?.module && a?.key) ctx.citations.set(`${a.module}:${a.key}`, { module: a.module, articleKey: a.key, title: a.title || a.key });
+      }
+      if (subs.length > 1) lines.push(`另外还在做：${subs.slice(1).map((x) => x.missionSlug).join('、')}`);
+      return lines.join('\n');
+    } catch {
+      return '读取实战题记录失败，按用户描述作答即可。';
+    }
+  }
+
+  /** get_interview_bank：按公司 / 考点在面经题目索引里找真题。 */
+  private async getInterviewBank(company: any, topic: any, limit: any, ctx: ToolContext): Promise<string> {
+    const co = String(company || '').trim().toLowerCase();
+    const tp = String(topic || '').trim().toLowerCase();
+    const n = Math.min(Math.max(Number(limit) || 6, 1), 10);
+    try {
+      const { index } = await this.questionIndex.load();
+      const pick = pickInterviewQuestions(index, co, tp, n);
+      if (!pick.length) {
+        return `面经题库里没找到${co ? `「${company}」` : ''}${tp ? `关于「${topic}」` : ''}的题。可以换个说法，或用 search_articles 搜相关知识点。`;
+      }
+      for (const p of pick) {
+        ctx.citations.set(`interview:${p.articleKey}`, { module: 'interview', articleKey: p.articleKey, title: p.title });
+      }
+      return pick
+        .map(
+          (p, i) =>
+            `${i + 1}. 【${p.company || '未知公司'}】${sanitizeForPrompt(p.question, 160)}\n   出处：《${p.title}》(interview/${p.articleKey})${
+              p.answer ? `\n   答题思路要点：${sanitizeForPrompt(p.answer, 200)}` : ''
+            }`
+        )
+        .join('\n');
+    } catch {
+      return '面经题库暂时读取失败。';
+    }
+  }
+
+  /** schedule_review：幂等加入复习计划（已在计划里不改排程）。 */
+  private async scheduleReview(module: string, key: string, ctx: ToolContext): Promise<string> {
+    if (isGuest(ctx.userId)) return '游客没有复习计划，提示用户登录后可以加入复习。';
+    if (!module || !key) return '（缺少 module 或 key）';
+    if (!CONTENT_MODULES.includes(module)) return `未知模块 ${module}。`;
+    try {
+      const r = await this.articleService.ensureSchedule(ctx.userId, module, key);
+      const when = new Date(r.dueAt + 8 * 3600 * 1000).toISOString().slice(5, 10).replace('-', '月') + '日';
+      return r.created
+        ? `已加入复习计划，${when}提醒复习。`
+        : `这篇已经在复习计划里了，下次复习是${when}，没有改动。`;
+    } catch {
+      return '加入复习计划失败。';
+    }
+  }
+
   // ---- 辅助 ----
 
   /** 从 nav 树按 key 找 filePath（read_article 回退 OSS 用）。 */
@@ -393,4 +567,50 @@ export class CoachToolsService {
     }
     return buf.join('\n').trim();
   }
+}
+
+const ACTIVE_SUBMISSION = ['claimed', 'plan_pending', 'building', 'submitted', 'reviewing', 'rework', 'passed'];
+
+const SUBMISSION_STATUS: Record<string, string> = {
+  claimed: '已领取',
+  plan_pending: '指挥方案待审',
+  building: '开发中',
+  submitted: '已交作业',
+  reviewing: '评审中',
+  passed: '已通过',
+  rework: '需返工',
+};
+
+const REVIEW_VERDICT: Record<string, string> = { pass: '通过', rework: '需返工', need_human: '待人工复核' };
+
+function isGuest(userId?: string): boolean {
+  return !userId || userId.startsWith('guest:');
+}
+
+function asStringList(v: any): string[] {
+  if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : String(x?.text || ''))).filter(Boolean);
+  return [];
+}
+
+/** 面经题挑选（纯函数，便于单测）：公司、考点都给时两者都要命中；同一篇面经最多取 2 题，避免一篇刷屏。 */
+export function pickInterviewQuestions(
+  index: { articleKey: string; title: string; company: string; questions: { key: string; question: string; answer: string }[] }[],
+  company: string,
+  topic: string,
+  limit: number
+): { articleKey: string; title: string; company: string; question: string; answer: string }[] {
+  const co = company.toLowerCase();
+  const tp = topic.toLowerCase();
+  const out: { articleKey: string; title: string; company: string; question: string; answer: string }[] = [];
+  for (const art of index) {
+    if (co && !`${art.company} ${art.title}`.toLowerCase().includes(co)) continue;
+    let taken = 0;
+    for (const q of art.questions || []) {
+      if (tp && !`${q.question} ${q.key}`.toLowerCase().includes(tp)) continue;
+      out.push({ articleKey: art.articleKey, title: art.title, company: art.company, question: q.question, answer: q.answer });
+      if (++taken >= 2 || out.length >= limit) break;
+    }
+    if (out.length >= limit) break;
+  }
+  return out;
 }
