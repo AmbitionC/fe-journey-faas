@@ -27,6 +27,7 @@ let aiHistoryService;
 let redisService;
 let articleService;
 let retrieveService;
+let coachAgentService = null;
 let mcpRuntimePromise = null;
 let irisCreditService = null;
 let entitlementService = null;
@@ -195,11 +196,29 @@ async function handleStream(req, res) {
   // 结构化任务（算法提示/点评）：提示词服务端拼装，走 forwardTaskStream（PRD-02 F1-3）
   const task = body.task && body.task.kind ? clampTask(body.task) : null;
 
+  // 辅助调用（前端「猜你想问」发 purpose:'suggest'）：不是用户提的问题。
+  // ① 走独立限流桶，不吃用户自己的每日提问额度；
+  // ② 计量上归到 module `aux:<purpose>`，让复盘能分开「用户在问」与「界面自动问」。
+  // 判定与 src/function/ai.ts 共用 common/aiPurpose——**线上这条路由走的是本文件**，
+  // 2026-09-20 只改了那边，测试与部署全绿而线上零变化，就是因为改在了不服务流量的一份上。
+  const auxModule = auxModuleFor(body.purpose);
+
+  // 用户自己提的普通问题走 Iris 教练工具循环（CoachAgentService：自主检索 / 读原文 / 追问，带引用与 status 帧）；
+  // 结构化任务（算法提示/点评）和辅助调用仍走单轮流式。
+  // 2026-11-10 发现：此前工具循环只接在 src/function/ai.ts 那份（不服务流量），线上 Iris 一直是单轮 RAG。
+  const useAgent =
+    !task &&
+    !auxModule &&
+    !!coachAgentService &&
+    process.env.COACH_AGENTIC_ENABLED === 'true' &&
+    aiProxyService.supportsTools();
+
   // RAG：用最后一条用户消息召回站内资料，注入上下文 + 先下发引用帧（PRD-02 F1-1/F1-2）
+  // 工具循环自己检索并在结尾下发引用，不走这一步。
   let citations = [];
   try {
     const lastUserMsg = [...messages].reverse().find((m) => m && m.role === 'user');
-    if (!task && lastUserMsg && lastUserMsg.content && retrieveService) {
+    if (!useAgent && !task && lastUserMsg && lastUserMsg.content && retrieveService) {
       const hits = await retrieveService.retrieve(lastUserMsg.content, {
         module: context.module,
         topK: 3,
@@ -216,12 +235,6 @@ async function handleStream(req, res) {
     /* 检索失败不影响回答 */
   }
 
-  // 辅助调用（前端「猜你想问」发 purpose:'suggest'）：不是用户提的问题。
-  // ① 走独立限流桶，不吃用户自己的每日提问额度；
-  // ② 计量上归到 module `aux:<purpose>`，让复盘能分开「用户在问」与「界面自动问」。
-  // 判定与 src/function/ai.ts 共用 common/aiPurpose——**线上这条路由走的是本文件**，
-  // 2026-09-20 只改了那边，测试与部署全绿而线上零变化，就是因为改在了不服务流量的一份上。
-  const auxModule = auxModuleFor(body.purpose);
   if (auxModule) context.module = auxModule;
 
   let full = '';
@@ -235,7 +248,31 @@ async function handleStream(req, res) {
     } else {
       charge = await irisCreditService.begin(userId, isMember, deepThink ? 'think' : 'chat');
     }
-    const gen = task
+    if (useAgent) {
+      for await (const frame of coachAgentService.streamAgentic(messages, context, userId)) {
+        if (frame.status) res.write(`data: ${JSON.stringify({ status: frame.status })}\n\n`);
+        if (frame.content) {
+          full += frame.content;
+          res.write(`data: ${JSON.stringify({ content: frame.content })}\n\n`);
+        }
+        if (frame.question) {
+          // 追问也算产出（不退点），并以文字落进会话历史，下一轮模型能看到自己问了什么
+          const q = frame.question;
+          const opts = Array.isArray(q.options) && q.options.length ? '\n\n' + q.options.map((o) => `- ${o}`).join('\n') : '';
+          full += `${q.question}${opts}`;
+          res.write(`data: ${JSON.stringify({ question: q })}\n\n`);
+        }
+        if (frame.citations) res.write(`data: ${JSON.stringify({ citations: frame.citations })}\n\n`);
+        if (frame.error) {
+          // 一字未出才按失败处理（退点 + 错误帧）；已经答了一部分就只补一条错误帧
+          if (!full) throw new Error(frame.error);
+          res.write(`data: ${JSON.stringify({ error: frame.error, code: irisErrorCode(frame.error) })}\n\n`);
+        }
+      }
+    }
+    const gen = useAgent
+      ? []
+      : task
       ? aiProxyService.forwardTaskStream(task, userId, deepThink)
       : aiProxyService.forwardStream(messages, context, userId, deepThink);
     for await (const chunk of gen) {
@@ -339,6 +376,12 @@ async function bootstrap() {
   articleService = await appCtx.getAsync(ArticleService);
   const { RetrieveService } = require('./dist/service/ai/retrieve');
   retrieveService = await appCtx.getAsync(RetrieveService);
+  try {
+    const { CoachAgentService } = require('./dist/service/ai/coachAgent');
+    coachAgentService = await appCtx.getAsync(CoachAgentService);
+  } catch (e) {
+    console.error('[server] CoachAgentService unavailable, Iris falls back to single-shot answers', e && e.message);
+  }
   try {
     const irisCredit = require('./dist/service/ai/irisCredit');
     irisCreditService = await appCtx.getAsync(irisCredit.IrisCreditService);

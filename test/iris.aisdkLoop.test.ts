@@ -225,3 +225,30 @@ describe('Iris 工具循环（AI SDK）', () => {
     }
   });
 });
+
+/**
+ * 线上 /api/ai/chat/stream 由 server.js 直写 SSE，不经过 src/function/ai.ts。
+ * 2026-11-10 发现工具循环只接在了 ai.ts 那份，线上 Iris 一直是单轮 RAG——这里直接盯 server.js。
+ */
+describe('线上实际处理器（server.js）接入 Iris 工具循环', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { readFileSync } = require('fs');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { join } = require('path');
+  const server: string = readFileSync(join(__dirname, '..', 'server.js'), 'utf8');
+
+  it('普通提问走 coachAgentService.streamAgentic', () => {
+    assert.ok(/require\('\.\/dist\/service\/ai\/coachAgent'\)/.test(server), '未加载 CoachAgentService');
+    assert.ok(/coachAgentService\.streamAgentic\(messages, context, userId\)/.test(server), '未调用 streamAgentic');
+  });
+
+  it('结构化任务与辅助调用不进工具循环', () => {
+    assert.ok(/const useAgent =\s*!task &&\s*!auxModule/.test(server), 'useAgent 判定缺少 task / aux 排除');
+  });
+
+  it('status / question / citations 帧都转发给前端', () => {
+    for (const k of ['status', 'question', 'citations']) {
+      assert.ok(new RegExp(`JSON\\.stringify\\(\\{ ${k}: `).test(server), `缺少 ${k} 帧`);
+    }
+  });
+});
