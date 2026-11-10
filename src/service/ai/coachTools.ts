@@ -64,7 +64,8 @@ export class CoachToolsService {
 
   /** OpenAI function-calling 格式的工具定义。传 whitelist 则只返回其中的工具。 */
   getToolDefs(whitelist?: string[]): any[] {
-    const all = this.allToolDefs();
+    // 运行函数没配好（本地 / 单测）就不把 run_code 交给模型，免得它调了只拿到「不可用」
+    const all = this.allToolDefs().filter((t) => t.function.name !== 'run_code' || codeRunnerConfigured());
     if (!whitelist || !whitelist.length) {
       // 默认（qa 模式）不含 ask_question
       return all.filter((t) => t.function.name !== 'ask_question');
@@ -201,6 +202,25 @@ export class CoachToolsService {
           },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'run_code',
+          description:
+            '在隔离的运行环境里真正执行一段 JavaScript / TypeScript（Node 22，无网络、不能读写文件、最多 10 秒），返回输出和报错。' +
+            '用来拿事实说话：验证用户贴来的代码在边界输入下的真实行为（自己补几行 console.log / assert 用例），' +
+            '或核实某个语言行为（事件循环顺序、this 指向、类型转换等）。不要用它写成品代码给用户。',
+          parameters: {
+            type: 'object',
+            properties: {
+              language: { type: 'string', enum: ['javascript', 'typescript'], description: '默认 javascript' },
+              code: { type: 'string', description: '完整可运行的代码（含你补的用例和 console.log 输出）' },
+              stdin: { type: 'string', description: '可选：标准输入' },
+            },
+            required: ['code'],
+          },
+        },
+      },
     ];
   }
 
@@ -221,6 +241,8 @@ export class CoachToolsService {
         return this.getInterviewBank(args?.company, args?.topic, args?.limit, ctx);
       case 'schedule_review':
         return this.scheduleReview(String(args?.module || ''), String(args?.key || ''), ctx);
+      case 'run_code':
+        return runCodeRemote(args);
       default:
         return `未知工具：${name}`;
     }
@@ -613,4 +635,54 @@ export function pickInterviewQuestions(
     if (out.length >= limit) break;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// run_code：调用独立的 iris-code-runner 函数（runner/code-runner，见 s.yaml irisCodeRunner）
+
+export function codeRunnerConfigured(): boolean {
+  return !!(process.env.CODE_RUNNER_URL && process.env.CODE_RUNNER_TOKEN);
+}
+
+/** 运行器结果 → 给模型读的紧凑文本。去掉 Node 内部堆栈帧，留下真正的报错行。 */
+export function formatRunResult(r: any): string {
+  const lines: string[] = [];
+  if (r?.timedOut) lines.push('结果：超时（超过时间上限被终止，可能有死循环）');
+  else if (r?.signal) lines.push(`结果：进程被终止（${r.signal}，多半是内存超限）`);
+  else lines.push(`结果：退出码 ${r?.exitCode}${r?.exitCode === 0 ? '（正常结束）' : '（出错）'}，耗时 ${r?.durationMs ?? '?'}ms`);
+  const out = String(r?.stdout || '').trimEnd();
+  lines.push(out ? `stdout：\n${out.slice(0, 2500)}` : 'stdout：（无输出）');
+  const err = String(r?.stderr || '')
+    .split('\n')
+    .filter((l) => !/^\s+at (node:|.*\(node:)/.test(l) && !/^node:/.test(l) && !/^Node\.js v/.test(l))
+    .join('\n')
+    .trim();
+  if (err) lines.push(`stderr：\n${err.slice(0, 1200)}`);
+  if (r?.truncated) lines.push('（输出过长，已截断）');
+  return lines.join('\n');
+}
+
+async function runCodeRemote(args: any): Promise<string> {
+  if (!codeRunnerConfigured()) return '代码运行环境暂不可用，请直接根据代码推理作答，并说明没有实际运行。';
+  const code = String(args?.code || '');
+  if (!code.trim()) return '（未提供代码）';
+  if (code.length > 20000) return '代码太长（超过 2 万字符），请只保留需要验证的部分。';
+  const url = String(process.env.CODE_RUNNER_URL).replace(/\/+$/, '') + '/run';
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-runner-token': String(process.env.CODE_RUNNER_TOKEN) },
+      body: JSON.stringify({
+        language: args?.language === 'typescript' ? 'typescript' : 'javascript',
+        code,
+        stdin: args?.stdin ? String(args.stdin) : undefined,
+        timeoutMs: 8000,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!resp.ok) return `代码运行环境返回 ${resp.status}，这次没跑成。请根据代码推理作答，并说明没有实际运行。`;
+    return formatRunResult(await resp.json());
+  } catch (e: any) {
+    return `代码运行环境连接失败（${e?.name === 'TimeoutError' ? '超时' : e?.message || e}）。请根据代码推理作答，并说明没有实际运行。`;
+  }
 }

@@ -146,3 +146,59 @@ describe('Iris 阶段 2 工具', () => {
     assert.strictEqual(titleFromCitations(m as any, 'llm', 'nope'), undefined);
   });
 });
+
+describe('Iris run_code', () => {
+  const http = require('http');
+  const { createServer } = require('../runner/code-runner/server.js');
+  let server: any;
+  let base = '';
+  const saved = { url: process.env.CODE_RUNNER_URL, token: process.env.CODE_RUNNER_TOKEN };
+
+  before(async () => {
+    server = createServer({ token: 't0ken' });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    base = `http://127.0.0.1:${server.address().port}`;
+  });
+  after(() => {
+    server.close();
+    process.env.CODE_RUNNER_URL = saved.url;
+    process.env.CODE_RUNNER_TOKEN = saved.token;
+    if (saved.url === undefined) delete process.env.CODE_RUNNER_URL;
+    if (saved.token === undefined) delete process.env.CODE_RUNNER_TOKEN;
+  });
+
+  it('没配运行函数时不把 run_code 交给模型', () => {
+    delete process.env.CODE_RUNNER_URL;
+    delete process.env.CODE_RUNNER_TOKEN;
+    const names = new CoachToolsService().getToolDefs(['search_articles', 'run_code']).map((t: any) => t.function.name);
+    assert.deepStrictEqual(names, ['search_articles']);
+  });
+
+  it('真跑代码：输出、断言失败、超时都如实返回；令牌不对拒绝', async () => {
+    process.env.CODE_RUNNER_URL = base;
+    process.env.CODE_RUNNER_TOKEN = 't0ken';
+    const svc = new CoachToolsService();
+    assert.ok(svc.getToolDefs(['run_code']).length === 1);
+    const ok = await svc.execute('run_code', { code: 'console.log(["1","2","3"].map(parseInt))' }, ctx());
+    assert.ok(ok.includes('退出码 0'), ok);
+    assert.ok(ok.includes('[ 1, NaN, NaN ]'), ok);
+    const bad = await svc.execute('run_code', { code: 'require("assert").strictEqual(0.1 + 0.2, 0.3)' }, ctx());
+    assert.ok(bad.includes('出错') && bad.includes('AssertionError'), bad);
+    assert.ok(!/^\s+at node:/m.test(bad));
+    const ts = await svc.execute('run_code', { language: 'typescript', code: 'const n: number = 2; console.log(n ** 10)' }, ctx());
+    assert.ok(ts.includes('1024'), ts);
+    const secret = await svc.execute('run_code', { code: 'console.log(Object.keys(process.env).length)' }, ctx());
+    assert.ok(secret.includes('stdout：\n0'), secret);
+
+    process.env.CODE_RUNNER_TOKEN = 'wrong';
+    const denied = await svc.execute('run_code', { code: 'console.log(1)' }, ctx());
+    assert.ok(denied.includes('401'), denied);
+    void http;
+  });
+
+  it('超时会被终止', async () => {
+    const { runCode } = require('../runner/code-runner/server.js');
+    const r = await runCode({ code: 'for(;;){}', timeoutMs: 600 });
+    assert.strictEqual(r.timedOut, true);
+  });
+});
