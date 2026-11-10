@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as http from 'http';
 import { AddressInfo } from 'net';
-import { runAiSdkLoop, LoopEvent } from '../src/service/ai/aisdkLoop';
+import { runAiSdkLoop, LoopEvent, stripPreface } from '../src/service/ai/aisdkLoop';
 
 /**
  * 模拟 DeepSeek（OpenAI 兼容流式接口），按脚本逐次返回。
@@ -200,6 +200,25 @@ describe('Iris 工具循环（AI SDK）', () => {
     } finally {
       m.close();
     }
+  });
+
+  it('超过 40 字的过场话也不展示；终答开头的过场句被剥掉', async () => {
+    const m = await startMock([
+      { tool: { name: 'search_articles', args: { query: 'schema' } }, preface: '我先查一下站内关于 Function Calling / Input Schema 和 additionalProperties 的资料。' },
+      { text: '我先查一下站内资料。**一句话：additionalProperties 默认是 true，写 false 才是封闭白名单。**' },
+    ]);
+    try {
+      const evs = await collect(m.url);
+      assert.strictEqual(text(evs), '**一句话：additionalProperties 默认是 true，写 false 才是封闭白名单。**');
+    } finally {
+      m.close();
+    }
+  });
+
+  it('stripPreface 只剥过场句，不误伤正文', () => {
+    assert.strictEqual(stripPreface('让我先检索一下。防抖是……'), '防抖是……');
+    assert.strictEqual(stripPreface('我来讲讲防抖。'), '我来讲讲防抖。');
+    assert.strictEqual(stripPreface('防抖是停止触发后才执行。'), '防抖是停止触发后才执行。');
   });
 
   it('兜底②：模型把工具调用写进正文 → 不展示，标记 textual_parse 交给降级链', async () => {

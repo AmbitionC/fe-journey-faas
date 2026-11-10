@@ -111,3 +111,22 @@ jobs:
         run: npx tsc --noEmit
       - name: 全量测试（标准入口）
         run: npm test
+
+  # 线上冒烟：向生产 SSE 入口发一条真实提问，确认走的是工具循环（出现 status 帧），不是单轮问答
+  live-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask production Iris one question
+        run: |
+          curl -sS -N --max-time 120 -X POST https://fe-journey-main-ktantdfjcs.cn-hangzhou.fcapp.run/api/ai/chat/stream \
+            -H 'content-type: application/json' -H 'Origin: https://agent-journey.cn' \
+            -d '{"messages":[{"role":"user","content":"Agent 的循环应该怎么设计终止条件？"}],"context":{"module":"llm"}}' > out.txt || true
+          curl -sS -N --max-time 120 -X POST https://fe-journey-main-ktantdfjcs.cn-hangzhou.fcapp.run/api/ai/chat/stream \
+            -H 'content-type: application/json' -H 'Origin: https://agent-journey.cn' \
+            -d '{"messages":[{"role":"user","content":"字节面试一般会问 RAG 的哪些题？给我挑几道"}],"context":{"module":"interview"}}' > out2.txt || true
+          echo "--- interview bank probe"; grep -o '"status":"[^"]*"' out2.txt | head -6 || true
+          grep -q '面经题库' out2.txt && echo "LIVE_PROBE_BANK=used" || echo "LIVE_PROBE_BANK=not-used"
+          grep -o '"status":"[^"]*"' out.txt | head -5 || true
+          grep -o '"content":"[^"]*"' out.txt | head -3 || true
+          grep -o '"error":"[^"]*"' out.txt | head -2 || true
+          grep -q '"status"' out.txt && echo "LIVE_PROBE=agent" || { echo "LIVE_PROBE=no-status"; head -c 1500 out.txt; exit 1; }
