@@ -33,10 +33,11 @@ URL=$(python3 - <<'PY'
 import os
 from alibabacloud_fc20230330.client import Client
 from alibabacloud_tea_openapi import models as open_models
+from alibabacloud_fc20230330 import models as fc_models
 cfg = open_models.Config(access_key_id=os.environ['AK_ID'], access_key_secret=os.environ['AK_SECRET'],
                          endpoint=f"{os.environ['ACCOUNT_ID']}.cn-hangzhou.fc.aliyuncs.com")
 fc = Client(cfg)
-f = fc.get_function('iris-code-runner', None).body
+f = fc.get_function('iris-code-runner', fc_models.GetFunctionRequest()).body
 print('internetAccess=%s role=%r vpc=%r' % (f.internet_access, f.role, getattr(f.vpc_config, 'vpc_id', None)), file=__import__('sys').stderr)
 assert f.internet_access is False, 'iris-code-runner 必须关闭公网出站'
 assert not f.role, 'iris-code-runner 不应绑定 RAM 角色'
