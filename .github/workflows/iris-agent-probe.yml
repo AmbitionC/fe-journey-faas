@@ -111,3 +111,17 @@ jobs:
         run: npx tsc --noEmit
       - name: 全量测试（标准入口）
         run: npm test
+
+  # 线上冒烟：向生产 SSE 入口发一条真实提问，确认走的是工具循环（出现 status 帧），不是单轮问答
+  live-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask production Iris one question
+        run: |
+          curl -sS -N --max-time 120 -X POST https://fe-journey-main-ktantdfjcs.cn-hangzhou.fcapp.run/api/ai/chat/stream \
+            -H 'content-type: application/json' -H 'Origin: https://agent-journey.cn' \
+            -d '{"messages":[{"role":"user","content":"Agent 的循环应该怎么设计终止条件？"}],"context":{"module":"llm"}}' > out.txt || true
+          grep -o '"status":"[^"]*"' out.txt | head -5 || true
+          grep -o '"content":"[^"]*"' out.txt | head -3 || true
+          grep -o '"error":"[^"]*"' out.txt | head -2 || true
+          grep -q '"status"' out.txt && echo "LIVE_PROBE=agent" || { echo "LIVE_PROBE=no-status"; head -c 1500 out.txt; exit 1; }
