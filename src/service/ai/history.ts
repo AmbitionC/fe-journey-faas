@@ -1,6 +1,6 @@
 import { Provide } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThan, Not, Repository } from 'typeorm';
 import { AiConversationEntity } from '../../entity/aiConversation';
 import { AiMessageEntity } from '../../entity/aiMessage';
 
@@ -99,6 +99,22 @@ export class AiHistoryService {
       total,
       hasMore: skip + rows.length < total,
     };
+  }
+
+  /** 最近聊过的话题（Iris 跨会话记忆用）：按最后消息时间倒序，排除当前会话。 */
+  async recentTopics(
+    userId: string,
+    opts: { excludeId?: number; limit?: number; days?: number } = {}
+  ): Promise<{ title: string; module: string; lastMessageAt: Date }[]> {
+    const since = new Date(Date.now() - (opts.days || 30) * 86400000);
+    const where: any = { userId, status: 'active', lastMessageAt: MoreThan(since) };
+    if (opts.excludeId) where.id = Not(opts.excludeId as any);
+    const rows = await this.convModel.find({
+      where,
+      order: { lastMessageAt: 'DESC', id: 'DESC' },
+      take: Math.min(Math.max(opts.limit || 5, 1), 10),
+    });
+    return rows.map((r) => ({ title: r.title, module: r.module, lastMessageAt: r.lastMessageAt }));
   }
 
   /** 会话历史消息（校验归属，正序）。 */

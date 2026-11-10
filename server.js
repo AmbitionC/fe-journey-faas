@@ -249,6 +249,8 @@ async function handleStream(req, res) {
       charge = await irisCreditService.begin(userId, isMember, deepThink ? 'think' : 'chat');
     }
     if (useAgent) {
+      // 带上本会话 id：跨会话记忆要排除它（否则「上次你问过」会把这次的问题本身算进去）
+      if (conv && conv.id) context.conversationId = conv.id;
       for await (const frame of coachAgentService.streamAgentic(messages, context, userId)) {
         if (frame.status) res.write(`data: ${JSON.stringify({ status: frame.status })}\n\n`);
         if (frame.content) {
