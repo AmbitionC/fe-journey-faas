@@ -119,6 +119,17 @@ jobs:
             --access aliyun \
             -f
 
+      # Iris run_code 的隔离运行函数：先部署并做隔离冒烟，通过后把地址/令牌写进 GITHUB_ENV 给主函数。
+      # 失败不阻断主函数发布（主函数拿不到地址时自动不提供 run_code 工具）。
+      - name: Deploy iris-code-runner (+ isolation smoke)
+        continue-on-error: true
+        env:
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+          AK_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+          AK_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+          ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
+        run: bash scripts/deploy-code-runner.sh
+
       # FC 3.0 Web 函数：单函数 server.js，环境变量经 ${env('...')} 注入到函数
       - name: Deploy (FC3 web function)
         run: s fcJourneyMain deploy -y --access aliyun

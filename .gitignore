@@ -22,3 +22,4 @@ run/
 # invest-model 定时函数的 CI 打包产物（deploy-invest-scheduler job）
 invest-dist/
 invest-model-src/
+runner/code-runner/noderuntime/
