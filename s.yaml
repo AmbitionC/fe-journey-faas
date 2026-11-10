@@ -112,6 +112,9 @@ resources:
         PAY_NOTIFY_EMAIL: ${env('PAY_NOTIFY_EMAIL', '')}
         PAY_NOTIFY_SMS_SIGN: ${env('PAY_NOTIFY_SMS_SIGN', '')}
         PAY_NOTIFY_SMS_TEMPLATE: ${env('PAY_NOTIFY_SMS_TEMPLATE', '')}
+        # Iris run_code：隔离运行函数 iris-code-runner 的地址与调用令牌（deploy.yml 先部署它再注入）。缺任一则不提供该工具。
+        CODE_RUNNER_URL: ${env('CODE_RUNNER_URL', '')}
+        CODE_RUNNER_TOKEN: ${env('CODE_RUNNER_TOKEN', '')}
       triggers:
         - triggerName: httpTrigger
           triggerType: http
@@ -124,6 +127,42 @@ resources:
               - DELETE
               - OPTIONS
               - HEAD
+
+  # ══ Iris 代码运行函数（run_code 工具）═════════════════════════════════
+  # 阿里云云沙箱是邀测，按方案的退路自建隔离运行（owner 2026-11-10 在卡片上确认部署）：
+  # 独立函数、关公网出站、不挂 VPC、不绑角色、除调用令牌外不带任何环境变量；单实例单并发；
+  # 用户代码再跑在受 Node 权限模型限制的子进程里。没配令牌时拒绝一切调用。
+  # 代码只有 runner/code-runner/server.js（零依赖），node 二进制由 workflow 打进 noderuntime/。
+  irisCodeRunner:
+    component: fc3
+    props:
+      region: cn-hangzhou
+      functionName: iris-code-runner
+      description: 'Iris run_code：隔离执行 JS/TS 片段（无公网、无密钥）'
+      runtime: custom.debian10
+      handler: index.handler
+      code: ./runner/code-runner
+      cpu: 0.5
+      memorySize: 512
+      diskSize: 512
+      timeout: 30
+      instanceConcurrency: 1
+      internetAccess: false
+      customRuntimeConfig:
+        command:
+          - noderuntime/bin/node
+          - server.js
+        port: 9000
+      environmentVariables:
+        CODE_RUNNER_TOKEN: ${env('CODE_RUNNER_TOKEN', '')}
+      triggers:
+        - triggerName: httpTrigger
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
 
   # ══ Personal OS 健康预警定时器 ══════════════════════════════════════
   # 只按时调 Web 函数 /pos/alerts/push 与 /pos/review/weekly/run（计算/去重/推送都在 Web 函数里）。

@@ -28,9 +28,10 @@ interface ModeDef {
 const AGENTIC_INSTRUCTIONS = `\n\n你能调用工具检索站内知识库来支撑回答。工作方式：
 1. 回答站内知识问题前，优先用 search_articles 找依据；需要原文细节再 read_article；想做跨文章推荐用 get_catalog；要个性化就先 get_learner_state。
 2. 用户提到自己的实战题 / 作业 / 评审结果 / 项目卡住了，先 get_mission_context 看题目验收标准和评审结论再说；问某公司面试考什么、要练面试题，用 get_interview_bank 找站内真题。
-3. 用户说要复习、记下来，或你判断他刚卡在某个知识点，可以用 schedule_review 把对应文章加入复习计划，并告诉他什么时候复习。
-4. 回答必须基于站内资料，末尾用「延伸阅读」列出引用到的文章标题；《》里的站内文章标题必须和工具返回的标题逐字一致，不改写、不意译；站内确实没有就如实说明、绝不编造 API 或数字。
-5. 用中文，代码用 Markdown。先给最关键的一句，再按需展开。`;
+3. 判断代码对不对、某个 JS/TS 行为到底是什么时，能跑就用 run_code 真跑一遍（自己补边界用例和输出），以运行结果为准；说结论时注明「实际运行结果」，没跑成就说明是推理。
+4. 用户说要复习、记下来，或你判断他刚卡在某个知识点，可以用 schedule_review 把对应文章加入复习计划，并告诉他什么时候复习。
+5. 回答必须基于站内资料，末尾用「延伸阅读」列出引用到的文章标题；《》里的站内文章标题必须和工具返回的标题逐字一致，不改写、不意译；站内确实没有就如实说明、绝不编造 API 或数字。
+6. 用中文，代码用 Markdown。先给最关键的一句，再按需展开。`;
 
 const COACH_BOUNDARY = `\n\n（重要边界）你是考官与学习向导，不是代码助手：不要输出成品代码、不替用户调试报错、不给可以直接粘贴运行的完整实现——这些用户自己的 IDE AI（Cursor / Claude Code）做得又快又好。你专注做它们做不到的事：对照站内知识判断用户的方向/方案对不对、指出他还缺哪块知识（并给出站内文章）、教他怎么把需求向 AI 说清楚。`;
 
@@ -43,9 +44,9 @@ const FEYNMAN_INSTR = `\n\n你在做「带你复习·讲给教练听」：让用
 
 const PLAN_REVIEW_INSTR = `\n\n你在做「指挥方案审稿」：对照题目验收标准审用户的指挥方案，只提问不代做——挑出方案里没想清楚的漏洞（用 ask_question 或直接追问），引用站内文章补前置知识，最后给结论：通过 / 需修改。绝不代写方案或给成品 prompt。`;
 
-const INTERVIEWER_INSTR = `\n\n你在做「模拟面试官」：先用 get_interview_bank 按用户的目标公司 / 考点找站内真题，一次只问一道（用 ask_question，可不给选项让用户自由作答）。用户答完后：指出答到了哪些要点、漏了什么（对照题目的答题思路和站内文章），给一个 1-5 的评分，再问下一道或追问一层。不要一次把答案全讲完，引导用户自己说出来。`;
+const INTERVIEWER_INSTR = `\n\n你在做「模拟面试官」：先用 get_interview_bank 按用户的目标公司 / 考点找站内真题，一次只问一道（用 ask_question，可不给选项让用户自由作答）。用户答完后：指出答到了哪些要点、漏了什么（对照题目的答题思路和站内文章），给一个 1-5 的评分，再问下一道或追问一层。用户的回答里有代码（手写题）时，用 run_code 补几个边界用例实际跑一遍，按运行结果评分。不要一次把答案全讲完，引导用户自己说出来。`;
 
-const RESCUE_INSTR = `\n\n你在做「卡点急救」：报错和代码问题让用户自己的 IDE AI 修（更快更强），你只做三件事——①对照题目验收标准判断当前做法/方案能不能过；②指出缺哪块知识并给站内文章；③教用户怎么把需求向 AI 说清楚。绝不代写代码、不代调试。`;
+const RESCUE_INSTR = `\n\n你在做「卡点急救」：报错和代码问题让用户自己的 IDE AI 修（更快更强），你只做三件事——①对照题目验收标准判断当前做法/方案能不能过；②指出缺哪块知识并给站内文章；③教用户怎么把需求向 AI 说清楚。用户贴了代码时，可以用 run_code 跑一遍、告诉他实际现象（哪个输入下结果不对），但不替他改。绝不代写代码、不代调试。`;
 
 const MODES: Record<string, ModeDef> = {
   placement: { tools: ['get_catalog', 'get_learner_state', 'ask_question'], rounds: 3, instructions: PLACEMENT_INSTR },
@@ -60,13 +61,14 @@ const MODES: Record<string, ModeDef> = {
       'get_mission_context',
       'get_interview_bank',
       'schedule_review',
+      'run_code',
     ],
     rounds: 4,
     instructions: AGENTIC_INSTRUCTIONS,
   },
   plan_review: { tools: ['get_mission_context', 'search_articles', 'read_article', 'ask_question'], rounds: 3, instructions: PLAN_REVIEW_INSTR },
-  rescue: { tools: ['get_mission_context', 'search_articles', 'read_article', 'get_learner_state'], rounds: 4, instructions: RESCUE_INSTR },
-  interviewer: { tools: ['get_interview_bank', 'search_articles', 'read_article', 'ask_question'], rounds: 3, instructions: INTERVIEWER_INSTR },
+  rescue: { tools: ['get_mission_context', 'search_articles', 'read_article', 'get_learner_state', 'run_code'], rounds: 4, instructions: RESCUE_INSTR },
+  interviewer: { tools: ['get_interview_bank', 'search_articles', 'read_article', 'ask_question', 'run_code'], rounds: 3, instructions: INTERVIEWER_INSTR },
 };
 
 function resolveMode(mode?: string): { key: string; def: ModeDef } {
@@ -95,6 +97,8 @@ export function statusLabel(name: string, args: any, titleOf?: (module: string, 
       return `正在翻面经题库${args?.company ? `（${String(args.company).slice(0, 10)}）` : ''}…`;
     case 'schedule_review':
       return '正在加入复习计划…';
+    case 'run_code':
+      return '正在实际运行代码验证…';
     case 'get_catalog':
       return '正在浏览站内目录…';
     case 'get_learner_state':

@@ -1,9 +1,9 @@
-# 一次性排雷：只在 claude/project-thread-fny047 分支推送时运行，不部署、不改线上。
+# 一次性排雷：只在 claude/project-thread-fny047 分支推送时运行；除独立的 iris-code-runner 外不部署、不改线上。
 name: iris-agent-probe
 on:
   push:
     branches: [claude/project-thread-fny047]
-    paths: ['spike/iris-agent-probe/**', '.github/workflows/iris-agent-probe.yml', 'src/service/ai/**', 'test/iris.*', 'package.json', 'tsconfig.json']
+    paths: ['runner/**', 'scripts/deploy-code-runner.sh', 's.yaml', 'spike/iris-agent-probe/**', '.github/workflows/iris-agent-probe.yml', 'src/service/ai/**', 'test/iris.*', 'package.json', 'tsconfig.json']
 permissions:
   contents: read
 jobs:
@@ -111,6 +111,33 @@ jobs:
         run: npx tsc --noEmit
       - name: 全量测试（标准入口）
         run: npm test
+
+  # Iris run_code 运行函数：从分支部署独立函数 iris-code-runner（不碰主函数）并跑隔离冒烟
+  code-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+      - name: Configure Alibaba Cloud credentials
+        run: |
+          s config add \
+            --AccountID "${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}" \
+            --AccessKeyID "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --access aliyun \
+            -f
+      - name: Deploy iris-code-runner + isolation smoke
+        env:
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+          AK_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+          AK_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+          ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
+        run: bash scripts/deploy-code-runner.sh
 
   # 线上冒烟：向生产 SSE 入口发一条真实提问，确认走的是工具循环（出现 status 帧），不是单轮问答
   live-probe:

@@ -1,0 +1,2 @@
+# 部署主函数 fe-journey-main 时不打包独立函数的代码（iris-code-runner 自带 node 二进制，约百兆）
+/runner/
