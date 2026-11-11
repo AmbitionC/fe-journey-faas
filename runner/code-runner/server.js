@@ -28,6 +28,20 @@ const MAX_STDIN = 10000;
 const MAX_OUT = 8000;
 const DEFAULT_TIMEOUT = 5000;
 const MAX_TIMEOUT = 10000;
+/** 附带文件（评审时把仓库里的源码一起放进去跑）：数量与总量上限 */
+const MAX_FILES = 40;
+const MAX_FILES_BYTES = 300000;
+
+/** 附带文件的相对路径：只允许普通相对路径，挡掉绝对路径、..、隐藏的奇怪字符。导出给单测用。 */
+function safeRelPath(p) {
+  const s = String(p || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!s || s.startsWith('/') || s.length > 200) return null;
+  if (!/^[\w@.\-\/ ]+$/.test(s)) return null;
+  const parts = s.split('/');
+  if (parts.some((x) => !x || x === '.' || x === '..')) return null;
+  if (s === 'main.js' || s === 'main.ts') return null;
+  return s;
+}
 
 function safeEqual(a, b) {
   const x = Buffer.from(String(a));
@@ -36,13 +50,25 @@ function safeEqual(a, b) {
 }
 
 /** 跑一段代码。导出给单测用。 */
-function runCode({ language, code, stdin, timeoutMs }, opts = {}) {
+function runCode({ language, code, stdin, timeoutMs, files }, opts = {}) {
   const nodeBin = opts.nodeBin || process.execPath;
   return new Promise((resolve) => {
     const lang = language === 'typescript' || language === 'ts' ? 'typescript' : 'javascript';
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'iris-run-'));
     const file = path.join(dir, lang === 'typescript' ? 'main.ts' : 'main.js');
     fs.writeFileSync(file, String(code));
+    if (files && typeof files === 'object') {
+      let n = 0;
+      let bytes = 0;
+      for (const [rel, content] of Object.entries(files)) {
+        const safe = safeRelPath(rel);
+        if (!safe || typeof content !== 'string') continue;
+        if (++n > MAX_FILES || (bytes += content.length) > MAX_FILES_BYTES) break;
+        const target = path.join(dir, safe);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, content);
+      }
+    }
     const limit = Math.min(Math.max(Number(timeoutMs) || DEFAULT_TIMEOUT, 500), MAX_TIMEOUT);
     const args = [
       '--experimental-permission',
@@ -120,7 +146,7 @@ function createServer(opts = {}) {
     let tooBig = false;
     req.on('data', (c) => {
       raw += c;
-      if (raw.length > MAX_CODE + MAX_STDIN + 2000) {
+      if (raw.length > MAX_CODE + MAX_STDIN + MAX_FILES_BYTES + 20000) {
         tooBig = true;
         req.destroy();
       }
@@ -145,7 +171,7 @@ function createServer(opts = {}) {
   });
 }
 
-module.exports = { runCode, createServer };
+module.exports = { runCode, createServer, safeRelPath };
 
 if (require.main === module) {
   createServer().listen(PORT, () => console.log(`iris-code-runner listening on ${PORT} (${process.version})`));

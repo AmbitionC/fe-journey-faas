@@ -3,7 +3,7 @@ name: iris-agent-probe
 on:
   push:
     branches: [claude/project-thread-fny047]
-    paths: ['runner/**', 'scripts/deploy-code-runner.sh', 's.yaml', 'spike/iris-agent-probe/**', '.github/workflows/iris-agent-probe.yml', 'src/service/ai/**', 'test/iris.*', 'package.json', 'tsconfig.json']
+    paths: ['src/service/review/**', 'runner/**', 'scripts/deploy-code-runner.sh', 's.yaml', 'spike/iris-agent-probe/**', '.github/workflows/iris-agent-probe.yml', 'src/service/ai/**', 'test/iris.*', 'package.json', 'tsconfig.json']
 permissions:
   contents: read
 jobs:
@@ -69,6 +69,28 @@ jobs:
         with:
           name: coach-eval-result
           path: ${{ runner.temp }}/coach-eval-result.md
+
+  # 作业评审 Agent 评测：真实 DeepSeek + 本地运行器，good / buggy 两份夹具
+  review-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: 'npm'
+      - run: npm ci --no-audit --no-fund
+      - name: review eval
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          EVAL_OUT: ${{ runner.temp }}/review-eval-result.md
+        run: npx ts-node --transpile-only spike/iris-agent-probe/review-eval.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-eval-result
+          path: ${{ runner.temp }}/review-eval-result.md
 
   # 与 test.yml 完全一致的全量测试（MySQL + Redis），确认新引擎没碰坏别的东西
   full-tests:

@@ -15,6 +15,8 @@ import { sanitizeForPrompt } from '../ai/sanitize';
 import { uuid } from '../../utils/uuid';
 import { R } from '../../common/base.error.utils';
 import { avatarSeedOf } from '../../common/avatar';
+import { runAgentReview } from './agentReview';
+import { codeRunnerConfigured, callCodeRunner } from '../ai/codeRunner';
 
 function genShareCode(): string {
   return uuid().replace(/-/g, '').slice(0, 12);
@@ -79,10 +81,12 @@ export class ReviewService {
 
     let repoDigest = '';
     let repoSnapshot: any = { truncated: false };
+    let repoTree: { owner: string; repo: string; branch: string; files: { path: string; size?: number }[] } | null = null;
     try {
       const r = await this.readRepo(sub.repoUrl);
       repoDigest = r.digest;
       repoSnapshot = r.snapshot;
+      repoTree = r.tree;
     } catch {
       repoDigest = '(仓库读取失败，仅凭复盘与说明评审，判定谨慎)';
       repoSnapshot = { error: true };
@@ -137,11 +141,89 @@ export class ReviewService {
     this.metricsService
       .track({ userId: sub.userId, event: 'review_done', props: { verdict, submissionId: Number(sub.id) } })
       .catch(() => {});
+    // 影子运行：Agent 评审（翻仓库 + 在隔离运行函数里真跑代码）。结果只存进 repoSnapshot.agentShadow
+    // 供对比，用户看到的仍是上面的结论；对比够了再切换。失败不影响任何东西。
+    // 不 await：Agent 评审要跑好几分钟，不拖慢评审结论落库和 /review/run 的响应。
+    if (repoTree) this.shadowAgentReview(review, mission, sub, repoTree).catch(() => {});
     return review;
   }
 
+  /** 影子 Agent 评审：结果写 review.repoSnapshot.agentShadow。 */
+  async shadowAgentReview(
+    review: MissionReviewEntity,
+    mission: MissionEntity,
+    sub: MissionSubmissionEntity,
+    tree: { owner: string; repo: string; branch: string; files: { path: string; size?: number }[] }
+  ): Promise<any> {
+    if (!codeRunnerConfigured() || !this.aiProxyService.supportsTools()) return null;
+    const started = Date.now();
+    let shadow: any;
+    try {
+      const commits = await this.gh(`/repos/${tree.owner}/${tree.repo}/commits?per_page=20`).catch(() => []);
+      const r = await runAgentReview({
+        config: { apiKey: this.aiProxyService.aiConfig.apiKey, model: this.aiProxyService.aiConfig.model },
+        mission: {
+          title: mission.title,
+          requirements: mission.requirements,
+          acceptanceCriteria: (mission.acceptanceCriteria || []).map((c: any, i: number) => ({
+            id: String(c?.id ?? i + 1),
+            text: String(c?.text || ''),
+            mustPass: !!c?.mustPass,
+          })),
+        },
+        retro: sub.retro || {},
+        files: tree.files,
+        commits: (commits || []).map((c: any) => (c.commit?.message || '').split('\n')[0]),
+        readFile: (p) =>
+          this.ghRaw(`/repos/${tree.owner}/${tree.repo}/contents/${p.split('/').map(encodeURIComponent).join('/')}?ref=${tree.branch}`),
+        runCode: (req) => callCodeRunner(req),
+      });
+      shadow = { ...r, ms: Date.now() - started, at: new Date().toISOString() };
+    } catch (e: any) {
+      shadow = { error: String(e?.message || e).slice(0, 300), ms: Date.now() - started, at: new Date().toISOString() };
+    }
+    review.repoSnapshot = { ...(review.repoSnapshot || {}), agentShadow: shadow };
+    await this.reviewModel.update({ id: review.id as any }, { repoSnapshot: review.repoSnapshot });
+    return shadow;
+  }
+
+  /** 管理员：新旧评审对比（最近 N 条有影子结果的评审）。 */
+  async shadowCompare(limit = 20): Promise<any[]> {
+    const rows = await this.reviewModel.find({ order: { createTime: 'DESC' } as any, take: Math.min(limit * 3, 200) });
+    return rows
+      .filter((r) => r.repoSnapshot?.agentShadow)
+      .slice(0, limit)
+      .map((r) => {
+        const a = r.repoSnapshot.agentShadow;
+        return {
+          reviewId: Number(r.id),
+          submissionId: r.submissionId,
+          missionId: r.missionId,
+          createTime: (r as any).createTime,
+          old: { verdict: r.verdict, totalScore: r.totalScore, criteria: r.criteriaVerdicts },
+          agent: a.error && !a.verdict
+            ? { error: a.error }
+            : {
+                verdict: a.verdict,
+                totalScore: a.totalScore,
+                criteria: a.criteriaVerdicts,
+                runs: a.runs,
+                runsOk: a.runsOk,
+                filesRead: a.filesRead,
+                tokenUsed: a.tokenUsed,
+                ms: a.ms,
+                report: a.report,
+                error: a.error,
+              },
+          agree: !a.error && a.verdict === r.verdict,
+        };
+      });
+  }
+
   /** read_github_repo：读仓库 tree + 关键文件 + commits，产出有界摘要。 */
-  async readRepo(repoUrl: string): Promise<{ digest: string; snapshot: any }> {
+  async readRepo(
+    repoUrl: string
+  ): Promise<{ digest: string; snapshot: any; tree: { owner: string; repo: string; branch: string; files: { path: string; size?: number }[] } }> {
     const m = repoUrl.match(/github\.com\/([^/]+)\/([^/?#]+)/);
     if (!m) throw R.error('无法解析仓库地址');
     const owner = m[1];
@@ -205,10 +287,19 @@ export class ReviewService {
       commits: (commits || []).length,
       truncated: used > BUDGET,
     };
-    return { digest: digest.slice(0, 12000), snapshot };
+    const repoTree = {
+      owner,
+      repo,
+      branch,
+      files: files
+        .filter((f) => !/(^|\/)(node_modules|dist|build|\.git)\//.test(String(f.path)))
+        .slice(0, 2000)
+        .map((f) => ({ path: String(f.path), size: f.size })),
+    };
+    return { digest: digest.slice(0, 12000), snapshot, tree: repoTree };
   }
 
-  private async gh(path: string): Promise<any> {
+  async gh(path: string): Promise<any> {
     const res = await fetch(`${GH_API}${path}`, {
       headers: {
         Accept: 'application/vnd.github+json',
@@ -220,7 +311,7 @@ export class ReviewService {
     return res.json();
   }
 
-  private async ghRaw(path: string): Promise<string> {
+  async ghRaw(path: string): Promise<string> {
     const json = await this.gh(path);
     if (json?.content) {
       return Buffer.from(String(json.content).replace(/\n/g, ''), 'base64').toString('utf8');
