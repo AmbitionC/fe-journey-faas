@@ -225,6 +225,8 @@ export class CoachAgentService {
     let errorMsg: string | undefined;
     let answered = false;
     let asked = false;
+    // 回答正文，交卷时用来挑「延伸阅读」：只列回答里真提到的文章
+    let answerText = '';
 
     try {
       try {
@@ -244,7 +246,10 @@ export class CoachAgentService {
               status: statusLabel(ev.toolName, ev.args, (m, k) => titleFromCitations(toolCtx.citations, m, k)),
             };
           }
-          else if (ev.type === 'content') yield { content: ev.text };
+          else if (ev.type === 'content') {
+            answerText += ev.text;
+            yield { content: ev.text };
+          }
           else if (ev.type === 'question') {
             asked = true;
             yield { question: ev.question };
@@ -266,9 +271,12 @@ export class CoachAgentService {
       if (!asked) {
         if (!answered) {
           yield { status: '正在整理答案…' };
-          yield* this.degradedAnswer(history, module, userId, toolCtx);
+          for await (const frame of this.degradedAnswer(history, module, userId, toolCtx)) {
+            if (frame.content) answerText += frame.content;
+            yield frame;
+          }
         }
-        const citations = [...toolCtx.citations.values()].slice(0, 6);
+        const citations = selectCitations([...toolCtx.citations.values()], answerText, module);
         if (citations.length) yield { citations };
       }
       if (tokenUsed) await this.proxy.recordUsage(userId, module, tokenUsed).catch(() => {});
@@ -367,4 +375,18 @@ export function titleFromCitations(
   if (exact) return exact;
   for (const c of citations.values()) if (c.articleKey === key && c.title) return c.title;
   return undefined;
+}
+
+/**
+ * 从检索 / 读过的候选里挑出「延伸阅读」。
+ * 候选包含每次检索的前几名，很多和这次回答无关（央国企的题会带出 Agent 方向的文章）。
+ * 规则：回答正文里提到标题的才列；一篇都没提到时，只留当前模块里的前 3 篇，其他模块的不列。
+ */
+export function selectCitations(candidates: Citation[], answer: string, module: string): Citation[] {
+  const text = answer || '';
+  const cited = candidates.filter(
+    (c) => c.title && c.title !== c.articleKey && c.title.length >= 4 && text.includes(c.title)
+  );
+  if (cited.length) return cited.slice(0, 6);
+  return candidates.filter((c) => c.module === module && c.title && c.title !== c.articleKey).slice(0, 3);
 }
