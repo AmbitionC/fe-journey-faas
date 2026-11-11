@@ -20,6 +20,7 @@ import {
   sanitizeProgress,
 } from '../service/kids/state';
 import { OssService } from '../service/content/oss';
+import { clientIpFromCtx } from '../common/clientIp';
 import {
   ORT_SHELF_KEY,
   ORT_SIGN_SECONDS,
@@ -119,10 +120,7 @@ export class KidsHTTPService {
 
   /** 同一个 IP 10 分钟最多 300 次；Redis 出问题时放行，不影响读书 */
   private async ortRateLimit() {
-    const ip =
-      this.ctx.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      this.ctx.ip ||
-      '';
+    const ip = clientIpFromCtx(this.ctx);
     if (!ip) return;
     const key = `kids:ort:rate:${Math.floor(
       Date.now() / 1000 / ORT_RATE.ttl
