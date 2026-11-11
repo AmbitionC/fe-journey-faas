@@ -78,6 +78,20 @@ export class ReviewHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '新旧评审对比（管理员）：影子运行的 Agent 评审 vs 线上结论',
+    functionName: 'reviewShadowCompare',
+    name: 'reviewShadowCompare',
+    path: '/review/shadowCompare',
+    method: 'get',
+  })
+  @NoAuth()
+  async shadowCompare(@Query('limit') limit: string) {
+    await assertAdmin(this.ctx, this.redisService);
+    const data = await this.reviewService.shadowCompare(Number(limit) || 20);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '公开只读评审报告（分享卡）',
     functionName: 'reviewShared',
     name: 'reviewShared',

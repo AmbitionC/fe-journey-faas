@@ -12,6 +12,9 @@ import { MissionEntity } from '../../entity/mission';
 import { MissionSubmissionEntity } from '../../entity/missionSubmission';
 import { MissionReviewEntity } from '../../entity/missionReview';
 import { InterviewQuestionIndexService } from '../interview/questionIndex';
+import { codeRunnerConfigured, callCodeRunner } from './codeRunner';
+
+export { codeRunnerConfigured };
 
 /** 一条引用（回答末尾「延伸阅读」候选）。 */
 export interface Citation {
@@ -640,10 +643,6 @@ export function pickInterviewQuestions(
 // ---------------------------------------------------------------------------
 // run_code：调用独立的 iris-code-runner 函数（runner/code-runner，见 s.yaml irisCodeRunner）
 
-export function codeRunnerConfigured(): boolean {
-  return !!(process.env.CODE_RUNNER_URL && process.env.CODE_RUNNER_TOKEN);
-}
-
 /** 运行器结果 → 给模型读的紧凑文本。去掉 Node 内部堆栈帧，留下真正的报错行。 */
 export function formatRunResult(r: any): string {
   const lines: string[] = [];
@@ -667,22 +666,14 @@ async function runCodeRemote(args: any): Promise<string> {
   const code = String(args?.code || '');
   if (!code.trim()) return '（未提供代码）';
   if (code.length > 20000) return '代码太长（超过 2 万字符），请只保留需要验证的部分。';
-  const url = String(process.env.CODE_RUNNER_URL).replace(/\/+$/, '') + '/run';
   try {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-runner-token': String(process.env.CODE_RUNNER_TOKEN) },
-      body: JSON.stringify({
-        language: args?.language === 'typescript' ? 'typescript' : 'javascript',
-        code,
-        stdin: args?.stdin ? String(args.stdin) : undefined,
-        timeoutMs: 8000,
-      }),
-      signal: AbortSignal.timeout(20000),
+    const r = await callCodeRunner({
+      language: args?.language === 'typescript' ? 'typescript' : 'javascript',
+      code,
+      stdin: args?.stdin ? String(args.stdin) : undefined,
     });
-    if (!resp.ok) return `代码运行环境返回 ${resp.status}，这次没跑成。请根据代码推理作答，并说明没有实际运行。`;
-    return formatRunResult(await resp.json());
+    return formatRunResult(r);
   } catch (e: any) {
-    return `代码运行环境连接失败（${e?.name === 'TimeoutError' ? '超时' : e?.message || e}）。请根据代码推理作答，并说明没有实际运行。`;
+    return `代码运行环境出错（${e?.name === 'TimeoutError' ? '超时' : e?.message || e}），这次没跑成。请根据代码推理作答，并说明没有实际运行。`;
   }
 }
