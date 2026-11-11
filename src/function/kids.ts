@@ -5,6 +5,7 @@ import {
   Inject,
   Body,
   ALL,
+  Query,
 } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
@@ -18,6 +19,20 @@ import {
   sanitizeProfile,
   sanitizeProgress,
 } from '../service/kids/state';
+import { OssService } from '../service/content/oss';
+import { clientIpFromCtx } from '../common/clientIp';
+import {
+  ORT_SHELF_KEY,
+  ORT_SIGN_SECONDS,
+  ortBookId,
+  ortObjectKey,
+  signOrtBook,
+  signOrtShelf,
+  toHttps,
+} from '../service/kids/ort';
+
+/** 牛津树签名接口不要求登录（没登录也能读书），按 IP 限流：10 分钟 300 次 */
+const ORT_RATE = { limit: 300, ttl: 600 };
 
 /**
  * 栗栗学英语（little-circle-web）：登录后同步孩子的学习计划和阅读进度。
@@ -30,6 +45,9 @@ export class KidsHTTPService {
 
   @Inject()
   redisService: RedisService;
+
+  @Inject()
+  ossService: OssService;
 
   private async requireUser(): Promise<string> {
     const info = await resolveUserInfo(this.ctx, this.redisService);
@@ -98,5 +116,70 @@ export class KidsHTTPService {
     );
     await this.redisService.set(progressKey(userId), JSON.stringify(merged));
     return { success: true, data: merged };
+  }
+
+  /** 同一个 IP 10 分钟最多 300 次；Redis 出问题时放行，不影响读书 */
+  private async ortRateLimit() {
+    const ip = clientIpFromCtx(this.ctx);
+    if (!ip) return;
+    const key = `kids:ort:rate:${Math.floor(
+      Date.now() / 1000 / ORT_RATE.ttl
+    )}:${ip}`;
+    let n = 0;
+    try {
+      n = await this.redisService.incr(key);
+      if (n === 1) await this.redisService.expire(key, ORT_RATE.ttl);
+    } catch {
+      return;
+    }
+    if (n > ORT_RATE.limit) throw R.validateError('请求太频繁，稍后再试');
+  }
+
+  private ortSign = (objectKey: string) =>
+    toHttps(this.ossService.signedUrl(objectKey, ORT_SIGN_SECONDS));
+
+  private async ortJson(objectKey: string): Promise<unknown> {
+    const text = await this.ossService.getRawText(objectKey);
+    if (text === null) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '栗栗学英语：牛津树书目（封面是 2 小时签名地址）',
+    functionName: 'kidsOrtShelf',
+    name: 'kidsOrtShelf',
+    path: '/kids/ort/shelf',
+    method: 'get',
+  })
+  async ortShelf() {
+    await this.ortRateLimit();
+    const shelf = await this.ortJson(ORT_SHELF_KEY);
+    return { success: true, data: signOrtShelf(shelf, this.ortSign) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description:
+      '栗栗学英语：牛津树一本书（每页图、每句音频都是 2 小时签名地址）',
+    functionName: 'kidsOrtBook',
+    name: 'kidsOrtBook',
+    path: '/kids/ort/book',
+    method: 'get',
+  })
+  async ortBook(@Query('id') id: string) {
+    await this.ortRateLimit();
+    const bookId = ortBookId(id);
+    if (!bookId) throw R.validateError('书号不对');
+    const book = await this.ortJson(
+      ortObjectKey(bookId, 'book.json') as string
+    );
+    if (!book || typeof book !== 'object') throw R.error('这本书找不到了');
+    return {
+      success: true,
+      data: signOrtBook(bookId, book as Record<string, unknown>, this.ortSign),
+    };
   }
 }
