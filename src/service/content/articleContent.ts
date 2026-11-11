@@ -2,6 +2,7 @@ import { Provide } from '@midwayjs/core';
 import { InjectEntityModel } from '@midwayjs/typeorm';
 import { Repository } from 'typeorm';
 import { ArticleContentEntity } from '../../entity/articleContent';
+import { NavConfigEntity } from '../../entity/navConfig';
 import { tokenize } from '../ai/lexicalSearch';
 import { ALL_MODULES } from './modules';
 
@@ -25,6 +26,12 @@ export interface ContentHit {
 export class ArticleContentService {
   @InjectEntityModel(ArticleContentEntity)
   contentModel: Repository<ArticleContentEntity>;
+
+  @InjectEntityModel(NavConfigEntity)
+  navConfigModel: Repository<NavConfigEntity>;
+
+  /** 进程内缓存：各模块目录里 key → 标题，10 分钟刷新一次。 */
+  private navTitles = new Map<string, { at: number; titles: Map<string, string> }>();
 
   /** 进程内缓存：FULLTEXT 索引是否已确认存在，避免每次 search 都 SHOW INDEX。 */
   private ftEnsured = false;
@@ -99,10 +106,48 @@ export class ArticleContentService {
   /** 取单篇正文（read_article 工具用；返回 null 表示未入库）。 */
   async get(module: string, articleKey: string): Promise<ArticleContentEntity | null> {
     try {
-      return await this.contentModel.findOne({ where: { module, articleKey } });
+      const row = await this.contentModel.findOne({ where: { module, articleKey } });
+      if (row && needsTitle(row.title, articleKey)) {
+        row.title = (await this.titleFromNav(module, articleKey)) || row.title;
+      }
+      return row;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 正文没有 frontmatter / 一级标题时入库标题是空的（resource 的央国企、考公文章标题只写在 _tree.json），
+   * 直接给用户看就成了英文 slug。这里按目录树补上标题；查不到返回 undefined。
+   */
+  async titleFromNav(module: string, articleKey: string): Promise<string | undefined> {
+    if (!module || !articleKey || !this.navConfigModel) return undefined;
+    try {
+      const cached = this.navTitles.get(module);
+      let titles = cached && Date.now() - cached.at < 10 * 60 * 1000 ? cached.titles : undefined;
+      if (!titles) {
+        const config = await this.navConfigModel.findOneBy({ module });
+        titles = new Map(
+          this.flattenLeaves((config?.navData as any[]) || [])
+            .filter((l) => l.title && l.title !== l.key)
+            .map((l) => [l.key, l.title])
+        );
+        this.navTitles.set(module, { at: Date.now(), titles });
+      }
+      return titles.get(articleKey);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 检索结果里标题缺失（= slug）的，按目录树补标题。 */
+  private async withNavTitles(hits: ContentHit[]): Promise<ContentHit[]> {
+    for (const h of hits) {
+      if (needsTitle(h.title, h.articleKey)) {
+        h.title = (await this.titleFromNav(h.module, h.articleKey)) || h.title;
+      }
+    }
+    return hits;
   }
 
   /** 已入库文章数（回填/健康检查用）。 */
@@ -127,12 +172,12 @@ export class ArticleContentService {
     const ftReady = await this.ensureFulltextIndex();
     if (ftReady) {
       try {
-        return await this.searchFulltext(terms, opts.module, limit);
+        return await this.withNavTitles(await this.searchFulltext(terms, opts.module, limit));
       } catch {
         /* 落 LIKE 兜底 */
       }
     }
-    return this.searchLike(terms, opts.module, limit);
+    return this.withNavTitles(await this.searchLike(terms, opts.module, limit));
   }
 
   /** BOOLEAN MODE 检索：token 以空格连接（OR 语义 + 相关度排序），召回优先。 */
@@ -285,4 +330,9 @@ export class ArticleContentService {
     }
     return acc;
   }
+}
+
+/** 入库标题为空或就是 slug：需要按目录树补。 */
+export function needsTitle(title: string | null | undefined, articleKey: string): boolean {
+  return !title || title === articleKey;
 }
