@@ -5,9 +5,21 @@ import { OssService } from '../content/oss';
 import { NavConfigEntity } from '../../entity/navConfig';
 import { LEGACY_PDF_GIFT, LEGACY_PDF_KEY, LEGACY_PDF_METADATA_KEY, LEGACY_PDF_SHA256, LEGACY_PDF_SIZE, assertLegacyPdf } from '../../common/legacyPdfGift';
 
+/**
+ * 会员 PDF 的内容模块。knowledge 是原有的知识库资料（OSS 前缀与旧版一致）；
+ * soe（央国企）、civil（考公）由 resource 仓 build-materials --module 生成，前缀 materials/<模块>/。
+ */
+export const MATERIAL_MODULES = ['knowledge', 'soe', 'civil'] as const;
+export type MaterialModule = typeof MATERIAL_MODULES[number];
+export function parseMaterialModule(value?: string | null): MaterialModule {
+  const v = (value || 'knowledge').trim();
+  if (!(MATERIAL_MODULES as readonly string[]).includes(v)) throw new Error(`不支持的资料模块：${v}`);
+  return v as MaterialModule;
+}
+
 /** OSS 上资料 PDF 的存放前缀与清单 key */
-const PREFIX = 'materials/knowledge/';
-const MANIFEST_KEY = `${PREFIX}manifest.json`;
+const prefixOf = (module: MaterialModule) => `materials/${module}/`;
+const PREFIX = prefixOf('knowledge');
 /** 下载签名链接失效期：24 小时（防泄漏传播） */
 const DOWNLOAD_EXPIRES = 24 * 60 * 60;
 
@@ -21,6 +33,8 @@ export interface MaterialItem {
   articleCount: number;
   /** 是否已生成可下载的 PDF */
   ready: boolean;
+  /** soe / civil：answers = 该册的「答案与解析」 */
+  kind?: string;
 }
 
 /** 一级分类分组（目录结构：一级 → 二级 PDF 列表） */
@@ -33,6 +47,7 @@ export interface MaterialGroup {
 interface ManifestItem {
   key: string;
   label?: string;
+  kind?: string;
   updatedAt?: string;
   sizeBytes?: number;
   articleCount?: number;
@@ -62,8 +77,9 @@ export class MaterialsService {
   @InjectEntityModel(NavConfigEntity)
   navModel: Repository<NavConfigEntity>;
 
-  private pdfKey(itemKey: string): string {
-    return `${PREFIX}${itemKey}.pdf`;
+  private pdfKey(itemKey: string, module: MaterialModule = 'knowledge'): string {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(itemKey)) throw new Error('资料 key 不合法');
+    return `${prefixOf(module)}${itemKey}.pdf`;
   }
 
   /** 独立元数据避免被资源仓库每次重建的 Agent manifest 覆盖。 */
@@ -83,8 +99,8 @@ export class MaterialsService {
   }
 
   /** 读取 manifest（不存在 / 解析失败 → 空） */
-  private async readManifest(): Promise<Manifest> {
-    const raw = await this.ossService.getRawText(MANIFEST_KEY);
+  private async readManifest(module: MaterialModule = 'knowledge'): Promise<Manifest> {
+    const raw = await this.ossService.getRawText(`${prefixOf(module)}manifest.json`);
     if (!raw) return {};
     try {
       return JSON.parse(raw) as Manifest;
@@ -175,8 +191,9 @@ export class MaterialsService {
    * 不依赖 nav_config 的二级 key 与 manifest 精确匹配，避免键不一致时整页空白。
    * 仅当没有 v2 manifest.groups 时才回退到 nav∩manifest 合并逻辑。
    */
-  async groupedListReady(): Promise<MaterialGroup[]> {
-    const manifest = await this.readManifest();
+  async groupedListReady(module: MaterialModule = 'knowledge'): Promise<MaterialGroup[]> {
+    const manifest = await this.readManifest(module);
+    if (module !== 'knowledge' && !Array.isArray(manifest.groups)) return [];
     if (Array.isArray(manifest.groups) && manifest.groups.length) {
       return manifest.groups
         .map((g) => ({
@@ -191,6 +208,7 @@ export class MaterialsService {
               sizeBytes: it.sizeBytes || 0,
               articleCount: it.articleCount || 0,
               ready: true,
+              ...(it.kind ? { kind: it.kind } : {}),
             })),
         }))
         .filter((g) => g.items.length > 0);
@@ -203,15 +221,16 @@ export class MaterialsService {
   }
 
   /** 某二级分类是否已生成 PDF */
-  async isReady(itemKey: string): Promise<boolean> {
-    if (itemKey === LEGACY_PDF_KEY) return !!(await this.legacyGift());
-    const map = this.manifestItemMap(await this.readManifest());
+  async isReady(itemKey: string, module: MaterialModule = 'knowledge'): Promise<boolean> {
+    if (module === 'knowledge' && itemKey === LEGACY_PDF_KEY) return !!(await this.legacyGift());
+    const map = this.manifestItemMap(await this.readManifest(module));
     const it = map.get(itemKey);
     return !!it?.updatedAt;
   }
 
   /** 取某二级分类的展示名（用于下载文件名） */
-  private async itemLabel(itemKey: string): Promise<string> {
+  private async itemLabel(itemKey: string, module: MaterialModule = 'knowledge'): Promise<string> {
+    if (module !== 'knowledge') return this.manifestItemMap(await this.readManifest(module)).get(itemKey)?.label || itemKey;
     if (itemKey === LEGACY_PDF_KEY) return LEGACY_PDF_GIFT.label;
     for (const g of await this.navGroups()) {
       const c = g.children.find((x) => x.key === itemKey);
@@ -222,10 +241,10 @@ export class MaterialsService {
   }
 
   /** 生成某二级分类 PDF 的 24h 下载签名链接（attachment 另存为分类名） */
-  async downloadUrl(itemKey: string): Promise<string> {
-    const label = await this.itemLabel(itemKey);
+  async downloadUrl(itemKey: string, module: MaterialModule = 'knowledge'): Promise<string> {
+    const label = await this.itemLabel(itemKey, module);
     return this.ossService.signedUrl(
-      this.pdfKey(itemKey),
+      this.pdfKey(itemKey, module),
       DOWNLOAD_EXPIRES,
       `${label}.pdf`,
     );
@@ -297,7 +316,7 @@ export class MaterialsService {
     group.items.push(newItem);
 
     await this.ossService.putRawText(
-      MANIFEST_KEY,
+      `${PREFIX}manifest.json`,
       JSON.stringify({ generatedAt: now, version: 2, groups }, null, 2),
     );
 

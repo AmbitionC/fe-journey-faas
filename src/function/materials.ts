@@ -10,7 +10,7 @@ import {
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
 import { NoAuth } from '../decorator/noAuth';
-import { MaterialsService } from '../service/materials';
+import { MaterialsService, MaterialModule, parseMaterialModule } from '../service/materials';
 import { EntitlementService } from '../service/entitlement';
 import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
@@ -45,7 +45,16 @@ export class MaterialsHTTPService {
     method: 'get',
   })
   @NoAuth()
-  async product(): Promise<any> {
+  async product(@Query('module') moduleParam?: string): Promise<any> {
+    const module = this.module(moduleParam);
+    if (module !== 'knowledge') {
+      // 央国企 / 考公资料：只列已生成的册（不含下载链接），仅会员可下载
+      const groups = await this.materialsService.groupedListReady(module);
+      return {
+        success: true,
+        data: { module, groups, ready: groups.some(g => g.items.length > 0), memberOnly: true, memberUrl: PDF_MEMBER_BENEFIT.memberUrl },
+      };
+    }
     const [groups, gift] = await Promise.all([
       this.materialsService.groupedListReady(), this.materialsService.legacyGift(),
     ]);
@@ -160,8 +169,27 @@ export class MaterialsHTTPService {
     return { success: true, data };
   }
 
-  /** 资格校验；返回 userId（游客为空串） */
-  private async gateMember(): Promise<string> {
+  private module(value?: string): MaterialModule {
+    try {
+      return parseMaterialModule(value);
+    } catch (e: any) {
+      throw R.error(e.message);
+    }
+  }
+
+  /**
+   * 资格校验；返回 userId（游客为空串）。
+   * 央国企 / 考公资料只认会员权益：老 ¥9.9 订单买的是知识库资料，公测免费领取也只针对知识库（owner 11/10 定：导出仅会员）。
+   */
+  private async gateMember(module: MaterialModule = 'knowledge'): Promise<string> {
+    if (module !== 'knowledge') {
+      const info = await resolveUserInfo(this.ctx, this.redisService);
+      const userId = info?.userId || '';
+      if (!userId) throw R.unauthorizedError('请先登录后下载');
+      const entitlement = await this.entitlementService.check(userId, 'materials_pdf', {});
+      if (!entitlement.allowed) throw R.forbiddenError('备考资料 PDF 是会员权益，开通会员后即可下载');
+      return userId;
+    }
     const access = await this.pdfAccess();
     if (!access.canDownload) {
       if (access.needsLogin) throw R.unauthorizedError('请先登录后领取');
@@ -178,9 +206,10 @@ export class MaterialsHTTPService {
     method: 'get',
   })
   @NoAuth()
-  async list(): Promise<any> {
-    await this.gateMember();
-    const data = await this.materialsService.groupedListReady();
+  async list(@Query('module') moduleParam?: string): Promise<any> {
+    const module = this.module(moduleParam);
+    await this.gateMember(module);
+    const data = await this.materialsService.groupedListReady(module);
     return { success: true, data };
   }
 
@@ -192,13 +221,14 @@ export class MaterialsHTTPService {
     method: 'get',
   })
   @NoAuth()
-  async download(@Query('category') category: string): Promise<any> {
-    await this.gateMember();
+  async download(@Query('category') category: string, @Query('module') moduleParam?: string): Promise<any> {
+    const module = this.module(moduleParam);
+    await this.gateMember(module);
     if (!category) throw R.error('category 必填');
-    if (!(await this.materialsService.isReady(category))) {
+    if (!(await this.materialsService.isReady(category, module))) {
       throw R.error('该分类资料尚未生成');
     }
-    const url = await this.materialsService.downloadUrl(category);
+    const url = await this.materialsService.downloadUrl(category, module);
     return { success: true, data: { url, expiresInSec: 86400 } };
   }
 
