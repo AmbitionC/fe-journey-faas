@@ -46,3 +46,55 @@ describe('作业评审 Agent', () => {
     assert.strictEqual(r.stdout.trim(), '5');
   });
 });
+
+describe('评审主路径切到 Agent', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ReviewService } = require('../src/service/review');
+
+  function makeSvc(agentResult: any) {
+    const svc = new ReviewService();
+    const saved: any[] = [];
+    const sub: any = { id: 7, missionId: 1, userId: 'u1', status: 'submitted', repoUrl: 'https://github.com/a/b', retro: {} };
+    svc.submissionModel = { findOne: async () => sub, save: async (x: any) => x };
+    svc.missionModel = {
+      findOne: async () => ({ id: 1, title: 't', acceptanceCriteria: [{ id: '1', text: 'x', mustPass: true }] }),
+    };
+    svc.reviewModel = { create: (x: any) => x, save: async (x: any) => (saved.push(x), { ...x, id: 99 }) };
+    svc.skillModel = { create: (x: any) => x, save: async () => [] };
+    svc.metricsService = { track: async () => {} };
+    svc.readRepo = async () => ({ digest: 'd', snapshot: { fileCount: 3 }, tree: { owner: 'a', repo: 'b', branch: 'main', files: [] } });
+    svc.agentGrade = async () => agentResult;
+    let oldCalled = 0;
+    svc.gradeWithLLM = async () => {
+      oldCalled++;
+      return { verdict: 'pass', totalScore: 70, scores: {}, criteriaVerdicts: [], report: 'old', skills: null };
+    };
+    return { svc, saved, sub, oldCalled: () => oldCalled };
+  }
+
+  it('Agent 成功：用 Agent 结论，记录运行统计，不调旧评审', async () => {
+    const t = makeSvc({
+      verdict: 'rework', totalScore: 40, scores: {}, report: 'agent', skills: null,
+      criteriaVerdicts: [{ id: '1', verdict: 'fail', note: '', evidence: 'ran' }],
+      runs: 2, runsOk: 2, filesRead: 3, steps: 5, tokenUsed: 100, ms: 1000,
+    });
+    await t.svc.runReview(7);
+    assert.strictEqual(t.oldCalled(), 0);
+    assert.strictEqual(t.saved[0].verdict, 'rework');
+    assert.strictEqual(t.saved[0].report, 'agent');
+    assert.ok(String(t.saved[0].reviewerModel).startsWith('agent:'));
+    assert.strictEqual(t.saved[0].repoSnapshot.agent.runs, 2);
+    assert.strictEqual(t.sub.status, 'rework');
+  });
+
+  it('Agent 失败或不可用：退回旧评审，并记下失败原因', async () => {
+    const t = makeSvc({ error: 'timeout' });
+    await t.svc.runReview(7);
+    assert.strictEqual(t.oldCalled(), 1);
+    assert.strictEqual(t.saved[0].report, 'old');
+    assert.strictEqual(t.saved[0].repoSnapshot.agentError, 'timeout');
+    const t2 = makeSvc(null);
+    await t2.svc.runReview(7);
+    assert.strictEqual(t2.oldCalled(), 1);
+  });
+});

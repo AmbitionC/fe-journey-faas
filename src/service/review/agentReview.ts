@@ -1,5 +1,5 @@
 /**
- * 作业评审 Agent（Iris 阶段 3，影子运行）。
+ * 作业评审 Agent（Iris 阶段 3）。2026-11-11 起是线上评审主路径，失败时 ReviewService 退回旧的一次性评审。
  *
  * 旧评审：一次性读 12 个文件 + 一次 LLM 调用，代码一行不跑就判「正确性」50 分。
  * 这里换成 Agent：模型自己翻仓库（list_files / read_file），把仓库里的源码连同自己写的用例
@@ -26,6 +26,8 @@ export interface AgentReviewInput {
   /** 提交历史摘要（可选，看过程） */
   commits?: string[];
   maxSteps?: number;
+  /** 整体时限（毫秒），超时抛错由调用方兜底 */
+  timeoutMs?: number;
 }
 
 export interface AgentReviewResult {
@@ -34,6 +36,8 @@ export interface AgentReviewResult {
   scores: { correctness: number; process: number; quality: number };
   criteriaVerdicts: { id: string; text: string; verdict: 'pass' | 'fail' | 'uncertain'; note: string; evidence?: string }[];
   report: string;
+  /** 能力曲线五维（0-100），解析不出为 null */
+  skills: Record<string, number> | null;
   /** 实际跑过的代码次数 / 其中正常结束的次数 */
   runs: number;
   runsOk: number;
@@ -58,6 +62,7 @@ const SYSTEM = `你是严格、诚实的项目评审官，评审用户为一道�
 最后只输出一个 JSON 对象（不要 Markdown 代码块），字段：
 verdict(pass|rework|need_human)、totalScore(0-100 整数)、scores{correctness,process,quality}、
 criteriaVerdicts([{id,text,verdict(pass|fail|uncertain),note,evidence}]，evidence 写你跑了什么、结果是什么，或依据的文件和行)、
+skills{requirement,ai_direction,engineering,debugging,knowledge}(各 0-100 整数，需求理解/指挥 AI/工程/调试/知识)、
 report(markdown：亮点、问题、改进建议；写明哪些结论来自实际运行，哪些只是读代码)。`;
 
 const TOOL_DEFS: Record<string, { description: string; parameters: any }> = {
@@ -137,8 +142,11 @@ export function normalizeAgentVerdict(
     process: clampInt(p.scores?.process, 0, 30, 0),
     quality: clampInt(p.scores?.quality, 0, 20, 0),
   };
+  const dims = ['requirement', 'ai_direction', 'engineering', 'debugging', 'knowledge'];
+  const skills = p.skills && typeof p.skills === 'object' ? Object.fromEntries(dims.map((d) => [d, clampInt(p.skills[d], 0, 100, 60)])) : null;
   return {
     verdict,
+    skills,
     totalScore: clampInt(p.totalScore, 0, 100, scores.correctness + scores.process + scores.quality),
     scores,
     criteriaVerdicts: cvs,
@@ -232,6 +240,7 @@ export async function runAgentReview(input: AgentReviewInput): Promise<AgentRevi
     tools,
     maxOutputTokens: 4096,
     maxRetries: 1,
+    ...(input.timeoutMs ? { abortSignal: AbortSignal.timeout(input.timeoutMs) } : {}),
     stopWhen: stepCountIs(maxSteps),
     providerOptions: { deepseek: { thinking: { type: input.config.thinking === false ? 'disabled' : 'enabled' } } },
     // 最后一步收掉工具，逼出结论
@@ -249,6 +258,7 @@ export async function runAgentReview(input: AgentReviewInput): Promise<AgentRevi
       scores: { correctness: 0, process: 0, quality: 0 },
       criteriaVerdicts: [],
       report: '',
+      skills: null,
       error: `结论解析失败：${String(result.text || '').slice(0, 200)}`,
       ...base,
     };

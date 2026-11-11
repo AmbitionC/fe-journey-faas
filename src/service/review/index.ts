@@ -99,7 +99,24 @@ export class ReviewService {
     );
     mission.acceptanceCriteria = normCriteria;
 
-    const parsed = await this.gradeWithLLM(mission, sub, repoDigest);
+    // 主路径：Agent 评审（翻仓库 + 在隔离运行函数里真跑代码，2026-11-11 起）。
+    // 运行函数没配、仓库读不到、Agent 出错或超时、结论解析失败 → 退回旧的一次性评审，不让学员卡住。
+    let parsed: any = null;
+    let reviewerModel = resolveLlmModel(process.env.LLM_PROVIDER, process.env.LLM_MODEL);
+    if (repoTree) {
+      const agent = await this.agentGrade(mission, sub, repoTree);
+      if (agent && !agent.error) {
+        parsed = { ...agent, makeupArticles: null };
+        repoSnapshot = {
+          ...repoSnapshot,
+          agent: { runs: agent.runs, runsOk: agent.runsOk, filesRead: agent.filesRead, steps: agent.steps, tokenUsed: agent.tokenUsed, ms: agent.ms },
+        };
+        reviewerModel = `agent:${reviewerModel}`.slice(0, 32);
+      } else if (agent) {
+        repoSnapshot = { ...repoSnapshot, agentError: String(agent.error).slice(0, 300) };
+      }
+    }
+    if (!parsed) parsed = await this.gradeWithLLM(mission, sub, repoDigest);
     // mustPass 兜底：任一必过项 fail → 强制 rework
     let verdict = parsed.verdict;
     const mustPassFailed = (parsed.criteriaVerdicts || []).some((cv: any) => {
@@ -120,7 +137,7 @@ export class ReviewService {
         report: parsed.report,
         repoSnapshot,
         makeupArticles: parsed.makeupArticles || null,
-        reviewerModel: resolveLlmModel(process.env.LLM_PROVIDER, process.env.LLM_MODEL),
+        reviewerModel,
         humanChecked: false,
         shareCode: verdict === 'pass' ? genShareCode() : null,
       })
@@ -141,23 +158,17 @@ export class ReviewService {
     this.metricsService
       .track({ userId: sub.userId, event: 'review_done', props: { verdict, submissionId: Number(sub.id) } })
       .catch(() => {});
-    // 影子运行：Agent 评审（翻仓库 + 在隔离运行函数里真跑代码）。结果只存进 repoSnapshot.agentShadow
-    // 供对比，用户看到的仍是上面的结论；对比够了再切换。失败不影响任何东西。
-    // 不 await：Agent 评审要跑好几分钟，不拖慢评审结论落库和 /review/run 的响应。
-    if (repoTree) this.shadowAgentReview(review, mission, sub, repoTree).catch(() => {});
     return review;
   }
 
-  /** 影子 Agent 评审：结果写 review.repoSnapshot.agentShadow。 */
-  async shadowAgentReview(
-    review: MissionReviewEntity,
+  /** Agent 评审：返回结果（含 error 字段表示失败）；运行函数或模型不支持工具时返回 null。 */
+  async agentGrade(
     mission: MissionEntity,
     sub: MissionSubmissionEntity,
     tree: { owner: string; repo: string; branch: string; files: { path: string; size?: number }[] }
   ): Promise<any> {
     if (!codeRunnerConfigured() || !this.aiProxyService.supportsTools()) return null;
     const started = Date.now();
-    let shadow: any;
     try {
       const commits = await this.gh(`/repos/${tree.owner}/${tree.repo}/commits?per_page=20`).catch(() => []);
       const r = await runAgentReview({
@@ -177,47 +188,13 @@ export class ReviewService {
         readFile: (p) =>
           this.ghRaw(`/repos/${tree.owner}/${tree.repo}/contents/${p.split('/').map(encodeURIComponent).join('/')}?ref=${tree.branch}`),
         runCode: (req) => callCodeRunner(req),
+        // 留出旧评审兜底的时间（FC 单次请求 120 秒）
+        timeoutMs: 85000,
       });
-      shadow = { ...r, ms: Date.now() - started, at: new Date().toISOString() };
+      return { ...r, ms: Date.now() - started };
     } catch (e: any) {
-      shadow = { error: String(e?.message || e).slice(0, 300), ms: Date.now() - started, at: new Date().toISOString() };
+      return { error: String(e?.message || e), ms: Date.now() - started };
     }
-    review.repoSnapshot = { ...(review.repoSnapshot || {}), agentShadow: shadow };
-    await this.reviewModel.update({ id: review.id as any }, { repoSnapshot: review.repoSnapshot });
-    return shadow;
-  }
-
-  /** 管理员：新旧评审对比（最近 N 条有影子结果的评审）。 */
-  async shadowCompare(limit = 20): Promise<any[]> {
-    const rows = await this.reviewModel.find({ order: { createTime: 'DESC' } as any, take: Math.min(limit * 3, 200) });
-    return rows
-      .filter((r) => r.repoSnapshot?.agentShadow)
-      .slice(0, limit)
-      .map((r) => {
-        const a = r.repoSnapshot.agentShadow;
-        return {
-          reviewId: Number(r.id),
-          submissionId: r.submissionId,
-          missionId: r.missionId,
-          createTime: (r as any).createTime,
-          old: { verdict: r.verdict, totalScore: r.totalScore, criteria: r.criteriaVerdicts },
-          agent: a.error && !a.verdict
-            ? { error: a.error }
-            : {
-                verdict: a.verdict,
-                totalScore: a.totalScore,
-                criteria: a.criteriaVerdicts,
-                runs: a.runs,
-                runsOk: a.runsOk,
-                filesRead: a.filesRead,
-                tokenUsed: a.tokenUsed,
-                ms: a.ms,
-                report: a.report,
-                error: a.error,
-              },
-          agree: !a.error && a.verdict === r.verdict,
-        };
-      });
   }
 
   /** read_github_repo：读仓库 tree + 关键文件 + commits，产出有界摘要。 */
