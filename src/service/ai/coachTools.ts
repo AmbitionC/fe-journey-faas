@@ -530,11 +530,28 @@ export class CoachToolsService {
     try {
       const r = await this.articleService.ensureSchedule(ctx.userId, module, key);
       const when = new Date(r.dueAt + 8 * 3600 * 1000).toISOString().slice(5, 10).replace('-', '月') + '日';
+      // 结果里带上文章标题：模型只拿到 key 时会把《soe-java-mcq》这样的 slug 写进回答
+      const title = await this.reviewTitle(module, key, ctx);
+      const name = title ? `《${title}》` : '这篇文章';
+      const hint = title ? `回答里提到这篇时用标题${name}，不要写 key。` : '回答里不要写文章 key。';
       return r.created
-        ? `已加入复习计划，${when}提醒复习。`
-        : `这篇已经在复习计划里了，下次复习是${when}，没有改动。`;
+        ? `已把${name}加入复习计划，${when}提醒复习。${hint}`
+        : `${name}已经在复习计划里了，下次复习是${when}，没有改动。${hint}`;
     } catch {
       return '加入复习计划失败。';
+    }
+  }
+
+  /** 复习计划要报给用户的文章标题：先看本轮读过/检索过的，再查正文库（空标题按目录树补）；拿不到时返回空。 */
+  private async reviewTitle(module: string, key: string, ctx: ToolContext): Promise<string> {
+    const known = ctx.citations.get(`${module}:${key}`)?.title;
+    if (known && known !== key) return known;
+    try {
+      const row = await this.articleContentService.get(module, key);
+      if (row?.title && row.title !== key) return row.title;
+      return (await this.articleContentService.titleFromNav(module, key)) || '';
+    } catch {
+      return '';
     }
   }
 

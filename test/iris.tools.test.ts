@@ -103,11 +103,44 @@ describe('Iris 阶段 2 工具', () => {
     (svc as any).articleService = {
       ensureSchedule: async () => ({ dueAt: due, created: calls++ === 0 }),
     };
-    assert.ok((await svc.execute('schedule_review', { module: 'knowledge', key: 'debounce' }, ctx())).includes('已加入复习计划，11月12日'));
+    (svc as any).articleContentService = { get: async () => null, titleFromNav: async () => undefined };
+    assert.ok((await svc.execute('schedule_review', { module: 'knowledge', key: 'debounce' }, ctx())).includes('加入复习计划，11月12日'));
     assert.ok((await svc.execute('schedule_review', { module: 'knowledge', key: 'debounce' }, ctx())).includes('已经在复习计划里'));
     assert.ok((await svc.execute('schedule_review', { module: 'knowledge', key: 'x' }, ctx('guest:1'))).includes('游客'));
     assert.ok((await svc.execute('schedule_review', { module: 'nope', key: 'x' }, ctx())).includes('未知模块'));
     assert.strictEqual(calls, 2);
+  });
+
+  it('schedule_review 结果带文章标题，不让模型把 slug 写进回答', async () => {
+    const svc = new CoachToolsService();
+    const due = Date.UTC(2026, 10, 13, 1);
+    (svc as any).articleService = { ensureSchedule: async () => ({ dueAt: due, created: true }) };
+    let navCalls = 0;
+    (svc as any).articleContentService = {
+      get: async (_m: string, k: string) => (k === 'soe-java-mcq' ? { title: 'Java 基础常考点：面向对象、异常、集合与常见陷阱' } : { title: k }),
+      titleFromNav: async (_m: string, k: string) => {
+        navCalls++;
+        return k === 'soe-computer-organization' ? '计算机组成原理速览' : undefined;
+      },
+    };
+
+    const fromDb = await svc.execute('schedule_review', { module: 'soe', key: 'soe-java-mcq' }, ctx());
+    assert.ok(fromDb.includes('已把《Java 基础常考点：面向对象、异常、集合与常见陷阱》加入复习计划，11月13日'), fromDb);
+    assert.ok(!fromDb.includes('《soe-java-mcq》'));
+
+    const fromNav = await svc.execute('schedule_review', { module: 'soe', key: 'soe-computer-organization' }, ctx());
+    assert.ok(fromNav.includes('《计算机组成原理速览》'), fromNav);
+
+    const c = ctx();
+    c.citations.set('soe:soe-os-mcq', { module: 'soe', articleKey: 'soe-os-mcq', title: '操作系统选择题高频考点' });
+    const before = navCalls;
+    const fromCtx = await svc.execute('schedule_review', { module: 'soe', key: 'soe-os-mcq' }, c);
+    assert.ok(fromCtx.includes('《操作系统选择题高频考点》'));
+    assert.strictEqual(navCalls, before);
+
+    const unknown = await svc.execute('schedule_review', { module: 'soe', key: 'soe-missing' }, ctx());
+    assert.ok(unknown.includes('已把这篇文章加入复习计划'), unknown);
+    assert.ok(!unknown.includes('soe-missing'));
   });
 
   it('qa 模式默认工具里包含新工具，不含 ask_question', () => {
