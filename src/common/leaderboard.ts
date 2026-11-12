@@ -8,10 +8,14 @@
 export function publicNickName(nick: string | null | undefined): string {
   const name = (nick || '').trim();
   if (!name) return '匿名用户';
-  return name.replace(/\d{7,}/g, (run) => {
+  return name.replace(/\d{7,}/g, run => {
     const keepHead = 3;
     const keepTail = 2;
-    return run.slice(0, keepHead) + '*'.repeat(run.length - keepHead - keepTail) + run.slice(-keepTail);
+    return (
+      run.slice(0, keepHead) +
+      '*'.repeat(run.length - keepHead - keepTail) +
+      run.slice(-keepTail)
+    );
   });
 }
 
