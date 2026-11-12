@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { McpRuntime } from './http';
 import {
-  SKUS,
+  skusFor,
   TIERS,
   TRIAL_POINTS,
   TRIAL_DAYS,
@@ -107,7 +107,7 @@ export function pricing(
     product,
     rechargeUrl: siteOf(product).recharge,
     tiers: Object.entries(TIERS).map(([id, t]) => ({ id, ...t })),
-    skus: SKUS.map(s => ({
+    skus: skusFor(product).map(s => ({
       sku: s.sku,
       name: s.name,
       kind: s.kind,

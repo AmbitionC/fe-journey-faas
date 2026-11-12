@@ -16,7 +16,7 @@ import { resolveUserInfo, assertAdmin } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
 import { PDF_FREE_CLAIM_UNTIL, PDF_MEMBER_BENEFIT, PdfAccessBasis, pdfFreeClaimActive } from '../common/commerce';
 import { OrderService } from '../service/order';
-import { SKUS, currentPhase, phasePrice } from '../mcp/billing';
+import { skusFor, currentPhase, phasePrice } from '../mcp/billing';
 
 interface PdfAccess {
   userId: string;
@@ -62,7 +62,7 @@ export class MaterialsHTTPService {
     const phase = currentPhase(now);
     const freeClaim = pdfFreeClaimActive(now);
     // 会员价只从 mcp/billing 读（与 /mcp/pricing 同源），这里不写死数字
-    const plans = SKUS.filter(s => s.kind === 'plan').map(s => ({
+    const plans = skusFor('agent').filter(s => s.kind === 'plan').map(s => ({
       sku: s.sku, name: s.name, months: s.months || 1,
       listPrice: s.listCents / 100, price: phasePrice(s, phase.id) / 100,
       purchasable: phase.id !== 'free',

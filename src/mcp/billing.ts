@@ -74,6 +74,11 @@ export interface Sku {
   /** plan：每月发放点数；pack：一次性点数 */
   points: number;
   desc: string;
+  /**
+   * 只在这些产品的价目里出现；不写＝所有产品都卖。
+   * 会员档位本身各产品通用，这里只管「哪个站把它摆出来卖」。
+   */
+  products?: Product[];
 }
 
 export const SKUS: Sku[] = [
@@ -96,6 +101,20 @@ export const SKUS: Sku[] = [
     points: MEMBER_MONTHLY_POINTS,
     listCents: 23900,
     desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 × 12 个月 · 约 7 折`,
+  },
+  {
+    // owner 2026-11-13：Agent Journey 加 ¥49 通行证、月卡保留，「相当于之前的年卡」——
+    // 年卡半价 ¥119.5 超过支付宝单笔 ¥50 一直买不了，这一档半价 ¥49 正好在限额内。
+    // 求职 / 备考是一次性周期，一次买半年比按月续更贴合。只在 Agent Journey 卖。
+    sku: 'member_pass',
+    name: '半年通行证',
+    kind: 'plan',
+    tier: 'member',
+    months: 6,
+    points: MEMBER_MONTHLY_POINTS,
+    listCents: 9800,
+    desc: `一次买 6 个月，覆盖一整个求职 / 备考季 · 每月 ${MEMBER_MONTHLY_POINTS} 点`,
+    products: ['agent'],
   },
   {
     sku: 'pack_100',
@@ -182,6 +201,13 @@ export function currentPhase(now = new Date()) {
         ? { id: next.id, name: next.name, from: next.from }
         : null,
   };
+}
+
+/** 某产品站点摆出来卖的商品：没限定产品的都卖，限定了的只在自己的站卖（不传产品＝不摆）。 */
+export function skusFor(product?: Product | null): Sku[] {
+  return SKUS.filter(
+    s => !s.products || (!!product && s.products.includes(product))
+  );
 }
 
 /** 某阶段下的售价（分）。 */
