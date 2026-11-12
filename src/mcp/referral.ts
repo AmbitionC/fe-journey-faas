@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { QueryFn } from './store';
 import {
   BillingStore,
@@ -557,6 +558,24 @@ export class ReferralStore {
     return { inviter, points: program.onPaid.points, days };
   }
 
+  /** 给没有邀请码的老账号补发一个（与注册时同样是 8 位），返回库里最终的码；失败返回 null */
+  private async ensureCode(inviter: string): Promise<string | null> {
+    try {
+      const fresh = randomUUID().replace(/-/g, '').slice(0, 8);
+      await this.q(
+        "UPDATE `user` SET inviteCode = ? WHERE phoneNumber = ? AND (inviteCode IS NULL OR inviteCode = '')",
+        [fresh, inviter]
+      );
+      const rows = await this.q(
+        'SELECT inviteCode FROM `user` WHERE phoneNumber = ? LIMIT 1',
+        [inviter]
+      );
+      return rows?.[0]?.inviteCode ? String(rows[0].inviteCode) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async stats(
     inviter: string,
     product?: string | null
@@ -589,8 +608,12 @@ export class ReferralStore {
     const invitedBy = mine?.[0]?.inviter_id
       ? maskUser(String(mine[0].inviter_id))
       : null;
+    let code = codeRows?.[0]?.inviteCode ? String(codeRows[0].inviteCode) : null;
+    // 早期注册的老账号 inviteCode 是空的（注册时生成码是后来才加的）：邀请卡显示「-」，
+    // 复制出去的链接是 ?invite= 空码（2026-11-12 回归）。第一次查成绩时补发一个，并发时以库里先写入的为准。
+    if (!code && codeRows?.length) code = await this.ensureCode(inviter);
     return {
-      code: codeRows?.[0]?.inviteCode ? String(codeRows[0].inviteCode) : null,
+      code,
       invited: Number(a.invited ?? 0),
       rewarded: Number(a.rewarded ?? 0),
       held: Number(a.held ?? 0),

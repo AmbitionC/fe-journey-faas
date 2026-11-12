@@ -71,6 +71,19 @@ describe('邀请拉新（真 MySQL）', function () {
     }
   });
 
+  it('老账号没有邀请码：查成绩时补发一个，之后不变，且能被用来邀请', async () => {
+    await q('INSERT INTO `user` (phoneNumber, inviteCode, nickName) VALUES (?, ?, ?)', ['nocode', '', null]);
+    const b = new BillingStore(q);
+    const r = new ReferralStore(q, b);
+    const first = (await r.stats('nocode')).code;
+    assert.ok(first && /^[0-9a-f]{8}$/.test(first), `补发的码：${first}`);
+    assert.strictEqual((await r.stats('nocode')).code, first);
+    const rows = await q('SELECT inviteCode FROM `user` WHERE phoneNumber = ?', ['nocode']);
+    assert.strictEqual(rows[0].inviteCode, first);
+    // 不存在的用户不凭空建码
+    assert.strictEqual((await r.stats('ghost')).code, null);
+  });
+
   it('带码注册：双方得点 + 会员天数、受邀者顺手开通；重复不再发', async () => {
     const b = new BillingStore(q);
     const r = new ReferralStore(q, b);
