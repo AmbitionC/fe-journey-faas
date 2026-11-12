@@ -34,6 +34,11 @@ describe('Iris 延伸阅读挑选', () => {
     assert.deepStrictEqual(selectCitations(CANDIDATES, '', 'civil'), []);
   });
 
+  it('标题太短（不足 4 个字）不按「提到」算，免得回答里随口一个词就把别的方向带进来', () => {
+    const short = [{ module: 'knowledge', articleKey: 'rag', title: 'RAG' }];
+    assert.deepStrictEqual(selectCitations(short, '这和 RAG 没什么关系。', 'soe'), []);
+  });
+
   it('最多 6 篇', () => {
     const many = Array.from({ length: 9 }, (_, i) => ({
       module: 'soe',
