@@ -700,6 +700,26 @@ describe('MCP HTTP 适配', () => {
       }
     });
 
+    it('半年通行证：只在 Agent Journey 摆出来卖，半价 ¥49 在支付宝 ¥50 限额内可买；月卡照旧排第一', async () => {
+      const get = async (q: string) => {
+        const rt = fakeRuntime({ now: NOV }).rt;
+        rt.alipay = { ...fakeAlipayCfg, maxCents: 5000 };
+        return (await run(rt, { path: '/mcp/pricing' + q, method: 'GET' })).json.data.skus;
+      };
+      const agent = await get('?product=agent');
+      const pass = agent.find((x: any) => x.sku === 'member_pass');
+      assert.deepStrictEqual(
+        [pass.price, pass.listPrice, pass.months, pass.tier, pass.soldOut, pass.purchasable],
+        [49, 98, 6, 'member', false, true]
+      );
+      assert.strictEqual(agent.filter((x: any) => x.kind === 'plan')[0].sku, 'member_month');
+      for (const q of ['?product=invest', '']) {
+        const skus = await get(q);
+        assert.ok(!skus.some((x: any) => x.sku === 'member_pass'), q);
+        assert.ok(skus.some((x: any) => x.sku === 'member_month'), q);
+      }
+    });
+
     it('价目按产品过滤：?product=invest 只给 Invest 的工具与 Invest 站的充值链接；不传给全部', async () => {
       const all = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing', method: 'GET' });
       const inv = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=invest', method: 'GET' });
