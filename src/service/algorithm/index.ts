@@ -8,6 +8,9 @@ import { AlgorithmProblemTagEntity } from '../../entity/algorithm/problemTag';
 import { AlgorithmSubmissionEntity } from '../../entity/algorithm/submission';
 import { AlgorithmCodeDraftEntity } from '../../entity/algorithm/codeDraft';
 import { AlgorithmProblemFlagEntity } from '../../entity/algorithm/problemFlag';
+import { UserEntity } from '../../entity/user';
+import { avatarSeedOf } from '../../common/avatar';
+import { beijingMonthStart, publicNickName } from '../../common/leaderboard';
 import { Judge0ClientService } from './judge0Client';
 import {
   CLIENT_JUDGE_UNSUPPORTED_MESSAGE,
@@ -56,6 +59,9 @@ export class AlgorithmService {
 
   @InjectEntityModel(AlgorithmProblemFlagEntity)
   problemFlagModel: Repository<AlgorithmProblemFlagEntity>;
+
+  @InjectEntityModel(UserEntity)
+  userModel: Repository<UserEntity>;
 
   @Inject()
   judge0ClientService: Judge0ClientService;
@@ -530,6 +536,78 @@ export class AlgorithmService {
       }
     }
     return map;
+  }
+
+  // ========== 刷题榜 ==========
+
+  /**
+   * 刷题榜（本月，北京时间）：按「本月提交通过的不同题目数」给登录用户排名，
+   * 同题数时先达到的人在前（最后一次通过时间早的在前）。
+   * 只算正式提交（type=submit），「运行」不算；inner join user 过滤掉已注销 / 脏数据。
+   * 隐私：只回昵称（长数字打码）/ 头像 / 名次 + isMe，不回手机号。
+   */
+  async getLeaderboard(userId: string | null) {
+    const monthStart = beijingMonthStart();
+
+    const rows: Array<{ userId: string; cnt: string }> =
+      await this.submissionModel
+        .createQueryBuilder('s')
+        .select('s.userId', 'userId')
+        .addSelect('COUNT(DISTINCT s.problemId)', 'cnt')
+        .addSelect('MAX(s.createTime)', 'lastAt')
+        .innerJoin(UserEntity, 'u', 'u.phoneNumber = s.userId')
+        .where('s.type = :type', { type: 'submit' })
+        .andWhere('s.status = :status', { status: 'accepted' })
+        .andWhere('s.createTime >= :monthStart', { monthStart })
+        .groupBy('s.userId')
+        .orderBy('cnt', 'DESC')
+        .addOrderBy('lastAt', 'ASC')
+        .limit(100)
+        .getRawMany();
+
+    const ids = rows.map(r => r.userId);
+    const users = ids.length
+      ? await this.userModel.find({ where: { phoneNumber: In(ids) } })
+      : [];
+    const uMap = new Map(users.map(u => [u.phoneNumber, u]));
+
+    const ranked = rows.map((r, i) => {
+      const u = uMap.get(r.userId);
+      const isMe = !!userId && r.userId === userId;
+      return {
+        rank: i + 1,
+        nickName: isMe ? u?.nickName || '我' : publicNickName(u?.nickName),
+        avatar: u?.avatar || '',
+        avatarSeed: avatarSeedOf(u),
+        count: Number(r.cnt),
+        isMe,
+      };
+    });
+
+    let me: { rank: number | null; count: number } | null = null;
+    if (userId) {
+      const mine = ranked.find(r => r.isMe);
+      if (mine) {
+        me = { rank: mine.rank, count: mine.count };
+      } else {
+        const my = await this.submissionModel
+          .createQueryBuilder('s')
+          .select('COUNT(DISTINCT s.problemId)', 'cnt')
+          .where('s.userId = :userId', { userId })
+          .andWhere('s.type = :type', { type: 'submit' })
+          .andWhere('s.status = :status', { status: 'accepted' })
+          .andWhere('s.createTime >= :monthStart', { monthStart })
+          .getRawOne();
+        me = { rank: null, count: Number(my?.cnt || 0) };
+      }
+    }
+
+    return {
+      period: 'month',
+      participants: ranked.length,
+      top: ranked.slice(0, 10),
+      me,
+    };
   }
 
   // ========== 题单 ==========

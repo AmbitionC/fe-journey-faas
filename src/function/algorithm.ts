@@ -103,6 +103,20 @@ export class AlgorithmHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '刷题榜（本月，按通过题数；未登录也可看）',
+    functionName: 'getAlgoLeaderboard',
+    name: 'getAlgoLeaderboard',
+    path: '/algorithm/leaderboard',
+    method: 'get',
+  })
+  @NoAuth()
+  async getLeaderboard(@Query(ALL) query: OverviewQueryDTO) {
+    const userId = this.ctx.userInfo?.userId || query.userId || null;
+    const data = await this.algorithmService.getLeaderboard(userId);
+    return { success: true, data };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '获取题单列表',
     functionName: 'getAlgoLists',
     name: 'getAlgoLists',
