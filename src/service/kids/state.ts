@@ -93,3 +93,128 @@ export function mergeProgress(a: KidsProgress, b: KidsProgress): KidsProgress {
 
 export const profileKey = (userId: string) => `kids:profile:${userId}`;
 export const progressKey = (userId: string) => `kids:progress:${userId}`;
+
+/**
+ * 阅读状态（多端同步）：每本书读到第几页、读完过几次、最后在读哪本、阅读偏好。
+ * 读完次数存成「读完那一刻的时间戳」列表，两台设备合并时取并集，不会重复计数。
+ */
+export interface KidsBookState {
+  /** 读到第几页（从 0 开始） */
+  page: number;
+  /** 这一页记录的时间（毫秒） */
+  at: number;
+  /** 每次读完的时间戳（毫秒） */
+  done: number[];
+}
+
+export interface KidsPrefs {
+  /** 读完自动接着读下一本 */
+  autoNext: boolean;
+  /** 语速 */
+  rate: 0.75 | 1;
+  /** 显示中文 */
+  zh: boolean;
+  /** 牛津树书架停在第几级 */
+  ortLevel: number;
+  /** 偏好改动的时间（毫秒），合并时新的覆盖旧的 */
+  at: number;
+}
+
+export interface KidsReading {
+  books: Record<string, KidsBookState>;
+  /** 最后在读的书 */
+  last: { id: string; page: number; at: number } | null;
+  prefs: KidsPrefs | null;
+}
+
+export const MAX_BOOKS = 400;
+const MAX_DONE = 30;
+const MAX_PAGE = 300;
+/** 时间戳只认 2024 年以后、不晚于现在一天的，防止乱填 */
+const okTime = (t: unknown): t is number =>
+  typeof t === 'number' &&
+  Number.isFinite(t) &&
+  t > 1704067200000 &&
+  t < Date.now() + 86400000;
+const okPage = (p: unknown): p is number =>
+  typeof p === 'number' && Number.isInteger(p) && p >= 0 && p <= MAX_PAGE;
+
+export function sanitizeReading(raw: unknown): KidsReading {
+  const out: KidsReading = { books: {}, last: null, prefs: null };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const r = raw as Record<string, any>;
+  const books =
+    r.books && typeof r.books === 'object' && !Array.isArray(r.books)
+      ? r.books
+      : {};
+  const entries: [string, KidsBookState][] = [];
+  for (const [id, b] of Object.entries(books as Record<string, any>)) {
+    if (!ID_RE.test(id) || !b || typeof b !== 'object') continue;
+    const done = [
+      ...new Set(
+        (Array.isArray(b.done) ? b.done : []).filter(okTime) as number[]
+      ),
+    ]
+      .sort((x, y) => x - y)
+      .slice(-MAX_DONE);
+    const page = okPage(b.page) ? b.page : 0;
+    const at = okTime(b.at) ? b.at : done[done.length - 1] || 0;
+    if (!at && !done.length) continue;
+    entries.push([id, { page, at, done }]);
+  }
+  entries
+    .sort((x, y) => y[1].at - x[1].at)
+    .slice(0, MAX_BOOKS)
+    .forEach(([id, b]) => (out.books[id] = b));
+  const l = r.last;
+  if (
+    l &&
+    typeof l === 'object' &&
+    ID_RE.test(l.id) &&
+    okPage(l.page) &&
+    okTime(l.at)
+  ) {
+    out.last = { id: l.id, page: l.page, at: l.at };
+  }
+  const p = r.prefs;
+  if (p && typeof p === 'object' && okTime(p.at)) {
+    out.prefs = {
+      autoNext: p.autoNext !== false,
+      rate: p.rate === 0.75 ? 0.75 : 1,
+      zh: p.zh !== false,
+      ortLevel:
+        Number.isInteger(p.ortLevel) && p.ortLevel >= 1 && p.ortLevel <= 9
+          ? p.ortLevel
+          : 1,
+      at: p.at,
+    };
+  }
+  return out;
+}
+
+/** 合并两台设备的阅读状态：页码和「最后在读」取较新的，读完记录取并集，偏好取较新的 */
+export function mergeReading(a: KidsReading, b: KidsReading): KidsReading {
+  const books: Record<string, KidsBookState> = { ...a.books };
+  for (const [id, x] of Object.entries(b.books)) {
+    const y = books[id];
+    if (!y) {
+      books[id] = x;
+      continue;
+    }
+    const newer = x.at >= y.at ? x : y;
+    books[id] = {
+      page: newer.page,
+      at: newer.at,
+      done: [...new Set([...y.done, ...x.done])],
+    };
+  }
+  const pick = <T extends { at: number } | null>(p: T, q: T): T =>
+    !p ? q : !q ? p : q.at >= p.at ? q : p;
+  return sanitizeReading({
+    books,
+    last: pick(a.last, b.last),
+    prefs: pick(a.prefs, b.prefs),
+  });
+}
+
+export const readingKey = (userId: string) => `kids:reading:${userId}`;
