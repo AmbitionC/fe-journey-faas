@@ -2,6 +2,9 @@ import * as assert from 'assert';
 import {
   MAX_DAYS,
   mergeProgress,
+  mergeReading,
+  readingKey,
+  sanitizeReading,
   sanitizeProfile,
   sanitizeProgress,
 } from '../src/service/kids/state';
@@ -63,5 +66,51 @@ describe('栗栗学英语 计划/进度', () => {
       '2026-11-01': { done: ['s02', 's04'], words: ['help', 'brave'] },
       '2026-11-02': { done: ['s05'], words: [] },
     });
+  });
+});
+
+describe('栗栗学英语 阅读状态同步', () => {
+  const t0 = Date.UTC(2026, 10, 12, 8, 0, 0);
+
+  it('丢掉不合法的书号、页码、时间戳', () => {
+    const r = sanitizeReading({
+      books: {
+        'ort-l2-05': { page: 3, at: t0, done: [t0, t0, 'x', 123] },
+        '../evil': { page: 1, at: t0 },
+        'ort-l1-13': { page: -1, at: t0 },
+        'ort-l3-01': { page: 2, at: 5 },
+      },
+      last: { id: 'ort-l2-05', page: 3, at: t0 },
+      prefs: { autoNext: false, rate: 0.5, zh: true, ortLevel: 12, at: t0 },
+    });
+    assert.deepStrictEqual(Object.keys(r.books).sort(), ['ort-l1-13', 'ort-l2-05']);
+    assert.deepStrictEqual(r.books['ort-l2-05'], { page: 3, at: t0, done: [t0] });
+    assert.strictEqual(r.books['ort-l1-13'].page, 0);
+    assert.deepStrictEqual(r.last, { id: 'ort-l2-05', page: 3, at: t0 });
+    assert.deepStrictEqual(r.prefs, { autoNext: false, rate: 1, zh: true, ortLevel: 1, at: t0 });
+    assert.deepStrictEqual(sanitizeReading('nope'), { books: {}, last: null, prefs: null });
+  });
+
+  it('两台设备合并：页码取新的，读完次数取并集不重复，偏好取新的', () => {
+    const a = sanitizeReading({
+      books: { 'ort-l2-05': { page: 3, at: t0, done: [t0] } },
+      last: { id: 'ort-l2-05', page: 3, at: t0 },
+      prefs: { autoNext: true, rate: 1, zh: true, ortLevel: 2, at: t0 },
+    });
+    const b = sanitizeReading({
+      books: {
+        'ort-l2-05': { page: 7, at: t0 + 1000, done: [t0, t0 + 900] },
+        'ort-l2-06': { page: 1, at: t0 + 2000, done: [] },
+      },
+      last: { id: 'ort-l2-06', page: 1, at: t0 + 2000 },
+      prefs: { autoNext: false, rate: 0.75, zh: false, ortLevel: 3, at: t0 - 1000 },
+    });
+    const m = mergeReading(a, b);
+    assert.deepStrictEqual(m.books['ort-l2-05'], { page: 7, at: t0 + 1000, done: [t0, t0 + 900] });
+    assert.strictEqual(m.books['ort-l2-06'].page, 1);
+    assert.deepStrictEqual(m.last, { id: 'ort-l2-06', page: 1, at: t0 + 2000 });
+    assert.strictEqual(m.prefs!.ortLevel, 2);
+    assert.deepStrictEqual(mergeReading(m, m), m);
+    assert.strictEqual(readingKey('u1'), 'kids:reading:u1');
   });
 });

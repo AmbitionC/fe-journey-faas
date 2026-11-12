@@ -13,11 +13,15 @@ import { R } from '../common/base.error.utils';
 import { resolveUserInfo } from '../common/admin.guard';
 import {
   KidsProgress,
+  KidsReading,
   mergeProgress,
+  mergeReading,
   profileKey,
   progressKey,
+  readingKey,
   sanitizeProfile,
   sanitizeProgress,
+  sanitizeReading,
 } from '../service/kids/state';
 import { OssService } from '../service/content/oss';
 import { clientIpFromCtx } from '../common/clientIp';
@@ -64,6 +68,15 @@ export class KidsHTTPService {
     }
   }
 
+  private async readReading(userId: string): Promise<KidsReading> {
+    const raw = await this.redisService.get(readingKey(userId));
+    try {
+      return sanitizeReading(raw ? JSON.parse(raw) : null);
+    } catch {
+      return sanitizeReading(null);
+    }
+  }
+
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '栗栗学英语：读取孩子的计划和进度',
     functionName: 'kidsState',
@@ -82,7 +95,11 @@ export class KidsHTTPService {
     }
     return {
       success: true,
-      data: { profile, progress: await this.readProgress(userId) },
+      data: {
+        profile,
+        progress: await this.readProgress(userId),
+        reading: await this.readReading(userId),
+      },
     };
   }
 
@@ -115,6 +132,23 @@ export class KidsHTTPService {
       sanitizeProgress(body)
     );
     await this.redisService.set(progressKey(userId), JSON.stringify(merged));
+    return { success: true, data: merged };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '栗栗学英语：合并保存阅读状态（读到哪页、读完几次、偏好）',
+    functionName: 'kidsSaveReading',
+    name: 'kidsSaveReading',
+    path: '/kids/reading',
+    method: 'post',
+  })
+  async saveReading(@Body(ALL) body: unknown) {
+    const userId = await this.requireUser();
+    const merged = mergeReading(
+      await this.readReading(userId),
+      sanitizeReading(body)
+    );
+    await this.redisService.set(readingKey(userId), JSON.stringify(merged));
     return { success: true, data: merged };
   }
 
