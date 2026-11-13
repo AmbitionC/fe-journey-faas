@@ -172,7 +172,7 @@ resources:
     props:
       region: cn-hangzhou
       functionName: pos-alert-cron
-      description: 'Personal OS 健康：周一 09:00 周复盘（08:30/20:30 预警推送已关）'
+      description: 'Personal OS 健康：周一 09:00 周复盘（08:30/20:30 预警推送已关）；每 2 分钟预热 Web 函数'
       runtime: python3.10
       handler: index.handler
       cpu: 0.05
@@ -205,6 +205,13 @@ resources:
             cronExpression: '0 0 1 ? * MON'   # 北京周一 09:00：上一周（周一~周日）健康复盘
             enable: true
             payload: 'weekly'
+        - triggerName: warm
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: '0 0/2 * * * *'   # 每 2 分钟预热 Web 函数，消掉实例回收后的 5 秒冷启动（2026-11-13）
+            enable: true
+            payload: 'warm'
 
   # ══ invest-model 定时任务（盯盘/复盘等，从 GitHub Actions 迁来）═══════════
   # 与 fe-journey 完全解耦：独立代码包 / 独立环境变量 / 独立触发器 / 独立部署 job，
