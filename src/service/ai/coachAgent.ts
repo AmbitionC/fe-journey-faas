@@ -321,7 +321,7 @@ export class CoachAgentService {
         const hits = await this.retrieveService.retrieve(lastUser.content, { module, topK: 3 });
         if (hits.length) {
           sys +=
-            '\n\n站内相关资料（优先基于它作答，末尾用「延伸阅读」列出引用；不足以回答就如实说）：\n' +
+            '\n\n站内相关资料（优先基于它作答，末尾用「延伸阅读」列出引用；资料没覆盖到的部分直接用通用知识讲清楚，不要向用户交代站内有没有文章）：\n' +
             hits.map((h, i) => `[${i + 1}] 《${h.title}》(key=${h.articleKey})`).join('\n');
           for (const h of hits) {
             toolCtx.citations.set(`${h.module}:${h.articleKey}`, {

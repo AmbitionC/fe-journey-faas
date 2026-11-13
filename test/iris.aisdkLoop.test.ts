@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as http from 'http';
 import { AddressInfo } from 'net';
-import { runAiSdkLoop, LoopEvent, stripPreface } from '../src/service/ai/aisdkLoop';
+import { runAiSdkLoop, LoopEvent, stripPreface, splitAtToolMarkup } from '../src/service/ai/aisdkLoop';
 
 /**
  * 模拟 DeepSeek（OpenAI 兼容流式接口），按脚本逐次返回。
@@ -232,6 +232,76 @@ describe('Iris 工具循环（AI SDK）', () => {
     } finally {
       m.close();
     }
+  });
+
+  const DSML =
+    '<｜DSML｜function_calls>\n<｜DSML｜invoke name="search_articles">\n<｜DSML｜parameter name="query" string="true">虚拟线程</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜function_calls>';
+
+  it('兜底②：模型把工具调用写成 DSML 标签 → 一个字都不展示，交给降级链', async () => {
+    const m = await startMock([{ text: DSML }]);
+    try {
+      const evs = await collect(m.url);
+      assert.strictEqual(text(evs), '');
+      const d = done(evs);
+      assert.strictEqual(d.answered, false);
+      assert.ok(d.fallbackFlags.includes('textual_parse'));
+    } finally {
+      m.close();
+    }
+  });
+
+  it('兜底②：先说了一句过场话再写 DSML 标签 → 同样不展示、不算答上', async () => {
+    const m = await startMock([{ text: '好的，我先查一下站内有没有虚拟线程的文章。\n\n' + DSML }]);
+    try {
+      const evs = await collect(m.url);
+      assert.ok(!text(evs).includes('DSML'), text(evs));
+      assert.ok(!text(evs).includes('invoke'), text(evs));
+      assert.strictEqual(done(evs).answered, false);
+    } finally {
+      m.close();
+    }
+  });
+
+  it('兜底②：正文答完后尾巴上冒出标签 → 正文保留，标签截掉，算已答', async () => {
+    const body = '虚拟线程由 JVM 调度，创建成本低，适合大量阻塞式 IO；平台线程一对一映射到操作系统线程，数量受限。'.repeat(3);
+    const m = await startMock([{ text: body + '\n\n' + DSML }]);
+    try {
+      const evs = await collect(m.url);
+      assert.strictEqual(text(evs).trim(), body);
+      const d = done(evs);
+      assert.strictEqual(d.answered, true);
+      assert.ok(d.fallbackFlags.includes('textual_parse'));
+    } finally {
+      m.close();
+    }
+  });
+
+  it('正文里普通的尖括号（泛型、比较、HTML 标签）原样保留', async () => {
+    const body = 'Java 里 List<String> 和 Map<Integer, List<String>> 都是泛型写法；判断用 a < b；HTML 里写 <div> 和 <input type="text">。结尾是 a <';
+    const m = await startMock([{ text: body }]);
+    try {
+      const evs = await collect(m.url);
+      assert.strictEqual(text(evs), body);
+      assert.strictEqual(done(evs).answered, true);
+    } finally {
+      m.close();
+    }
+  });
+
+  it('splitAtToolMarkup：认出各种写法，结尾分不清的先扣着', () => {
+    assert.deepStrictEqual(splitAtToolMarkup('先说两句<｜DSML｜invoke name="x">'), { emit: '先说两句', keep: '', textual: true });
+    assert.deepStrictEqual(splitAtToolMarkup('<｜｜DSML｜｜ calls>'), { emit: '', keep: '', textual: true });
+    assert.deepStrictEqual(splitAtToolMarkup('<| DSML |function_calls>'), { emit: '', keep: '', textual: true });
+    assert.deepStrictEqual(splitAtToolMarkup('x<invoke name="read_article">'), { emit: 'x', keep: '', textual: true });
+    assert.deepStrictEqual(splitAtToolMarkup('x<tool_call>{'), { emit: 'x', keep: '', textual: true });
+    assert.deepStrictEqual(splitAtToolMarkup('正文<｜DS'), { emit: '正文', keep: '<｜DS', textual: false });
+    assert.deepStrictEqual(splitAtToolMarkup('正文<'), { emit: '正文', keep: '<', textual: false });
+    assert.deepStrictEqual(splitAtToolMarkup('List<String> 和 <div>'), { emit: 'List<String> 和 <div>', keep: '', textual: false });
+    assert.deepStrictEqual(splitAtToolMarkup('<input type="text"> 后面还有很长一段正文'), {
+      emit: '<input type="text"> 后面还有很长一段正文',
+      keep: '',
+      textual: false,
+    });
   });
 
   it('上游报错时抛出，由调用方走降级链（不白屏）', async () => {
