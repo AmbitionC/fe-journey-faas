@@ -87,7 +87,7 @@ describe('栗栗学英语 阅读状态同步', () => {
     assert.deepStrictEqual(r.books['ort-l2-05'], { page: 3, at: t0, done: [t0] });
     assert.strictEqual(r.books['ort-l1-13'].page, 0);
     assert.deepStrictEqual(r.last, { id: 'ort-l2-05', page: 3, at: t0 });
-    assert.deepStrictEqual(r.prefs, { autoNext: false, rate: 1, zh: true, ortLevel: 1, at: t0 });
+    assert.deepStrictEqual(r.prefs, { autoNext: false, pagePause: 'medium', rate: 1, zh: true, ortLevel: 1, at: t0 });
     assert.deepStrictEqual(sanitizeReading('nope'), { books: {}, last: null, prefs: null });
   });
 
@@ -112,5 +112,21 @@ describe('栗栗学英语 阅读状态同步', () => {
     assert.strictEqual(m.prefs!.ortLevel, 2);
     assert.deepStrictEqual(mergeReading(m, m), m);
     assert.strictEqual(readingKey('u1'), 'kids:reading:u1');
+  });
+});
+
+describe('栗栗学英语 计划级别', () => {
+  const base = { nickname: '豆豆', ageBand: '3-4', minutesPerDay: 10, startDate: '2026-11-02', lockToPlan: false };
+  it('级别 1-9 保留，其他丢掉', () => {
+    assert.strictEqual(sanitizeProfile({ ...base, level: 3 })!.level, 3);
+    for (const bad of [0, 10, 2.5, '3', null]) {
+      assert.strictEqual('level' in sanitizeProfile({ ...base, level: bad })!, false, String(bad));
+    }
+  });
+  it('翻页停顿只认 short / medium / long', () => {
+    const t = Date.UTC(2026, 10, 12);
+    const p = (pagePause: unknown) => sanitizeReading({ prefs: { pagePause, at: t } }).prefs!.pagePause;
+    assert.strictEqual(p('long'), 'long');
+    assert.strictEqual(p('slow'), 'medium');
   });
 });

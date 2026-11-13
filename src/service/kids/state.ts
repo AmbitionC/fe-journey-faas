@@ -14,6 +14,8 @@ export interface KidsProfile {
   minutesPerDay: 5 | 10 | 15;
   startDate: string;
   lockToPlan: boolean;
+  /** 孩子当前在读的牛津树级别（1-9）；旧数据没有 */
+  level?: number;
 }
 
 export interface DayRecord {
@@ -56,6 +58,11 @@ export function sanitizeProfile(raw: unknown): KidsProfile | null {
     minutesPerDay: r.minutesPerDay as 5 | 10 | 15,
     startDate: r.startDate,
     lockToPlan: r.lockToPlan === true,
+    ...(Number.isInteger(r.level) &&
+    (r.level as number) >= 1 &&
+    (r.level as number) <= 9
+      ? { level: r.level as number }
+      : {}),
   };
 }
 
@@ -110,6 +117,8 @@ export interface KidsBookState {
 export interface KidsPrefs {
   /** 读完自动接着读下一本 */
   autoNext: boolean;
+  /** 自动读时翻页前停多久：短 / 中 / 长 */
+  pagePause: 'short' | 'medium' | 'long';
   /** 语速 */
   rate: 0.75 | 1;
   /** 显示中文 */
@@ -180,6 +189,9 @@ export function sanitizeReading(raw: unknown): KidsReading {
   if (p && typeof p === 'object' && okTime(p.at)) {
     out.prefs = {
       autoNext: p.autoNext !== false,
+      pagePause: ['short', 'medium', 'long'].includes(p.pagePause)
+        ? p.pagePause
+        : 'medium',
       rate: p.rate === 0.75 ? 0.75 : 1,
       zh: p.zh !== false,
       ortLevel:
