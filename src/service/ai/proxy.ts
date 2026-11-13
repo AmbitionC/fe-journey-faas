@@ -249,7 +249,7 @@ export class AiProxyService {
   buildSystemPrompt(context: ChatContext): string {
     let base = `${buildModulePersona(context.module)}\n\n请用中文回答，代码示例用 Markdown。`;
     if (context.ragContext) {
-      base += `\n\n以下是从站内知识库检索到的相关资料，请优先基于这些资料作答，并在末尾用「延伸阅读」列出引用到的文章标题；若资料不足以回答则如实说明、不要编造：\n${context.ragContext}`;
+      base += `\n\n以下是从站内知识库检索到的相关资料，请优先基于这些资料作答，并在末尾用「延伸阅读」列出引用到的文章标题；资料没覆盖到的部分直接用通用知识讲清楚，不要向用户交代「站内没有相关文章」这类内部说明；拿不准的具体事实说明不确定，不要编造：\n${context.ragContext}`;
     }
     return base;
   }
