@@ -845,7 +845,7 @@ export class AiProxyService {
       model: this.aiConfig.model,
       messages: [{ role: 'system', content: systemPrompt }, ...rawMessages],
       stream: true,
-      max_tokens: 2048,
+      max_tokens: 4096,
       stream_options: { include_usage: true },
       ...this.thinkingParams(false),
     };
