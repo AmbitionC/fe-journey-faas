@@ -8,7 +8,7 @@
  *
  * 兜底五件套的对应关系：
  * ① 去重熔断：同名同参二次调用 → 返回提示 + 下一步收掉工具，强制终答（dedup_stop）
- * ② 文本化工具调用：模型把调用写进正文 → 不展示给用户，交由调用方走降级链（textual_parse）
+ * ② 文本化工具调用：模型把调用写进正文（JSON，或 `<｜DSML｜invoke …>` 这类标签）→ 不展示给用户，交由调用方走降级链（textual_parse）
  * ③ 空响应：没有终答正文 → 调用方走降级链（final_fallback）
  * ④ 轮数用尽：最后一步收掉工具，模型只能作答（rounds_exhausted）
  * ⑤ 参数自纠：AI SDK 对坏 JSON 会自动报给模型修正（invalid tool input 走 SDK 的修复回路）
@@ -67,6 +67,40 @@ function looksLikeTextualToolCall(text: string, toolNames: string[]): boolean {
   if (!(t.startsWith('{') || t.startsWith('```'))) return false;
   return toolNames.some((n) => t.includes(`"${n}"`));
 }
+
+/**
+ * 模型把工具调用写成标签文本的几种写法（DeepSeek 偶发的 `<｜DSML｜function_calls>` / `<｜DSML｜invoke name="…">`，
+ * 以及通用的 `<function_calls>` / `<invoke name=…>` / `<tool_call>`）。比较前先去掉 `<` 后面的竖线和空白。
+ */
+const TOOL_MARKUP_HEADS = ['DSML', 'invokename=', 'function_calls', 'tool_call'];
+/** 标签开头最多看这么多字符；超过还对不上就当普通的 `<`（比如代码里的泛型） */
+const TOOL_MARKUP_SCAN = 24;
+
+/**
+ * 在正文里找工具调用标签（纯函数，便于单测）。
+ * - emit：可以放给用户的部分；
+ * - keep：结尾那段还分不清是不是标签开头的文字，先扣着，等后面的字到了再判断；
+ * - textual：确认出现了标签，标签起的内容全部不展示。
+ */
+export function splitAtToolMarkup(buf: string): { emit: string; keep: string; textual: boolean } {
+  let from = 0;
+  for (;;) {
+    const i = buf.indexOf('<', from);
+    if (i < 0) return { emit: buf, keep: '', textual: false };
+    const head = buf.slice(i + 1, i + 1 + TOOL_MARKUP_SCAN).replace(/[｜|\s]/g, '');
+    if (TOOL_MARKUP_HEADS.some((h) => head.startsWith(h))) {
+      return { emit: buf.slice(0, i), keep: '', textual: true };
+    }
+    const atTail = buf.length - i - 1 < TOOL_MARKUP_SCAN;
+    if (atTail && TOOL_MARKUP_HEADS.some((h) => h.startsWith(head))) {
+      return { emit: buf.slice(0, i), keep: buf.slice(i), textual: false };
+    }
+    from = i + 1;
+  }
+}
+
+/** 标签之前只说了这么点字就转去写工具调用：算没答上，交给降级链重新回答 */
+const TEXTUAL_MIN_ANSWER = 120;
 
 export async function* runAiSdkLoop(opts: {
   config: LoopConfig;
@@ -154,6 +188,7 @@ export async function* runAiSdkLoop(opts: {
   let stepFlushed = false;
   let stepHasTool = false;
   let stepTextual = false;
+  let lastStepTextual = false;
 
   for await (const part of result.fullStream as AsyncIterable<any>) {
     switch (part.type) {
@@ -166,15 +201,35 @@ export async function* runAiSdkLoop(opts: {
       case 'text-delta': {
         const delta: string = part.text ?? part.delta ?? '';
         if (!delta || stepHasTool || stepTextual) break;
+        stepBuf += delta;
         if (stepFlushed) {
-          answeredText += delta;
-          yield { type: 'content', text: delta };
+          // 已经在往外放正文：每次只放确认不是工具调用标签的部分
+          const cut = splitAtToolMarkup(stepBuf);
+          if (cut.emit) {
+            answeredText += cut.emit;
+            yield { type: 'content', text: cut.emit };
+          }
+          stepBuf = cut.keep;
+          if (cut.textual) stepTextual = true;
           break;
         }
-        stepBuf += delta;
         if (looksLikeTextualToolCall(stepBuf, toolNames)) {
           stepTextual = true;
           break;
+        }
+        {
+          // 还没开始放正文就出现了标签：标签前的话多半是过场话，剥掉后有剩才展示
+          const cut = splitAtToolMarkup(stepBuf);
+          if (cut.textual) {
+            const before = stripPreface(cut.emit);
+            if (before.trim()) {
+              answeredText += before;
+              yield { type: 'content', text: before };
+            }
+            stepBuf = '';
+            stepTextual = true;
+            break;
+          }
         }
         // 过场话开头：等这句说完再判断（说完就剥掉），没说完先别放
         const looksPreface = /^\s*(好的[，,]?\s*)?(我先|让我先?|我来|先)(去)?(查|检索|搜|看|翻|读|找|了解)/.test(stepBuf);
@@ -185,9 +240,12 @@ export async function* runAiSdkLoop(opts: {
         }
         if (stepBuf.length >= HOLD_CHARS && !stepBuf.trim().startsWith('{') && !stepBuf.trim().startsWith('```')) {
           stepFlushed = true;
-          answeredText += stepBuf;
-          yield { type: 'content', text: stepBuf };
-          stepBuf = '';
+          const cut = splitAtToolMarkup(stepBuf);
+          if (cut.emit) {
+            answeredText += cut.emit;
+            yield { type: 'content', text: cut.emit };
+          }
+          stepBuf = cut.keep;
         }
         break;
       }
@@ -227,8 +285,14 @@ export async function* runAiSdkLoop(opts: {
             }
           }
           stepBuf = '';
+        } else if (stepFlushed && !stepHasTool && !stepTextual && stepBuf) {
+          // 结尾扣着的那几个字最后也没变成标签，照常放出去
+          answeredText += stepBuf;
+          yield { type: 'content', text: stepBuf };
+          stepBuf = '';
         }
         if (stepTextual && !fallbackFlags.includes('textual_parse')) fallbackFlags.push('textual_parse');
+        lastStepTextual = stepTextual;
         break;
       }
       case 'error':
@@ -258,7 +322,9 @@ export async function* runAiSdkLoop(opts: {
     }
   }
 
-  const answered = asked || answeredText.trim().length > 0;
+  // 最后一步写成了工具调用标签、此前又没说出像样的内容：按没答上处理，调用方走降级链把问题答完
+  const cutShort = lastStepTextual && answeredText.trim().length < TEXTUAL_MIN_ANSWER;
+  const answered = asked || (answeredText.trim().length > 0 && !cutShort);
   if (!answered && !fallbackFlags.includes('final_fallback')) fallbackFlags.push('final_fallback');
   yield { type: 'done', answered, tokenUsed, cacheHitTokens, reasoningTokens, rounds, toolCallCount, fallbackFlags };
 }
