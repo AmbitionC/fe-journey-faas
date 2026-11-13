@@ -173,6 +173,7 @@ jobs:
           s posAlertCron deploy -y --access aliyun
           s posAlertCron invoke -e '{"dryRun":true}' --access aliyun | tee /tmp/pos-alert-smoke.out
           s posAlertCron invoke -e '{"dryRun":true,"job":"weekly"}' --access aliyun | tee -a /tmp/pos-alert-smoke.out
+          s posAlertCron invoke -e '{"job":"warm"}' --access aliyun | tee -a /tmp/pos-alert-smoke.out
           ! grep -qE "Error Type|InvocationError|InternalServerError|failed to \[invoke\]" /tmp/pos-alert-smoke.out
 
       # 资源仓库的 Actions 被停用时，可通过一次带 [resync-content] 的发布提交

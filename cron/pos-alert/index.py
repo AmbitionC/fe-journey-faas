@@ -2,12 +2,14 @@
 
 - 每天北京 08:30 / 20:30 → /pos/alerts/push（健康 / 热量差预警，src/service/pos/alertPush.ts）
 - 每周一北京 09:00      → /pos/review/weekly/run（上一周复盘，src/service/pos/reviewService.ts）
+- 每 2 分钟             → 预热 Web 函数（GET /article/navList，避免实例被回收后的 5 秒冷启动）
 
-定时器 payload 为 'weekly' 时走周复盘，其余走预警。
+定时器 payload 为 'weekly' 时走周复盘，'warm' 时只做预热，其余走预警。
 事件里带 {"dryRun": true} 时只算不推（部署后冒烟用）；{"job": "weekly"} 手动指定周复盘。
 """
 import json
 import os
+import time
 import urllib.request
 
 
@@ -19,12 +21,35 @@ def _parse(event):
     return ev if isinstance(ev, dict) else {}
 
 
+def _warm(base):
+    """每 2 分钟敲一次 Web 函数的公开只读接口，让实例不被回收。
+
+    2026-11-13 线上实测：实例被回收后第一个请求要等 5 秒多（备考库目录首屏 6.6 秒）。
+    失败只打日志不报错：预热没成功不该让定时器告警。
+    """
+    if not base:
+        raise RuntimeError("缺少 POS_API_BASE")
+    started = time.time()
+    try:
+        with urllib.request.urlopen(f"{base}/article/navList?module=soe", timeout=20) as resp:
+            status = resp.status
+            resp.read()
+    except Exception as e:  # noqa: BLE001
+        print(f"warm failed: {e}")
+        return json.dumps({"job": "warm", "ok": False})
+    ms = int((time.time() - started) * 1000)
+    print(f"warm status={status} ms={ms}")
+    return json.dumps({"job": "warm", "ok": status == 200, "ms": ms})
+
+
 def handler(event, context):
     base = os.environ.get("POS_API_BASE", "").rstrip("/")
     token = os.environ.get("HEALTH_API_TOKEN", "")
+    ev = _parse(event)
+    if "warm" in (ev.get("payload"), ev.get("triggerName"), ev.get("job")):
+        return _warm(base)
     if not base or not token:
         raise RuntimeError("缺少 POS_API_BASE / HEALTH_API_TOKEN")
-    ev = _parse(event)
     weekly = "weekly" in (ev.get("payload"), ev.get("triggerName"), ev.get("job"))
     dry = bool(ev.get("dryRun"))
     path = "/pos/review/weekly/run" if weekly else "/pos/alerts/push"
