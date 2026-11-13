@@ -23,7 +23,7 @@ export interface LoopConfig {
   baseURL?: string;
   /** 是否开启思考（默认 true；仅单测 / 评测会关） */
   thinking?: boolean;
-  /** 单步最大输出 token（默认 2048） */
+  /** 单步最大输出 token（默认 4096；开着思考时思考内容也算在里面，2048 会把带表格的长回答截断） */
   maxOutputTokens?: number;
   /** 单测注入 */
   fetch?: typeof globalThis.fetch;
@@ -99,6 +99,9 @@ export function splitAtToolMarkup(buf: string): { emit: string; keep: string; te
   }
 }
 
+/** 回答撞上输出上限时接在后面的提示 */
+export const TRUNCATED_NOTE = '\n\n（这次回答太长，写到这里被截断了。回复「继续」，我接着往下讲。）';
+
 /** 标签之前只说了这么点字就转去写工具调用：算没答上，交给降级链重新回答 */
 const TEXTUAL_MIN_ANSWER = 120;
 
@@ -164,7 +167,7 @@ export async function* runAiSdkLoop(opts: {
     system: opts.systemPrompt,
     messages: opts.messages as ModelMessage[],
     tools,
-    maxOutputTokens: config.maxOutputTokens ?? 2048,
+    maxOutputTokens: config.maxOutputTokens ?? 4096,
     maxRetries: 1,
     abortSignal: abort.signal,
     stopWhen: stepCountIs(maxRounds + 1),
@@ -293,6 +296,12 @@ export async function* runAiSdkLoop(opts: {
         }
         if (stepTextual && !fallbackFlags.includes('textual_parse')) fallbackFlags.push('textual_parse');
         lastStepTextual = stepTextual;
+        // 正文写到一半撞上输出上限：不能把半截话当成完整回答收尾，明说并告诉用户怎么接着看
+        if (part.finishReason === 'length' && stepFlushed && !stepHasTool && !stepTextual) {
+          if (!fallbackFlags.includes('truncated')) fallbackFlags.push('truncated');
+          answeredText += TRUNCATED_NOTE;
+          yield { type: 'content', text: TRUNCATED_NOTE };
+        }
         break;
       }
       case 'error':

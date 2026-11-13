@@ -1,14 +1,14 @@
 import * as assert from 'assert';
 import * as http from 'http';
 import { AddressInfo } from 'net';
-import { runAiSdkLoop, LoopEvent, stripPreface, splitAtToolMarkup } from '../src/service/ai/aisdkLoop';
+import { runAiSdkLoop, LoopEvent, stripPreface, splitAtToolMarkup, TRUNCATED_NOTE } from '../src/service/ai/aisdkLoop';
 
 /**
  * 模拟 DeepSeek（OpenAI 兼容流式接口），按脚本逐次返回。
  * 严格执行官方规则：请求带 tools 时，历史里每个 assistant 都必须带 reasoning_content，否则 400。
  */
 type Turn =
-  | { text: string; reasoning?: string }
+  | { text: string; reasoning?: string; finish?: string }
   | { tool: { name: string; args: any }; reasoning?: string; preface?: string }
   | { status: number };
 
@@ -62,7 +62,7 @@ function startMock(script: Turn[]) {
         const half = Math.ceil(turn.text.length / 2);
         send({ content: turn.text.slice(0, half) });
         send({ content: turn.text.slice(half) });
-        send({}, 'stop');
+        send({}, turn.finish || 'stop');
       }
       res.end('data: [DONE]\n\n');
     });
@@ -283,6 +283,31 @@ describe('Iris 工具循环（AI SDK）', () => {
       const evs = await collect(m.url);
       assert.strictEqual(text(evs), body);
       assert.strictEqual(done(evs).answered, true);
+    } finally {
+      m.close();
+    }
+  });
+
+  it('回答撞上输出上限 → 正文保留，末尾明说被截断，标记 truncated', async () => {
+    const body = 'record 是不可变数据的载体，自动生成构造器、访问器、equals、hashCode 和 toString；想让它真的不可变，得在紧凑构造器里做防御';
+    const m = await startMock([{ text: body, finish: 'length' }]);
+    try {
+      const evs = await collect(m.url);
+      assert.strictEqual(text(evs), body + TRUNCATED_NOTE);
+      const d = done(evs);
+      assert.strictEqual(d.answered, true);
+      assert.ok(d.fallbackFlags.includes('truncated'));
+    } finally {
+      m.close();
+    }
+  });
+
+  it('正常结束的回答不带截断提示', async () => {
+    const m = await startMock([{ text: '防抖：停止触发后才执行，适合搜索框输入这类只关心最后一次的场景，和节流的固定窗口不同。' }]);
+    try {
+      const evs = await collect(m.url);
+      assert.ok(!text(evs).includes('截断'));
+      assert.ok(!done(evs).fallbackFlags.includes('truncated'));
     } finally {
       m.close();
     }
