@@ -171,16 +171,20 @@ async function handleStream(req, res) {
   const messages = clampMessages(body.messages || []);
   const context = body.context || {};
 
-  // 取/建会话并落库用户消息（尽力而为）
+  // 取/建会话并落库用户消息（尽力而为）。
+  // 界面自动发起的辅助调用（猜你想问）不是用户提的问题，不落库：
+  // 否则会话列表里会多出一条「你是学习助手…」，Iris 还会把它当成「上次问过」。
   let conv = null;
   try {
     const lastUser = [...messages].reverse().find((m) => m && m.role === 'user');
-    conv = await aiHistoryService.ensureConversation(userId, body.conversationId, {
-      module: context.module,
-      articleKey: context.articleKey,
-      firstUserText: lastUser && lastUser.content,
-    });
-    if (lastUser) {
+    if (!auxModuleFor(body.purpose)) {
+      conv = await aiHistoryService.ensureConversation(userId, body.conversationId, {
+        module: context.module,
+        articleKey: context.articleKey,
+        firstUserText: lastUser && lastUser.content,
+      });
+    }
+    if (conv && lastUser) {
       await aiHistoryService.appendMessage(conv, {
         role: 'user',
         content: lastUser.content,

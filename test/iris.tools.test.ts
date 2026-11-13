@@ -167,6 +167,24 @@ describe('Iris 阶段 2 工具', () => {
     assert.strictEqual(buildMemoryPrompt([], now), '');
   });
 
+  it('跨会话记忆：没答上来的会话和界面自动发起的「猜你想问」不算上次问过', () => {
+    const now = Date.UTC(2026, 10, 13, 8);
+    const p = buildMemoryPrompt(
+      [
+        { title: '进程和线程的区别', lastMessageAt: new Date(now - 86400000), messageCount: 1 },
+        { title: '你是学习助手。请根据下面的内容，…', lastMessageAt: new Date(now), messageCount: 2 },
+        { title: 'TCP 三次握手为什么不是两次', lastMessageAt: new Date(now - 86400000), messageCount: 2 },
+        { title: '老数据没有条数也照常保留', lastMessageAt: new Date(now - 2 * 86400000) },
+      ],
+      now
+    );
+    assert.ok(!p.includes('进程和线程的区别'));
+    assert.ok(!p.includes('学习助手'));
+    assert.ok(p.includes('- 昨天：TCP 三次握手为什么不是两次'));
+    assert.ok(p.includes('老数据没有条数也照常保留'));
+    assert.strictEqual(buildMemoryPrompt([{ title: '只问没答', messageCount: 1 }], now), '');
+  });
+
   it('查阅状态显示文章标题而不是英文 key', () => {
     const label = statusLabel('read_article', { module: 'llm', key: 'agent-run-loop', section: '终止条件' }, () => 'Agent Run Loop、轮次与终止条件');
     assert.strictEqual(label, '正在查阅《Agent Run Loop、轮次与终止条件》 · 终止条件…');

@@ -348,12 +348,29 @@ export class CoachAgentService {
   }
 }
 
+/**
+ * 这条会话能不能算「上次问过」：
+ * - 只有用户那一条、Iris 一个字没答上来的（messageCount < 2）不算，否则会对着一次失败说「上次你问过」；
+ * - 界面自动发起的「猜你想问」不是用户提的问题，不算（历史数据里还留着这类会话）。
+ */
+export function isRecallableTopic(t: { title?: string; messageCount?: number | null }): boolean {
+  if (!t || !t.title || t.title === '新对话') return false;
+  if (t.title.startsWith('你是学习助手')) return false;
+  if (typeof t.messageCount === 'number' && t.messageCount < 2) return false;
+  return true;
+}
+
 /** 跨会话记忆提示词（纯函数，便于单测）。 */
 export function buildMemoryPrompt(
-  topics: { title: string; module?: string | null; lastMessageAt?: Date | string | null }[],
+  topics: {
+    title: string;
+    module?: string | null;
+    lastMessageAt?: Date | string | null;
+    messageCount?: number | null;
+  }[],
   now: number
 ): string {
-  const rows = topics.filter((t) => t && t.title && t.title !== '新对话').slice(0, 5);
+  const rows = topics.filter(isRecallableTopic).slice(0, 5);
   if (!rows.length) return '';
   const fmt = (d: any) => {
     const ms = d ? new Date(d).getTime() : NaN;

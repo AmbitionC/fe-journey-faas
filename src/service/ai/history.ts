@@ -105,16 +105,22 @@ export class AiHistoryService {
   async recentTopics(
     userId: string,
     opts: { excludeId?: number; limit?: number; days?: number } = {}
-  ): Promise<{ title: string; module: string; lastMessageAt: Date }[]> {
+  ): Promise<{ title: string; module: string; lastMessageAt: Date; messageCount: number }[]> {
     const since = new Date(Date.now() - (opts.days || 30) * 86400000);
     const where: any = { userId, status: 'active', lastMessageAt: MoreThan(since) };
     if (opts.excludeId) where.id = Not(opts.excludeId as any);
     const rows = await this.convModel.find({
       where,
       order: { lastMessageAt: 'DESC', id: 'DESC' },
-      take: Math.min(Math.max(opts.limit || 5, 1), 10),
+      // 多取几条：没答上来的会话、界面自动发起的会话会在 buildMemoryPrompt 里被筛掉
+      take: Math.min(Math.max(opts.limit || 5, 1), 10) + 10,
     });
-    return rows.map((r) => ({ title: r.title, module: r.module, lastMessageAt: r.lastMessageAt }));
+    return rows.map((r) => ({
+      title: r.title,
+      module: r.module,
+      lastMessageAt: r.lastMessageAt,
+      messageCount: r.messageCount,
+    }));
   }
 
   /** 会话历史消息（校验归属，正序）。 */
