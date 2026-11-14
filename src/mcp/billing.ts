@@ -409,6 +409,8 @@ export const TOOL_COST: Record<string, number> = {
   sector_rank: 5,
   sector_history: 5,
   index_history: 5,
+  // 2026-11-14 常见指数统一指标：最新一览 / 单指数序列，同指数日线价、当天只扣一次
+  index_metrics: 5,
   rule_backtest: 0,
   indicator_list: 0,
   methodology_get: 0,
@@ -429,6 +431,7 @@ export const DAY_PASS_TOOLS = [
   'market_sentiment',
   'sector_history',
   'index_history',
+  'index_metrics',
 ];
 
 export function isDayPassTool(tool: string): boolean {
@@ -465,6 +468,7 @@ export const PRODUCT_TOOLS: Record<Product, string[]> = {
     'sector_rank',
     'sector_history',
     'index_history',
+    'index_metrics',
     'rule_backtest',
     'indicator_list',
     'methodology_get',
