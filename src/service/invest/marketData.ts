@@ -26,6 +26,37 @@ export const OPEN_INDEXES: Record<string, string> = {
   '399006.SZ': '创业板指',
   '000688.SH': '科创50',
 };
+// 2026-11-14 起再并入下方常见指数全集（index-universe 工作流每个交易日日更）；
+// 这些新指数的成交量/成交额各数据源单位不一，库里置空，amount_yi 为 null。
+
+/**
+ * 常见指数全集（宽基 / 策略风格 / 行业主题 / 港股海外），顺序＝页面与 Skill 的展示顺序。
+ * 与 invest-model `invest_model/index_universe.py:UNIVERSE` 同一份名单（改名单两边一起改）。
+ */
+export const UNIVERSE_INDEXES: { code: string; name: string; category: string }[] = [
+  ['000001.SH', '上证指数', '宽基'], ['399001.SZ', '深证成指', '宽基'], ['399006.SZ', '创业板指', '宽基'],
+  ['000016.SH', '上证50', '宽基'], ['000300.SH', '沪深300', '宽基'], ['000905.SH', '中证500', '宽基'],
+  ['000852.SH', '中证1000', '宽基'], ['000510.SH', '中证A500', '宽基'], ['000688.SH', '科创50', '宽基'],
+  ['899050.BJ', '北证50', '宽基'],
+  ['000922.CSI', '中证红利', '策略风格'], ['H30269.CSI', '红利低波', '策略风格'],
+  ['932365.CSI', '中证自由现金流', '策略风格'], ['399370.SZ', '国证成长', '策略风格'],
+  ['399371.SZ', '国证价值', '策略风格'],
+  ['399997.SZ', '中证白酒', '行业主题'], ['000932.SH', '中证主要消费', '行业主题'],
+  ['399989.SZ', '中证医疗', '行业主题'], ['000933.SH', '中证医药卫生', '行业主题'],
+  ['931152.CSI', '中证创新药产业', '行业主题'], ['399975.SZ', '中证证券公司', '行业主题'],
+  ['399986.SZ', '中证银行', '行业主题'], ['399809.SZ', '中证保险主题', '行业主题'],
+  ['H30184.CSI', '中证全指半导体', '行业主题'], ['930713.CSI', '中证人工智能主题', '行业主题'],
+  ['930651.CSI', '中证计算机主题', '行业主题'], ['931160.CSI', '中证全指通信设备', '行业主题'],
+  ['399971.SZ', '中证传媒', '行业主题'], ['399967.SZ', '中证军工', '行业主题'],
+  ['399976.SZ', '中证新能源汽车', '行业主题'], ['931151.CSI', '中证光伏产业', '行业主题'],
+  ['000819.SH', '中证申万有色金属', '行业主题'], ['399998.SZ', '中证煤炭', '行业主题'],
+  ['H30199.CSI', '中证全指电力公用事业', '行业主题'], ['H30590.CSI', '中证机器人', '行业主题'],
+  ['HSI.HI', '恒生指数', '港股海外'], ['HSTECH.HI', '恒生科技', '港股海外'],
+  ['H30533.CSI', '中概互联网', '港股海外'], ['NDX.GI', '纳斯达克100', '港股海外'],
+  ['SPX.GI', '标普500', '港股海外'], ['N225.GI', '日经225', '港股海外'],
+].map(([code, name, category]) => ({ code, name, category }));
+
+for (const u of UNIVERSE_INDEXES) if (!OPEN_INDEXES[u.code]) OPEN_INDEXES[u.code] = u.name;
 
 export const SECTOR_TAGS: Record<string, string> = {
   industry: '行业',
@@ -239,6 +270,83 @@ export async function indexHistory(db: Db, opt: { code?: string; start?: string;
   };
 }
 
+/**
+ * 常见指数统一指标（invest-model 表 index_metrics_daily，2026-11-14）。
+ * 只给客观读数：长期中枢、收盘÷中枢、近5年中位线、距最高点回撤、60 日偏离度、近十年名次、全历史分位。
+ * 🔴 不下发买入/卖出参考线（新指数的线未经任何验证，四腿的线走 /invest/broad）。
+ */
+function projectMetric(r: any) {
+  const int = (v: any) => (v === null || v === undefined ? null : Number(v));
+  return {
+    code: String(r.code),
+    name: r.name,
+    category: r.category,
+    trade_date: String(r.trade_date),
+    close: num(r.close),
+    days_since_launch: int(r.n_hist),
+    long_term_median: num(r.median_all),
+    close_to_median: num(r.pos_ratio),
+    median_5y: num(r.median_5y),
+    close_to_median_5y: num(r.pos_5y),
+    peak: num(r.peak),
+    drawdown_from_peak_pct: pct(num(r.dd_peak)),
+    ma60: num(r.ma60),
+    bias60_pct: pct(num(r.bias60)),
+    bias_10y_rank_low: int(r.bias_rank_low),
+    bias_10y_rank_high: int(r.bias_rank_high),
+    bias_10y_days: int(r.bias_win),
+    bias_10y_extreme: r.bias_extreme || '',
+    bias_all_pct_low: num(r.bias_pct_all),
+    bias_all_rank_low: int(r.bias_rank_all),
+  };
+}
+
+const METRIC_COLS =
+  'm.trade_date, m.code, m.name, m.category, m.close, m.n_hist, m.median_all, m.pos_ratio, ' +
+  'm.median_5y, m.pos_5y, m.peak, m.dd_peak, m.ma60, m.bias60, m.bias_win, m.bias_rank_low, ' +
+  'm.bias_rank_high, m.bias_extreme, m.bias_pct_all, m.bias_rank_all';
+
+export async function indexMetrics(
+  db: Db,
+  opt: { code?: string; category?: string; days?: number; start?: string; end?: string } = {}
+) {
+  const order = new Map(UNIVERSE_INDEXES.map((u, i) => [u.code, i]));
+  if (opt.code) {
+    const code = String(opt.code).toUpperCase();
+    const u = UNIVERSE_INDEXES.find(x => x.code === code);
+    if (!u) return { error: 'unknown_code', indexes: UNIVERSE_INDEXES };
+    const days = clampInt(opt.days, 1, 6000, 250);
+    const rows = opt.start
+      ? await db.q(
+          `SELECT ${METRIC_COLS} FROM index_metrics_daily m WHERE m.code = ? AND m.trade_date >= ? ` +
+            'AND m.trade_date <= ? ORDER BY m.trade_date LIMIT 6000',
+          [code, opt.start, opt.end || '99991231']
+        )
+      : (
+          await db.q(
+            `SELECT ${METRIC_COLS} FROM index_metrics_daily m WHERE m.code = ? ORDER BY m.trade_date DESC LIMIT ?`,
+            [code, days]
+          )
+        ).reverse();
+    return { code, name: u.name, category: u.category, rows: rows.map(projectMetric) };
+  }
+  const rows = await db.q(
+    `SELECT ${METRIC_COLS} FROM index_metrics_daily m JOIN ` +
+      '(SELECT code, MAX(trade_date) d FROM index_metrics_daily GROUP BY code) t ' +
+      'ON m.code = t.code AND m.trade_date = t.d',
+    []
+  );
+  let latest = rows.map(projectMetric).filter((r: any) => order.has(r.code));
+  if (opt.category) latest = latest.filter((r: any) => r.category === opt.category);
+  latest.sort((a: any, b: any) => (order.get(a.code) ?? 999) - (order.get(b.code) ?? 999));
+  const dates = latest.map((r: any) => r.trade_date).sort();
+  return {
+    as_of: dates.length ? dates[dates.length - 1] : null,
+    categories: ['宽基', '策略风格', '行业主题', '港股海外'],
+    latest,
+  };
+}
+
 const LEG_INDEX: Record<string, string> = {
   沪深300: '沪深300',
   红利: '中证红利',
@@ -310,6 +418,10 @@ export class InvestMarketDataService {
   }
   indexHistory(opt: { code?: string; start?: string; end?: string }) {
     return indexHistory(this.db, opt);
+  }
+  indexMetrics(opt: { code?: string; category?: string; days?: number; start?: string; end?: string } = {}) {
+    const key = `im:${opt.code || ''}:${opt.category || ''}:${opt.days || ''}:${opt.start || ''}:${opt.end || ''}`;
+    return cached(key, () => indexMetrics(this.db, opt));
   }
   backtest() {
     return cached('backtest', async () => {

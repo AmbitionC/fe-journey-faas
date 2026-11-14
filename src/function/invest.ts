@@ -12,6 +12,7 @@ import { InvestOverviewService } from '../service/invest/overview';
 import { InvestPlanService } from '../service/invest/plan';
 import { InvestInsightService } from '../service/invest/insight';
 import { InvestFollowService } from '../service/invest/follow';
+import { InvestMarketDataService } from '../service/invest/marketData';
 import { EntitlementService } from '../service/entitlement';
 import { acceptsGzip } from '../common/datasetBody';
 
@@ -36,6 +37,9 @@ export class InvestHTTPService {
 
   @Inject()
   followService: InvestFollowService;
+
+  @Inject()
+  marketDataService: InvestMarketDataService;
 
   @Inject()
   entitlementService: EntitlementService;
@@ -254,6 +258,24 @@ export class InvestHTTPService {
   })
   async bias() {
     return { success: true, data: await this.insightService.bias() };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '常见指数统一指标（中枢位置/偏离度/名次，数据层读数）',
+    functionName: 'investIndexMetrics',
+    name: 'investIndexMetrics',
+    path: '/invest/index-metrics',
+    method: 'get',
+  })
+  async indexMetrics(@Query(ALL) q: { code?: string; category?: string; days?: string }) {
+    return {
+      success: true,
+      data: await this.marketDataService.indexMetrics({
+        code: q.code || undefined,
+        category: q.category || undefined,
+        days: q.days ? Number(q.days) : undefined,
+      }),
+    };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {

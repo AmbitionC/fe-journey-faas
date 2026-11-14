@@ -813,6 +813,7 @@ export async function createMcpRuntime(appCtx: any): Promise<McpRuntime> {
       sectorRank: o => marketData.sectorRank(o),
       sectorHistory: o => marketData.sectorHistory(o),
       indexHistory: o => marketData.indexHistory(o),
+      indexMetrics: o => marketData.indexMetrics(o),
       backtest: () => marketData.backtest(),
       usage: usageOf(row, 'invest'),
     }),

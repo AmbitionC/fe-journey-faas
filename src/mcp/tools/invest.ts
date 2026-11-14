@@ -24,6 +24,8 @@ export interface InvestDeps {
   sectorRank(opt: { tag?: string; period?: number; top?: number; order?: string }): Promise<any>;
   sectorHistory(opt: { keyword?: string; code?: string; days?: number }): Promise<any>;
   indexHistory(opt: { code?: string; start?: string; end?: string }): Promise<any>;
+  /** 2026-11-14：常见指数统一指标（index_metrics_daily） */
+  indexMetrics(opt: { code?: string; category?: string; days?: number; start?: string; end?: string }): Promise<any>;
   backtest(): Promise<{ generated_at?: string | null; legs: any[] }>;
 }
 
@@ -409,9 +411,11 @@ export const investTools: ToolDef<InvestDeps>[] = [
     name: 'index_history',
     title: '指数日线',
     description:
-      '主要指数的日线（开高低收、涨跌幅、成交额），可选：000001.SH 上证指数 / 000016.SH 上证50 / ' +
-      '000300.SH 沪深300（默认）/ 000905.SH 中证500 / 000852.SH 中证1000 / 000906.SH 中证800 / ' +
-      '000922.CSI 中证红利 / 399006.SZ 创业板指 / 000688.SH 科创50。库内 2015 年起；不传日期默认近一年。',
+      '指数日线（开高低收、涨跌幅、成交额）。覆盖 41 个常见指数：宽基（上证、深证成指、沪深300、中证500/1000/A500、' +
+      '科创50、北证50 等）、策略风格（红利、红利低波、自由现金流、国证成长/价值）、行业主题（白酒、医疗、证券、银行、半导体、' +
+      '人工智能、军工、新能源车、光伏、有色、煤炭、电力、机器人等）、港股海外（恒生、恒生科技、中概互联网、纳指100、标普500、日经225）。' +
+      '代码不确定时先调 index_metrics（不传参数）看全部代码。默认 000300.SH，不传日期默认近一年；' +
+      '2026-11 新接入的指数成交额为空。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -433,6 +437,45 @@ export const investTools: ToolDef<InvestDeps>[] = [
             .join(' / ')}`
         );
       return { ...r, disclaimer: DISCLAIMER };
+    },
+  },
+  {
+    name: 'index_metrics',
+    title: '常见指数位置与偏离度',
+    description:
+      '41 个常见指数（宽基 / 策略风格 / 行业主题 / 港股海外）的统一读数：收盘、长期中枢（发布以来收盘中位数）、' +
+      '收盘÷中枢、近 5 年中位线与收盘÷近5年中位线、距发布以来最高点回撤、60 日偏离度（乖离率）及其近十年名次、全历史分位。' +
+      '不传 code 返回全部指数的最新一行（可用 category 过滤：宽基 / 策略风格 / 行业主题 / 港股海外）；' +
+      '传 code（如 399997.SZ）返回该指数逐日序列，days 默认 250、最多 6000，或用 start/end。口径见 methodology_get(index_metrics)。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: '指数代码，如 000300.SH、399997.SZ、HSI.HI' },
+        category: { type: 'string', enum: ['宽基', '策略风格', '行业主题', '港股海外'] },
+        days: { type: 'number', description: '传 code 时的交易日数，默认 250' },
+        start: { type: 'string', description: '起始日 YYYYMMDD' },
+        end: { type: 'string', description: '截止日 YYYYMMDD' },
+      },
+    },
+    handler: async (a, d) => {
+      const r = await d.indexMetrics({
+        code: a.code,
+        category: a.category,
+        days: a.days,
+        start: ymd(a.start, 'start'),
+        end: ymd(a.end, 'end'),
+      });
+      if (r.error === 'unknown_code')
+        throw new ToolError(
+          `不支持的指数代码，可选：${r.indexes.map((x: any) => `${x.code} ${x.name}`).join(' / ')}`
+        );
+      return {
+        ...r,
+        note:
+          '读数不是买卖信号：偏离度六种用法均验证失败；新接入指数的位置读数没有经过任何回测，' +
+          '长期趋势向上的海外指数（纳指、标普、日经）收盘长期远高于自有史以来的中位数，收盘÷中枢不宜横向比较。',
+        disclaimer: DISCLAIMER,
+      };
     },
   },
   {
@@ -467,7 +510,7 @@ export const investServer: ServerSpec<InvestDeps> = {
   version: '0.1.0',
   instructions:
     'Invest Journey 数据服务：A 股市场加工读数（恐慌指数、宽基相对长期中枢位置、乖离率、股息率、宏观数据）、' +
-    '涨跌停情绪、行业/概念板块排行与走势、主要指数日线、宽基跟车规则的历史回测成绩，以及完整口径。' +
+    '涨跌停情绪、行业/概念板块排行与走势、41 个常见指数（宽基/风格/行业/港股海外）的日线与位置、偏离度读数（index_metrics）、宽基跟车规则的历史回测成绩，以及完整口径。' +
     '先 market_snapshot 看全貌，再按需取历史序列；解释任何数字前用 methodology_get 查口径。' +
     '所有数据仅供研究，不构成投资建议；不要把读数直接说成买卖指令，用户的仓位与风险偏好由用户自己决定。' +
     ONBOARDING_INSTRUCTIONS,

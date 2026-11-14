@@ -4,6 +4,8 @@ import {
   sectorRank,
   sectorHistory,
   indexHistory,
+  indexMetrics,
+  UNIVERSE_INDEXES,
   backtestSummary,
   clearMarketDataCache,
 } from '../../src/service/invest/marketData';
@@ -29,6 +31,8 @@ class FakeDb {
       return Object.entries(d.cat).filter(([, c]: any) => c.name.includes(kw)).map(([k, c]: any) => ({ thscode: k, ...c })).sort((a: any, b: any) => a.name.length - b.name.length);
     }
     if (sql.includes('FROM ths_index_daily WHERE thscode')) return d.ths.filter((r: any) => r.thscode === params[0]).sort((a: any, b: any) => (a.trade_date < b.trade_date ? 1 : -1)).slice(0, params[1]);
+    if (sql.includes('JOIN (SELECT code, MAX(trade_date) d FROM index_metrics_daily')) return d.metLatest;
+    if (sql.includes('FROM index_metrics_daily m WHERE m.code')) return d.metSeries.filter((r: any) => r.code === params[0]).slice(0, params[1]);
     if (sql.includes('FROM index_daily')) return d.idx.filter((r: any) => r.code === params[0] && r.trade_date >= params[1] && r.trade_date <= params[2]);
     throw new Error(`unexpected sql: ${sql}`);
   }
@@ -103,8 +107,38 @@ describe('invest/marketData.ts — Skill 第二批数据', () => {
     const r: any = await indexHistory(new FakeDb(data) as any, { code: '000300.sh', start: '20261101' });
     assert.strictEqual(r.name, '沪深300');
     assert.strictEqual(r.rows[0].amount_yi, 3456.79);
-    const bad: any = await indexHistory(new FakeDb(data) as any, { code: '399001.SZ' });
-    assert.strictEqual(bad.error, 'unknown_code', '停更的深证成指不开');
+    const bad: any = await indexHistory(new FakeDb(data) as any, { code: '399999.SZ' });
+    assert.strictEqual(bad.error, 'unknown_code', '名单外的代码不开');
+    // 2026-11-14 常见指数全集并入（深证成指已日更）
+    const sz: any = await indexHistory(new FakeDb(data) as any, { code: '399001.SZ', start: '20261101' });
+    assert.strictEqual(sz.name, '深证成指');
+  });
+
+  it('常见指数统一读数：按名单顺序、可按类别过滤、不下发买卖参考线', async () => {
+    const row = (code: string, name: string, category: string, d = '20261113') => ({
+      trade_date: d, code, name, category, close: '100', n_hist: 600, median_all: '80', pos_ratio: '1.25',
+      median_5y: '90', pos_5y: '1.111111', peak: '120', dd_peak: '-0.166667', ma60: '105', bias60: '-0.047619',
+      bias_win: 2500, bias_rank_low: 12, bias_rank_high: 2489, bias_extreme: '', bias_pct_all: '0.05', bias_rank_all: 30,
+      buy_line: '80', sell_line: '104',
+    });
+    const db = new FakeDb({
+      metLatest: [row('HSI.HI', '恒生指数', '港股海外'), row('399997.SZ', '中证白酒', '行业主题', '20261111'),
+                  row('000300.SH', '沪深300', '宽基'), row('XXX.SH', '名单外', '宽基')],
+      metSeries: [row('399997.SZ', '中证白酒', '行业主题', '20261111'), row('399997.SZ', '中证白酒', '行业主题', '20261110')],
+    });
+    const all: any = await indexMetrics(db as any, {});
+    assert.deepStrictEqual(all.latest.map((r: any) => r.code), ['000300.SH', '399997.SZ', 'HSI.HI']);
+    assert.strictEqual(all.as_of, '20261113');
+    assert.strictEqual(all.latest[0].drawdown_from_peak_pct, -16.67);
+    assert.strictEqual(all.latest[0].bias60_pct, -4.76);
+    assert.ok(!JSON.stringify(all).includes('buy_line') && !JSON.stringify(all).includes('sell_line'));
+    const cat: any = await indexMetrics(db as any, { category: '行业主题' });
+    assert.deepStrictEqual(cat.latest.map((r: any) => r.code), ['399997.SZ']);
+    const one: any = await indexMetrics(db as any, { code: '399997.sz', days: 5 });
+    assert.deepStrictEqual(one.rows.map((r: any) => r.trade_date), ['20261110', '20261111']);
+    const bad: any = await indexMetrics(db as any, { code: 'FOO' });
+    assert.strictEqual(bad.error, 'unknown_code');
+    assert.strictEqual(UNIVERSE_INDEXES.length, 41);
   });
 
   it('回测成绩：四个指数按全站顺序，逐年复利汇总，不带买卖线与成交明细', () => {
