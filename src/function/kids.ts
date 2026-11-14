@@ -35,8 +35,12 @@ import {
   toHttps,
 } from '../service/kids/ort';
 
-/** 牛津树签名接口不要求登录（没登录也能读书），按 IP 限流：10 分钟 300 次 */
+/**
+ * 牛津树：书架（只签封面）不用登录，谁都能逛；读一本书（签每页图和音频）要登录。
+ * 限流：同一个 IP 10 分钟 300 次；登录后再按账号 10 分钟 300 次，防一个账号批量扒书。
+ */
 const ORT_RATE = { limit: 300, ttl: 600 };
+const ORT_USER_RATE = { limit: 300, ttl: 600 };
 
 /**
  * 栗栗学英语（little-circle-web）：登录后同步孩子的学习计划和阅读进度。
@@ -169,6 +173,21 @@ export class KidsHTTPService {
     if (n > ORT_RATE.limit) throw R.validateError('请求太频繁，稍后再试');
   }
 
+  /** 按账号限流：Redis 出问题时放行 */
+  private async ortUserRateLimit(userId: string) {
+    const key = `kids:ort:urate:${Math.floor(
+      Date.now() / 1000 / ORT_USER_RATE.ttl
+    )}:${userId}`;
+    let n = 0;
+    try {
+      n = await this.redisService.incr(key);
+      if (n === 1) await this.redisService.expire(key, ORT_USER_RATE.ttl);
+    } catch {
+      return;
+    }
+    if (n > ORT_USER_RATE.limit) throw R.validateError('请求太频繁，稍后再试');
+  }
+
   private ortSign = (objectKey: string) =>
     toHttps(this.ossService.signedUrl(objectKey, ORT_SIGN_SECONDS));
 
@@ -197,14 +216,17 @@ export class KidsHTTPService {
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description:
-      '栗栗学英语：牛津树一本书（每页图、每句音频都是 2 小时签名地址）',
+      '栗栗学英语：牛津树一本书（要登录；每页图、每页音频都是 2 小时签名地址）',
     functionName: 'kidsOrtBook',
     name: 'kidsOrtBook',
     path: '/kids/ort/book',
     method: 'get',
   })
   async ortBook(@Query('id') id: string) {
+    // 要登录才能读：没登录直接 401（请先登录），不签任何页图和音频
+    const userId = await this.requireUser();
     await this.ortRateLimit();
+    await this.ortUserRateLimit(userId);
     const bookId = ortBookId(id);
     if (!bookId) throw R.validateError('书号不对');
     const book = await this.ortJson(
