@@ -61,10 +61,23 @@ export function missingKeyReason(
 }
 
 /** 401 报错正文：说清原因 + 用户能自己做的下一步。 */
-export function authHelp(reason: AuthFailReason, product: Product): string {
+export function authHelp(
+  reason: AuthFailReason,
+  product: Product,
+  via: 'plugin' | 'mcp' = 'mcp'
+): string {
   const env = ENV[product];
   const manage = siteOf(product).manage;
   const restart = '改完要重启客户端（Claude Code 需退出后重新打开）才会生效。';
+  // 2026-11-14：最新版插件一周 17 次「装了没登录」、没有一次走到授权成功。插件用户不需要 Key，
+  // 只差一步登录——把插件这条路放第一句，手动 Key 降为备选。
+  if (reason === 'missing' && via === 'plugin')
+    return (
+      `${NAME[product]} 插件已装好，还差一步登录（不需要自己找 Key）：` +
+      `对 Agent 说「登录 ${NAME[product]}」，它会给你一个链接，浏览器里登录后点「授权」；` +
+      '或在 Claude Code 里输入 /mcp，选中服务后选 Authenticate。新用户自动开通并送体验点。' +
+      `想手动配 Key 的，到 ${manage} 登录后创建。`
+    );
   switch (reason) {
     case 'env_unset':
       return (

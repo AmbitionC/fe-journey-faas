@@ -200,7 +200,7 @@ export async function handleMcpHttp(
     return sendJson(
       res,
       401,
-      rpcErr(RpcError.INVALID_REQUEST, authHelp(reason, product))
+      rpcErr(RpcError.INVALID_REQUEST, authHelp(reason, product, via))
     );
   }
   let row: ApiKeyRow | null;
