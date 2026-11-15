@@ -16,7 +16,7 @@ const read = (p: string) => readFileSync(join(__dirname, '..', '..', p), 'utf8')
 
 describe('恐慌读数契约', () => {
   const insight = read('src/service/invest/insight.ts');
-  const start = insight.indexOf('async fearLatest()');
+  const start = insight.indexOf('async fearLatest(');
   const block = insight.slice(start, insight.indexOf('async fearSeries('));
 
   it('盘中只在严格更新的交易日替代收盘值', () => {
@@ -27,5 +27,20 @@ describe('恐慌读数契约', () => {
 
   it('盘中返回体带收盘值所属交易日 daily_date', () => {
     assert.ok(/daily_date:\s*daily\.trade_date/.test(block), '缺 daily_date 字段');
+  });
+});
+
+describe('免费版恐慌读数（2026-11-15 关键数字收进会员）', () => {
+  const insight = read('src/service/invest/insight.ts');
+  const block = insight.slice(insight.indexOf('async fearLatest('), insight.indexOf('async fearSeries('));
+  const fn = read('src/function/invest.ts');
+
+  it('免费版不返回盘中近似值，只回最近收盘值并标 intraday_locked', () => {
+    assert.ok(/if \(!intraday\) return \{ \.\.\.daily, intraday_locked: true \}/.test(block));
+  });
+
+  it('接口按完整权限决定是否给盘中值', () => {
+    assert.ok(/insightService\.fearLatest\(full\)/.test(fn));
+    assert.ok(/full \? pub : lockBroadRow\(pub\)/.test(fn), '宽基读数按完整权限裁剪');
   });
 });

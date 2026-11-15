@@ -349,6 +349,15 @@ export class InvestFollowService {
         trial_pending: !trialDate,
         market: {
           ...market,
+          // 免费版只给区间，具体价格与买卖线是会员/体验期内才有（2026-11-15 owner）
+          legs: (market.legs || []).map((l: any) => ({
+            ...l,
+            close: null,
+            median: null,
+            buy_line: null,
+            sell_line: null,
+          })),
+          legs_locked: true,
           today: execOpen
             ? market.today.map(s => this.sigTeaser(s))
             : market.today.map(s => this.sigPublic(s)),

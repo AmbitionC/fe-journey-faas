@@ -251,7 +251,8 @@ export class InvestInsightService {
     }
   }
 
-  async fearLatest() {
+  /** intraday=false（免费版，2026-11-15）：盘中近似值不下发，只给最近收盘值，并标 intraday_locked。 */
+  async fearLatest(intraday = true) {
     const row = await this.db.one(
       'SELECT trade_date, score, level, components, raw FROM fear_daily ORDER BY trade_date DESC LIMIT 1');
     if (!row) return null;
@@ -265,6 +266,7 @@ export class InvestInsightService {
         'SELECT trade_date, snapshot_ts, score, level, components, raw FROM fear_intraday ' +
         'ORDER BY trade_date DESC, snapshot_ts DESC LIMIT 1');
       if (intra && String(intra.trade_date) > String(daily.trade_date)) {
+        if (!intraday) return { ...daily, intraday_locked: true };
         return {
           ...intra,
           components: parseJson(intra.components),

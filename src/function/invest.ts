@@ -13,6 +13,7 @@ import { InvestPlanService } from '../service/invest/plan';
 import { InvestInsightService } from '../service/invest/insight';
 import { InvestFollowService } from '../service/invest/follow';
 import { InvestMarketDataService } from '../service/invest/marketData';
+import { InvestAccessService, lockBroadRow, type InvestAccess } from '../service/invest/access';
 import { EntitlementService } from '../service/entitlement';
 import { acceptsGzip } from '../common/datasetBody';
 
@@ -44,6 +45,19 @@ export class InvestHTTPService {
   @Inject()
   entitlementService: EntitlementService;
 
+  @Inject()
+  accessService: InvestAccessService;
+
+  /** 完整权限（会员或 7 天体验期内）；读失败按免费版处理，不放大权限。 */
+  private async access(): Promise<InvestAccess> {
+    const uid = String(this.ctx?.userInfo?.userId || '');
+    try {
+      return await this.accessService.state(uid);
+    } catch {
+      return { member: false, full: false, trial_until: null, trial_days_left: 0 };
+    }
+  }
+
   /**
    * 会员判定（跟车/操作提醒的付费边界）：一律走权益网关（单一会员档）。
    * 2026-11-03 owner：管理员不再「视为会员」——自己的账号也开真实会员（/mcp/admin/member/grant），
@@ -55,7 +69,11 @@ export class InvestHTTPService {
     try {
       const isMember = await this.entitlementService.isMember(uid);
       const until = isMember ? await this.entitlementService.currentExpiry(uid) : null;
-      return { uid, isMember, until };
+      if (isMember) return { uid, isMember, until };
+      // 7 天完整体验期内按会员口径（2026-11-15 owner）：跟车明细、订阅邮件都与会员一致；
+      // until 留空＝不回写档案 member_until，体验到期后自然回到免费版。
+      const acc = await this.accessService.state(uid);
+      return { uid, isMember: acc.full, until: null };
     } catch {
       return { uid, isMember: false, until: null };
     }
@@ -194,7 +212,19 @@ export class InvestHTTPService {
     method: 'get',
   })
   async fearLatest() {
-    return { success: true, data: await this.insightService.fearLatest() };
+    const { full } = await this.access();
+    return { success: true, data: await this.insightService.fearLatest(full) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '投资站权限：会员 / 7 天完整体验 / 免费版',
+    functionName: 'investAccess',
+    name: 'investAccess',
+    path: '/invest/access',
+    method: 'get',
+  })
+  async accessInfo() {
+    return { success: true, data: await this.access() };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -220,9 +250,12 @@ export class InvestHTTPService {
     // 只出市场级读数：owner 的实盘账本与持仓字段对谁都不出接口（2026-11-04 起管理员同普通用户）
     if (data) {
       data.ledger = [];
+      // 免费版（非会员且体验期已过）只给每个指数所处区间，具体买卖线/中枢/价格不下发（2026-11-15 owner）
+      const { full } = await this.access();
+      (data as any).locked = !full;
       data.latest = (data.latest || []).map((r: any) => {
         const { shares, mkt_value, cost_price, ...pub } = r;
-        return pub;
+        return full ? pub : lockBroadRow(pub);
       });
     }
     return { success: true, data };

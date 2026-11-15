@@ -133,6 +133,7 @@ export class AuthMiddleware implements IMiddleware<any, NextFunction> {
           path === '/invest/leverage' ||
           path === '/invest/alerts/feed' ||     // 对外预警流（≠ /invest/alerts 个人盯盘，已下线）
           path === '/invest/macro' ||           // 宏观读数（市场级公开数据）
+          path === '/invest/access' ||          // 自己的权限状态（会员/体验期，2026-11-15）
           path.startsWith('/invest/fear'));
       // 预警订阅设置：登录用户读写自己的（handler 只认 ctx.userInfo，不信任入参）
       // 注意 path 已 toLowerCase，字面量必须全小写（alertPref → alertpref）
