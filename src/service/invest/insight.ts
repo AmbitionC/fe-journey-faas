@@ -382,10 +382,11 @@ export class InvestInsightService {
   /** 对外预警流（alert_outbox，市场级——投顾/个人预警物理不入该表）。登录即可读。 */
   async alertFeed(limit = 50, isMember = true) {
     try {
-      // signal（跟车操作提醒）是会员权益：非会员的预警流里不出现（邮件分发器同口径只投会员）
+      // signal（跟车操作提醒）与 index_signal（其他指数买卖点，2026-11-15）是会员权益：
+      // 非会员的预警流里不出现（邮件分发器同口径只投会员）
       const rows = await this.db.q(
         'SELECT alert_key, topic, title, body, trade_date, created_at FROM alert_outbox ' +
-          (isMember ? '' : "WHERE topic <> 'signal' ") +
+          (isMember ? '' : "WHERE topic NOT IN ('signal', 'index_signal') ") +
           'ORDER BY created_at DESC LIMIT ?',
         [Math.min(Number(limit) || 50, 200)]
       );

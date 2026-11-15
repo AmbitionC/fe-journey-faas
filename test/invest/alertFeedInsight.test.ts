@@ -23,7 +23,7 @@ describe('预警流：每日市场观察只给会员看正文', () => {
     assert.strictEqual(ins.body, '');
     assert.strictEqual(ins.locked, true);
     assert.strictEqual(out.rows.find((r: any) => r.topic === 'daily').body, '播报');
-    assert.match(seen[0], /topic <> 'signal'/);
+    assert.match(seen[0], /topic NOT IN \('signal', 'index_signal'\)/);
   });
 
   it('会员：全文可见', async () => {
