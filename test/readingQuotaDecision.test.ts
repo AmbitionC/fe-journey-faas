@@ -3,7 +3,7 @@ import { beijingDate, decideReading, QUOTA_MODULES, READING_QUOTA } from '../src
 
 describe('非会员阅读额度判定', () => {
   it('额度是游客 3、登录 5（owner 2026-11-03 定）', () => {
-    assert.deepStrictEqual({ ...READING_QUOTA }, { guest: 3, login: 5 });
+    assert.deepStrictEqual({ ...READING_QUOTA }, { guest: 2, login: 3 });
   });
   it('面经、知识点、算法题、央国企备考库、考公选岗指南各自计数（owner 2026-11-03 算法题也纳入）', () => {
     assert.deepStrictEqual([...QUOTA_MODULES], ['interview', 'knowledge', 'algorithm', 'soe', 'civil']);

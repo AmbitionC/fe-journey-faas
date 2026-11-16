@@ -2,13 +2,14 @@
  * 非会员阅读额度（owner 2026-11-03 定，同日改为**每天**）：会员不限；非会员面经、知识点、算法题**每个模块各自**
  * 每天能新看固定篇（道）数，北京时间零点重置；以前看过的随时能重看、不占当天额度。
  *   算法题（module=algorithm，articleKey=题目 slug）只记浏览日志、不建 article 行。
- *   - 游客每天 3 篇：前端本机计数（front-end-journey `utils/readingQuota.ts`），到额提示登录；
- *   - 登录非会员每天 5 篇：这里按 article_view_log（fingerprint=userId）判定——某篇第一次被看的日期是今天才算今天的额度，到额提示开会员。
- * 看过的文章随时可以重看，不再占额度。改篇数只改这里与前端 GUEST_QUOTA。
+ *   - 游客每天 2 篇：前端本机计数（front-end-journey `utils/readingQuota.ts`），到额提示登录；
+ *   - 登录非会员每天 3 篇：这里按 article_view_log（fingerprint=userId）判定——某篇第一次被看的日期是今天才算今天的额度，到额提示开会员。
+ * 看过的文章随时可以重看，不再占额度。改篇数只改这里与前端 GUEST_QUOTA / LOGIN_QUOTA。
+ * 2026-11-16 owner 同意收紧（游客 3→2、登录 5→3）：近 12 天 163 位读者只有 2 人用完 5 篇，付费墙几乎碰不到人。
  */
 export const READING_QUOTA = Object.freeze({
-  guest: 3,
-  login: 5,
+  guest: 2,
+  login: 3,
 });
 
 /** 受额度约束的模块；其余模块（项目文章等）不拦。 */
