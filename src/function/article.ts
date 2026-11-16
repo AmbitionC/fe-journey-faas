@@ -193,7 +193,7 @@ export class ArticleHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
-    description: '非会员阅读额度：能否打开这篇正文（登录非会员每模块每天 5 篇）',
+    description: '非会员阅读额度：能否打开这篇正文（登录非会员每模块每天 3 篇）',
     functionName: 'articleAccess',
     name: 'articleAccess',
     path: '/article/access',
