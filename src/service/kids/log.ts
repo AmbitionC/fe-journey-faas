@@ -1,6 +1,6 @@
 /**
  * 栗栗学英语阅读器的播放问题日志：网页上 play() 被拒、音频出错、卡住时上报一条。
- * 只留白名单字段（事件名、浏览器标识、页面路径、书号、页码、错误名），不存个人信息；
+ * 只留白名单字段（事件名、浏览器标识、页面路径、书号、页码、错误名），不存个人信息，也不存 IP；
  * 存 Redis 列表，最多留最近 2000 条。
  */
 export const KIDS_LOG_KEY = 'kids:log';
@@ -20,7 +20,6 @@ export interface KidsLogEntry {
   paused?: boolean;
   rs?: number;
   t: number;
-  ip?: string;
 }
 
 const str = (v: unknown, n: number) =>

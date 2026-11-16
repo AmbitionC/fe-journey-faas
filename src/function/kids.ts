@@ -204,10 +204,8 @@ export class KidsHTTPService {
     const entry = sanitizeKidsLog(raw);
     if (!entry) throw R.validateError('格式不对');
     try {
-      await this.redisService.lpush(
-        KIDS_LOG_KEY,
-        JSON.stringify({ ...entry, ip: ip.replace(/\.\d+$/, '.x') })
-      );
+      // 日志里不存 IP（IPv4、IPv6 都不存）；IP 只用在 10 分钟过期的限流 key 里
+      await this.redisService.lpush(KIDS_LOG_KEY, JSON.stringify(entry));
       await this.redisService.ltrim(KIDS_LOG_KEY, 0, KIDS_LOG_MAX - 1);
     } catch {
       // 日志写不进去不影响读书

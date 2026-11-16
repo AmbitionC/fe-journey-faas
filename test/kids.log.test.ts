@@ -31,6 +31,7 @@ describe('栗栗学英语 播放问题日志', () => {
     await svc.kidsLog({ ev: 'stall', ua: 'x', path: '/read/ort-l1-13' });
     assert.strictEqual(list.length, 1);
     assert.strictEqual(JSON.parse(list[0]).ev, 'stall');
+    assert.strictEqual('ip' in JSON.parse(list[0]), false);
     n = 60;
     await svc.kidsLog({ ev: 'stall', ua: 'x', path: '/' });
     assert.strictEqual(list.length, 1);
@@ -41,5 +42,16 @@ describe('栗栗学英语 播放问题日志', () => {
     (svc as any).ctx = { header: {}, headers: {} };
     (svc as any).redisService = { get: async () => null, lrange: async () => [] };
     await assert.rejects(() => svc.kidsLogList('10'));
+  });
+
+  it('IPv6 也不存进日志', async () => {
+    const svc = new KidsHTTPService();
+    const list: string[] = [];
+    const ip6 = '240e:3a1:4c2:8d10:1d2e:3f4a:5b6c:7d8e';
+    (svc as any).ctx = { header: { 'x-forwarded-for': ip6 }, headers: { 'x-forwarded-for': ip6 }, ip: ip6 };
+    (svc as any).redisService = { incr: async () => 1, expire: async () => 1, lpush: async (_k: string, v: string) => list.unshift(v), ltrim: async () => 'OK' };
+    await svc.kidsLog({ ev: 'play_rejected', ua: 'iPhone', path: '/read/ort-l1-13' });
+    assert.strictEqual(list.length, 1);
+    assert.strictEqual(list[0].includes('240e'), false);
   });
 });
