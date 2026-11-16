@@ -1,5 +1,5 @@
 /**
- * 备考库做题记录（央国企 soe / 考公 civil）：文章内练习、整卷模考、错题本的校验与合并。
+ * 做题记录（央国企 soe / 考公 civil / Agent 知识库 knowledge）：文章内练习、整卷模考、错题本的校验与合并。
  *
  * 数据小（一个赛道一两百道题），存 Redis，不建表：库表改动要手动迁移（synchronize 已关）。
  * 合并规则和前端 src/components/Practice/practiceSync.ts 保持一致，改一边要改另一边：
@@ -8,7 +8,7 @@
  * - 错题本：同一题取 updatedAt 新的；移出的题留一条 removedAt 记录，免得另一台设备又把它带回来。
  */
 
-export const PRACTICE_MODULES = ['soe', 'civil'];
+export const PRACTICE_MODULES = ['soe', 'civil', 'knowledge'];
 
 export interface PracticeAnswer {
   choice: string;
