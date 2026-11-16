@@ -10,7 +10,12 @@ import {
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
 import { R } from '../common/base.error.utils';
-import { resolveUserInfo } from '../common/admin.guard';
+import { assertAdmin, resolveUserInfo } from '../common/admin.guard';
+import {
+  KIDS_LOG_KEY,
+  KIDS_LOG_MAX,
+  sanitizeKidsLog,
+} from '../service/kids/log';
 import {
   KidsProgress,
   KidsReading,
@@ -171,6 +176,64 @@ export class KidsHTTPService {
       return;
     }
     if (n > ORT_RATE.limit) throw R.validateError('请求太频繁，稍后再试');
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '栗栗学英语：阅读器播放问题上报（不用登录，按 IP 限流）',
+    functionName: 'kidsLog',
+    name: 'kidsLog',
+    path: '/kids/log',
+    method: 'post',
+  })
+  async kidsLog(@Body(ALL) body: unknown) {
+    const ip = clientIpFromCtx(this.ctx) || '';
+    if (ip) {
+      const key = `kids:log:rate:${Math.floor(Date.now() / 600000)}:${ip}`;
+      try {
+        const n = await this.redisService.incr(key);
+        if (n === 1) await this.redisService.expire(key, 600);
+        if (n > 60) return { success: true };
+      } catch {
+        return { success: true };
+      }
+    }
+    const raw =
+      typeof body === 'object' && body && Object.keys(body).length
+        ? body
+        : (this.ctx as any).request?.rawBody ?? body;
+    const entry = sanitizeKidsLog(raw);
+    if (!entry) throw R.validateError('格式不对');
+    try {
+      // 日志里不存 IP（IPv4、IPv6 都不存）；IP 只用在 10 分钟过期的限流 key 里
+      await this.redisService.lpush(KIDS_LOG_KEY, JSON.stringify(entry));
+      await this.redisService.ltrim(KIDS_LOG_KEY, 0, KIDS_LOG_MAX - 1);
+    } catch {
+      // 日志写不进去不影响读书
+    }
+    return { success: true };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '栗栗学英语：看最近的播放问题日志（管理员）',
+    functionName: 'kidsLogList',
+    name: 'kidsLogList',
+    path: '/kids/log',
+    method: 'get',
+  })
+  async kidsLogList(@Query('limit') limit: string) {
+    await assertAdmin(this.ctx, this.redisService);
+    const n = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+    const rows = await this.redisService.lrange(KIDS_LOG_KEY, 0, n - 1);
+    return {
+      success: true,
+      data: rows.map(r => {
+        try {
+          return JSON.parse(r);
+        } catch {
+          return null;
+        }
+      }),
+    };
   }
 
   /** 按账号限流：Redis 出问题时放行 */
