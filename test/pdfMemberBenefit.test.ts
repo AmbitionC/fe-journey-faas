@@ -36,7 +36,7 @@ describe('知识点 PDF 并入会员权益', () => {
     assert.strictEqual(r.membership.freeClaimUntil, null);
     const month = r.membership.plans.find((p: any) => p.sku === 'member_month');
     assert.strictEqual(month.listPrice, 29);
-    assert.strictEqual(month.price, 14.5);
+    assert.strictEqual(month.price, 19.9);
     assert.strictEqual(month.purchasable, true);
     assert.ok(!/收款码|我已支付|单次购买/.test(JSON.stringify(r)));
     assert.ok(!/https?:\/\//.test(JSON.stringify(r)));
