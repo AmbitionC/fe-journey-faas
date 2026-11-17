@@ -115,13 +115,17 @@ export function pricing(
       months: s.months || null,
       points: s.points,
       // 当前阶段的售价（只有 2026-10-31 公测免费那一天为 0 且不开放购买）
-      price: phasePrice(s, phase.id) / 100,
+      price: phasePrice(s, phase.id, product) / 100,
       listPrice: s.listCents / 100,
-      halfPrice: phasePrice(s, 'half') / 100,
+      halfPrice: phasePrice(s, 'half', product) / 100,
       purchasable:
         phase.id !== 'free' &&
-        !soldOut(phasePrice(s, phase.id), alipay, alipayMaxCents),
-      soldOut: soldOut(phasePrice(s, phase.id), alipay, alipayMaxCents),
+        !soldOut(phasePrice(s, phase.id, product), alipay, alipayMaxCents),
+      soldOut: soldOut(
+        phasePrice(s, phase.id, product),
+        alipay,
+        alipayMaxCents
+      ),
       desc: s.desc,
     })),
     toolCost: toolCostFor(product),
@@ -131,6 +135,34 @@ export function pricing(
     iris: irisPricing(),
     referral: referralPricing(),
   };
+}
+
+/**
+ * Agent Journey 累计开通会员人数 = 历史基线 + 线上真实开通人数。
+ * 基线（owner 2026-11-17）：该产品早期版本（接入现支付链路之前）的历史成交约 5120 单，作为起点累加；
+ * 线上部分实时来自订单表（paidMemberCount），不做任何虚增或随机波动。页面只能写「累计」口径，
+ * 不能包装成实时动态（如「某某刚刚开通」）。查询失败返回 null，页面就不展示这块。
+ */
+export const AGENT_PAID_BASELINE = 5120;
+const SOCIAL_PROOF_TTL_MS = 10 * 60 * 1000;
+let socialProofCache: { at: number; online: number } | null = null;
+
+export function resetSocialProofCache() {
+  socialProofCache = null;
+}
+
+async function agentSocialProof(rt: McpRuntime, now: Date) {
+  const t = now.getTime();
+  if (!socialProofCache || t - socialProofCache.at > SOCIAL_PROOF_TTL_MS) {
+    const billing: any = rt.billing;
+    if (typeof billing?.paidMemberCount !== 'function') return null;
+    try {
+      socialProofCache = { at: t, online: await billing.paidMemberCount() };
+    } catch {
+      return null;
+    }
+  }
+  return { paidMembers: AGENT_PAID_BASELINE + socialProofCache.online };
 }
 
 function orderView(o: any) {
@@ -187,7 +219,12 @@ async function fulfillTracked(rt: McpRuntime, orderNo: string, actor: string) {
         await track(rt, {
           event: 'referral_member',
           userId: bonus.inviter,
-          props: { invitee: String(o.user_id), points: bonus.points, days: bonus.days, orderNo },
+          props: {
+            invitee: String(o.user_id),
+            points: bonus.points,
+            days: bonus.days,
+            orderNo,
+          },
         });
       }
     }
@@ -351,14 +388,14 @@ export async function handleSelfServe(
   const now = rt.now ? rt.now() : new Date();
   if (path === '/mcp/pricing' && method === 'GET') {
     const p = url.searchParams.get('product');
+    const product = isProduct(p) ? p : null;
     return send(res, 200, {
       success: true,
-      data: pricing(
-        now,
-        !!rt.alipay,
-        rt.alipay?.maxCents || 0,
-        isProduct(p) ? p : null
-      ),
+      data: {
+        ...pricing(now, !!rt.alipay, rt.alipay?.maxCents || 0, product),
+        socialProof:
+          product === 'agent' ? await agentSocialProof(rt, now) : null,
+      },
     });
   }
 
@@ -496,14 +533,15 @@ export async function handleSelfServe(
         });
       const act = await rt.billing.activate(userId); // 下单即视为开通
       await trackActivation(rt, userId, !!act?.created, 'order');
-      const amount = phasePrice(sku, phase.id);
+      // 售价按下单站点算（Agent Journey 月卡单独定价），与 /mcp/pricing?product= 展示的一致
+      const site = siteParam(data);
+      const amount = phasePrice(sku, phase.id, site);
       if (soldOut(amount, !!rt.alipay, rt.alipay?.maxCents || 0))
         return send(res, 400, {
           success: false,
           code: 'sold_out',
           message: SOLD_OUT_MESSAGE,
         });
-      const site = siteParam(data);
       const entry = sanitizeEntry(data.entry);
       const o = await rt.billing.createOrder(userId, sku, amount);
       await track(rt, {

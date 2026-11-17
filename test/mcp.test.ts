@@ -6,7 +6,8 @@ import { METHODOLOGY } from '../src/mcp/methodology';
 import { handleMcpHttp, McpRuntime } from '../src/mcp/http';
 import { fakeAlipayCfg } from './fakeAlipay';
 import { McpStore, extractKey, hashKey, generateKey, beijingYmd, ApiKeyRow } from '../src/mcp/store';
-import { PRODUCT_TOOLS } from '../src/mcp/billing';
+import { PRODUCT_TOOLS, phasePrice, findSku } from '../src/mcp/billing';
+import { resetSocialProofCache } from '../src/mcp/selfServe';
 
 const call = (name: string, args: any = {}, id: any = 1) => ({
   jsonrpc: '2.0',
@@ -720,6 +721,32 @@ describe('MCP HTTP 适配', () => {
       }
     });
 
+    it('Agent Journey 月卡单独定价 ¥19.9（原价 ¥29 照常展示），Invest 月卡不受影响；下单金额与展示一致', async () => {
+      const ag = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=agent', method: 'GET' });
+      const inv = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=invest', method: 'GET' });
+      const m = (d: any) => d.json.data.skus.find((x: any) => x.sku === 'member_month');
+      assert.deepStrictEqual([m(ag).price, m(ag).listPrice], [19.9, 29]);
+      assert.strictEqual(m(inv).price, 14.5);
+      // 通行证仍是阶段价
+      assert.strictEqual(ag.json.data.skus.find((x: any) => x.sku === 'member_pass').price, 49);
+      assert.strictEqual(phasePrice(findSku('member_month')!, 'full', 'agent'), 1990);
+      assert.strictEqual(phasePrice(findSku('member_month')!, 'free', 'agent'), 0);
+      assert.strictEqual(phasePrice(findSku('member_month')!, 'half'), 1450);
+    });
+
+    it('Agent 价目带累计开通人数 = 历史基线 5120 + 线上真实开通；取数失败不展示，其他产品不给', async () => {
+      resetSocialProofCache();
+      const ok = fakeRuntime({ now: NOV, billing: { ...fakeBilling(), paidMemberCount: async () => 3 } as any }).rt;
+      const r = await run(ok, { path: '/mcp/pricing?product=agent', method: 'GET' });
+      assert.deepStrictEqual(r.json.data.socialProof, { paidMembers: 5123 });
+      const inv = await run(ok, { path: '/mcp/pricing?product=invest', method: 'GET' });
+      assert.strictEqual(inv.json.data.socialProof, null);
+      resetSocialProofCache();
+      const bad = fakeRuntime({ now: NOV, billing: { ...fakeBilling(), paidMemberCount: async () => { throw new Error('db'); } } as any }).rt;
+      assert.strictEqual((await run(bad, { path: '/mcp/pricing?product=agent', method: 'GET' })).json.data.socialProof, null);
+      resetSocialProofCache();
+    });
+
     it('价目按产品过滤：?product=invest 只给 Invest 的工具与 Invest 站的充值链接；不传给全部', async () => {
       const all = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing', method: 'GET' });
       const inv = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=invest', method: 'GET' });
@@ -747,7 +774,8 @@ describe('MCP HTTP 适配', () => {
       novRt.alipay = fakeAlipayCfg;
       const nov = await run(novRt, { path: '/mcp/me/orders', body: { sku: 'member_month' } });
       assert.strictEqual(nov.status, 200);
-      assert.strictEqual(nov.json.data.amount, 14.5);
+      // 不带 site 的老前端按 Agent Journey 算：月卡 ¥19.9
+      assert.strictEqual(nov.json.data.amount, 19.9);
     });
 
     it('下单返回支付宝链接与备注码、不再带微信收款码，金额为半价；未知商品 400', async () => {
@@ -763,7 +791,12 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(ok.json.data.payCode, 'DEF12'.padStart(6, 'C'));
       assert.ok(ok.json.data.alipayUrl.includes('alipay.trade.page.pay'));
       assert.strictEqual(ok.json.data.qr, undefined);
-      assert.strictEqual(ok.json.data.amount, 14.5);
+      // Agent Journey 月卡 ¥19.9，支付宝收银台金额与订单一致
+      assert.strictEqual(ok.json.data.amount, 19.9);
+      assert.ok(decodeURIComponent(ok.json.data.alipayUrl).includes('"total_amount":"19.90"'), ok.json.data.alipayUrl);
+      // Invest 站下单仍是阶段价
+      const inv = await run(rt, { path: '/mcp/me/orders', body: { sku: 'member_month', site: 'invest' } });
+      assert.strictEqual(inv.json.data.amount, 14.5);
     });
 
     it('Key 数量受档位限制', async () => {

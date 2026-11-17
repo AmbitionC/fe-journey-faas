@@ -265,6 +265,10 @@ describe('付费用户视图（真 MySQL）', function () {
 
     const d: any = await a.paidUsage(30);
     assert.strictEqual(d.payers, 1);
+    // 会员页「累计开通」的线上部分：同一口径排除管理员（含手机号即账户 id 的管理员）；加油包不算开通
+    const pk = await billing.createOrder('F', { sku: 'pack_100', listCents: 1000, kind: 'pack', points: 100 } as any, 500);
+    await billing.fulfill(pk.order_no, 'alipay:T');
+    assert.strictEqual(await billing.paidMemberCount(), 1);
     const p = d.users[0];
     assert.deepStrictEqual(
       [p.userId, p.phone, p.member, p.monthly, p.calls, p.failed, p.skillPts, p.irisPts, p.usedCycle, p.quotaHits, p.connected],

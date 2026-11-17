@@ -190,7 +190,7 @@ describe('MCP 埋点：后端节点', () => {
     const names = events.map(e => e.event);
     assert.deepStrictEqual(names.slice(0, 3), ['account_activated', 'trial_granted', 'key_created']);
     const o = events.find(e => e.event === 'order_created')!;
-    assert.deepStrictEqual([o.props!.sku, o.props!.amountCents, o.props!.listCents, o.props!.phase], ['member_month', 1450, 2900, 'half']);
+    assert.deepStrictEqual([o.props!.sku, o.props!.amountCents, o.props!.listCents, o.props!.phase], ['member_month', 1990, 2900, 'half']);
   });
 
   it('POST /mcp/track 回 204 并带上登录用户', async () => {

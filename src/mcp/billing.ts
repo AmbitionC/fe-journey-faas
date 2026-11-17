@@ -20,7 +20,7 @@ import { SITES, rechargeLink } from './sites';
 
 /**
  * 档位只有「体验」和「会员」两档（owner 2026-10-31：产品能力还没到能分级的程度，不分入门 / Pro）。
- * 会员原价 ¥29/月（owner 定，卖点「一天不到一块钱」），年卡 ¥239。
+ * 会员原价 ¥29/月（owner 定，卖点「一天不到一块钱」），年卡 ¥239；2026-11-17 起 Agent Journey 月卡售价 ¥19.9（productCents）。
  * 'starter' / 'pro' 是 2026-10-30 版的旧档位名，库里若有存量账户按会员处理（effectiveTier）。
  */
 export type Tier = 'free' | 'member';
@@ -79,6 +79,11 @@ export interface Sku {
    * 会员档位本身各产品通用，这里只管「哪个站把它摆出来卖」。
    */
   products?: Product[];
+  /**
+   * 按产品单独定的售价（分），收费阶段（半价 / 正式价）都按它卖，覆盖阶段折扣；公测免费那天仍为 0。
+   * owner 2026-11-17：Agent Journey 会员月卡定 ¥19.9（原价 ¥29 照常展示作锚点）；Invest 不在本次范围，价不动。
+   */
+  productCents?: Partial<Record<Product, number>>;
 }
 
 export const SKUS: Sku[] = [
@@ -90,6 +95,7 @@ export const SKUS: Sku[] = [
     months: 1,
     points: MEMBER_MONTHLY_POINTS,
     listCents: 2900,
+    productCents: { agent: 1990 },
     desc: `一天不到一块钱 · 每月 ${MEMBER_MONTHLY_POINTS} 点 · ${TIERS.member.maxKeys} 个 Key · 每日 ${TIERS.member.dailyLimit} 次`,
   },
   {
@@ -168,9 +174,9 @@ export const PRICING_PHASES: PricingPhase[] = [
   },
   {
     id: 'half',
-    name: '早期用户半价',
+    name: '早期用户优惠价',
     from: '2026-11-01',
-    note: `新用户开通即送 ${TRIAL_POINTS} 点体验额度（${TRIAL_DAYS} 天内有效），用完或到期后开通会员或购买加油包继续使用；早期用户半价，已购会员在有效期内不受后续调价影响。`,
+    note: `新用户开通即送 ${TRIAL_POINTS} 点体验额度（${TRIAL_DAYS} 天内有效），用完或到期后开通会员或购买加油包继续使用；早期用户享优惠价，已购会员在有效期内不受后续调价影响。`,
   },
   {
     id: 'full',
@@ -210,12 +216,15 @@ export function skusFor(product?: Product | null): Sku[] {
   );
 }
 
-/** 某阶段下的售价（分）。 */
+/** 某阶段下的售价（分）。传了产品且该产品单独定价的，按单独定价。 */
 export function phasePrice(
-  sku: Pick<Sku, 'listCents'>,
-  phase: PhaseId
+  sku: Pick<Sku, 'listCents'> & Pick<Partial<Sku>, 'productCents'>,
+  phase: PhaseId,
+  product?: Product | null
 ): number {
   if (phase === 'free') return 0;
+  const fixed = product ? sku.productCents?.[product] : undefined;
+  if (typeof fixed === 'number') return fixed;
   if (phase === 'half') return Math.round(sku.listCents / 2);
   return sku.listCents;
 }
@@ -269,7 +278,7 @@ export function creditExhaustedMessage(
   const opt = (id: string, label: (s: Sku, p: string) => string) => {
     const s = SKUS.find(x => x.sku === id);
     if (!s) return '';
-    const p = phasePrice(s, phase.id);
+    const p = phasePrice(s, phase.id, product);
     const was = p < s.listCents ? `（原价 ${yuan(s.listCents)}）` : '';
     return label(s, yuan(p) + was);
   };
@@ -281,7 +290,10 @@ export function creditExhaustedMessage(
     .join('；');
   return (
     `Journey 点数不足：本次调用需要 ${cost} 点，账户剩余 ${balance} 点（体验额度已用完或已到期）。` +
-    `请到 ${rechargeLink('credit_exhausted', product)} 充值后继续使用：${options}。` +
+    `请到 ${rechargeLink(
+      'credit_exhausted',
+      product
+    )} 充值后继续使用：${options}。` +
     '充值到账后直接重试即可，Key 不用换。'
   );
 }
@@ -960,6 +972,21 @@ export class BillingStore {
       `SELECT order_no, user_id, sku, amount_cents, status, created_at, reported_at, paid_at, handled_by, note FROM mcp_order ${w} ORDER BY id DESC LIMIT ?`,
       status ? [status, Math.min(500, limit)] : [Math.min(500, limit)]
     );
+  }
+
+  /**
+   * 线上真实开通过会员的人数：有过已付款会员订单（不含加油包、支付宝测试单）的去重用户，排除管理员。
+   * 口径与 paidUsage 一致（账户 id 可能是 user.id 也可能是手机号）。会员页「累计 X 人已开通」用它加历史基线。
+   */
+  async paidMemberCount(): Promise<number> {
+    await this.ensureSchema();
+    const rows = await this.q(
+      'SELECT COUNT(DISTINCT m.user_id) n FROM mcp_order m ' +
+        'LEFT JOIN `user` u ON (u.id = m.user_id OR u.phoneNumber = m.user_id) ' +
+        "WHERE m.status = 'paid' AND m.sku <> 'pay_test' AND m.sku NOT LIKE 'pack%' " +
+        "AND (u.role IS NULL OR u.role <> 'admin')"
+    );
+    return Number(rows?.[0]?.n) || 0;
   }
 
   /** 经营看板：用户、收入、调用、点数消耗。 */
