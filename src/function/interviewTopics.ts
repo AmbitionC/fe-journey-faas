@@ -21,6 +21,10 @@ import {
   sanitizeLabel,
   sheetSignature,
 } from '../common/interviewTopics';
+import {
+  interviewsAskingKnowledge,
+  knowledgeInInterview,
+} from '../common/relatedReading';
 
 /** 未开通会员每月可导出的题单份数（同一批面经重复打开不再扣）。 */
 const FREE_SHEETS_PER_MONTH = 1;
@@ -93,6 +97,41 @@ export class InterviewTopicsHTTPService {
         unlocked,
         needsLogin: !userId,
         freeLimit: FREE_TOPIC_LIMIT,
+      },
+    };
+  }
+
+  /**
+   * 文末「接着看」：知识点 → 问过它的面经；面经 → 它考到的知识点。公开接口，不含答案。
+   */
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '文末接着看：按考点关联知识点与面经',
+    functionName: 'interviewRelated',
+    name: 'interviewRelated',
+    path: '/interview/related',
+    method: 'get',
+  })
+  @NoAuth()
+  async related() {
+    const query = (this.ctx.query || {}) as Record<string, unknown>;
+    const module = String(query.module || '');
+    const [key] = sanitizeKeys([String(query.key || '')]);
+    if (!key || (module !== 'knowledge' && module !== 'interview')) {
+      return { success: true, data: { total: 0, interviews: [], knowledge: [] } };
+    }
+    const { index, knowledge, careerKeys } = await this.questionIndex.load();
+    if (module === 'knowledge') {
+      const { total, items } = interviewsAskingKnowledge(index, key);
+      return { success: true, data: { total, interviews: items, knowledge: [] } };
+    }
+    const article = index.find(a => a.articleKey === key);
+    return {
+      success: true,
+      data: {
+        total: 0,
+        interviews: [],
+        knowledge: knowledgeInInterview(index, key, knowledge, careerKeys),
+        company: article?.company || '',
       },
     };
   }

@@ -1,0 +1,31 @@
+name: weekly-digest
+
+# 每周学习提醒邮件（2026-11-17 站内营销第一批）：给在网站上订阅了提醒的用户发
+# 「这周该复习的知识点 + 周报」，正文带一键退订。发送逻辑在 service/notify，
+# 这里只按时调一次 /notify/cron/run（带 SYNC_SECRET）。
+# 每周一北京时间 09:00；也可手动触发核对。
+
+on:
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 触发发送
+        env:
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+          API_BASE: https://fe-journey-main-ktantdfjcs.cn-hangzhou.fcapp.run
+        run: |
+          set -euo pipefail
+          if [ -z "$SYNC_SECRET" ]; then echo "缺少 SYNC_SECRET"; exit 1; fi
+          body=$(curl -sS --max-time 300 -X POST -G "$API_BASE/notify/cron/run" \
+            --data-urlencode "secret=$SYNC_SECRET")
+          echo "$body"
+          echo "$body" | grep -q '"success":true'

@@ -12,6 +12,7 @@ import { RedisService } from '@midwayjs/redis';
 import { Config } from '@midwayjs/core';
 import { NotifyService } from '../service/notify';
 import { NoAuth } from '../decorator/noAuth';
+import { verifyUnsubscribe } from '../common/digestMail';
 
 class SubscribeDTO {
   channel: string;
@@ -85,6 +86,25 @@ export class NotifyHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '邮件里的一键退订（带签名，不需要登录）',
+    functionName: 'notifyUnsubscribeLink',
+    name: 'notifyUnsubscribeLink',
+    path: '/notify/unsubscribe/link',
+    method: 'get',
+  })
+  @NoAuth()
+  async unsubscribeLink(@Query(ALL) query: { u?: string; s?: string }) {
+    const userId = String(query.u || '');
+    this.ctx.type = 'text/html; charset=utf-8';
+    if (!verifyUnsubscribe(this.syncSecret, userId, String(query.s || ''))) {
+      this.ctx.status = 400;
+      return '<meta charset="utf-8"><p>退订链接无效。可以登录 Agent Journey 后在个人中心关闭提醒。</p>';
+    }
+    await this.notifyService.unsubscribe(userId, 'email');
+    return '<meta charset="utf-8"><p>已退订，之后不会再收到 Agent Journey 的学习提醒邮件。</p>';
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '订阅状态',
     functionName: 'notifyStatus',
     name: 'notifyStatus',
@@ -113,7 +133,7 @@ export class NotifyHTTPService {
       this.ctx.status = 403;
       return { success: false, message: 'forbidden' };
     }
-    const data = await this.notifyService.runDigestCron();
+    const data = await this.notifyService.runDigestCron(200, this.syncSecret);
     return { success: true, data };
   }
 
