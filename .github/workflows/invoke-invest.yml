@@ -19,6 +19,7 @@ on:
           - daily_update_plan
           - weekly_rebuild_review
           - alert_selftest
+          - kick_index_universe
   # 无 Actions 写权限的集成（如 Claude 会话）用 push 触发：
   # 把 job 名写进 ops/invoke.trigger 第一行后 push master 即可
   push:
@@ -85,7 +86,7 @@ jobs:
             JOB="$(head -1 ops/invoke.trigger | tr -d ' \r\n')"
           fi
           case "$JOB" in
-            live_watch|snapshot_remind|ingest_etf|daily_update_plan|weekly_rebuild_review|alert_selftest) ;;
+            live_watch|snapshot_remind|ingest_etf|daily_update_plan|weekly_rebuild_review|alert_selftest|kick_index_universe) ;;
             *) echo "未知 job: $JOB"; exit 1 ;;
           esac
           # live_watch 跑在盯盘专用函数上，其余在 invest-scheduler

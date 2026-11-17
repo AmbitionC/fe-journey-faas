@@ -372,6 +372,19 @@ resources:
             cronExpression: '0 30 10 ? * MON-FRI'  # 北京 18:30 计划兜底哨兵②（双保险；已有计划则毫秒退出）
             enable: true
             payload: 'plan_watchdog'
+        - triggerName: index-universe-kick
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            # 北京 21:40 准点触发常见指数日更：写 invest-model 的 ops/index-universe.trigger，
+            # GitHub Actions 一两分钟内起跑（拉 41 个指数日线 + 算买卖点与位置提醒）。
+            # 原先只靠 Actions 定时，首个例行班次实测晚到 9 小时 21 分（2026-11-17），
+            # 再晚两个多小时就赶不上 09:00 那轮提醒分发；Actions 定时保留作兜底。
+            # 本任务自己不碰 tushare、不连库，秒级结束；Actions 侧 21:40 起跑在 16:45-20:00
+            # 窗口之外，invest-model 的窗口表不用改。
+            cronExpression: '0 40 13 ? * MON-FRI'
+            enable: true
+            payload: 'kick_index_universe'
         - triggerName: fear-intraday
           triggerType: timer
           qualifier: LATEST
