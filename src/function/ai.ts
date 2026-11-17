@@ -27,6 +27,14 @@ import { NoAuth } from '../decorator/noAuth';
 import { R } from '../common/base.error.utils';
 import { auxModuleFor, auxBucketFor } from '../common/aiPurpose';
 import { InterviewQuestionIndexService } from '../service/interview/questionIndex';
+import {
+  decideMockTrial,
+  mockTrialKey,
+  MockTrialState,
+  MOCK_TRIAL_QUESTIONS,
+  MOCK_TRIAL_TTL_SECONDS,
+  parseMockTrialState,
+} from '../common/mockTrial';
 import { sanitizeKeys, sanitizeLabel } from '../common/interviewTopics';
 import {
   normalizeSeed,
@@ -113,6 +121,8 @@ class AIInterviewDTO {
   label?: string;
   /** 一场面试的随机种子（开始时生成，之后每轮原样带上，服务端据此重算同一份题） */
   seed?: number;
+  /** 非会员用免费体验场（每人一场，见 common/mockTrial.ts） */
+  trial?: boolean;
 }
 
 class AIInterviewReportDTO {
@@ -691,8 +701,9 @@ export class AiHTTPService {
   async aiInterview(@Body(ALL) body: AIInterviewDTO) {
     body = guardBody(body);
     const { userId, isMember } = await this.resolveUser();
-    // 会员权益网关：非会员返回付费入口标记
+    // 会员权益网关：非会员返回付费入口标记；带 trial 的走免费体验场
     if (!isEntitled('mock_interview', { isMember })) {
+      if (body.trial) return this.trialInterview(body, userId);
       return { success: true, data: { paywall: true, message: '开通会员解锁 AI 模拟面试' } };
     }
     // 每轮按 irisCost('interview') 计点（会员专享模式，IrisCreditService 内再校验一次会员）
@@ -714,6 +725,75 @@ export class AiHTTPService {
       if (!reply) await charge.refund();
       return { success: true, data: { reply } };
     });
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '模拟面试免费体验是否还能用（登录非会员每人一场）',
+    functionName: 'aiInterviewTrial',
+    name: 'aiInterviewTrial',
+    path: '/api/ai/interview/trial',
+    method: 'get',
+  })
+  @NoAuth()
+  async aiInterviewTrial() {
+    const { userId, isMember } = await this.resolveUser();
+    const guest = !userId || userId.startsWith('guest:');
+    let available = !isMember;
+    if (!guest && !isMember) {
+      try {
+        available = !(await this.redisService.get(mockTrialKey(userId)));
+      } catch {
+        available = false;
+      }
+    }
+    return {
+      success: true,
+      data: { available, guest, isMember, questions: MOCK_TRIAL_QUESTIONS },
+    };
+  }
+
+  /** 免费体验场：只按目标公司出题、题量减到 MOCK_TRIAL_QUESTIONS、不扣点；每人一场。 */
+  private async trialInterview(body: AIInterviewDTO, userId: string) {
+    const paywall = {
+      success: true,
+      data: { paywall: true, trialUsed: true, message: '免费体验已经用过了，开通会员不限场次' },
+    };
+    if (!userId || userId.startsWith('guest:')) throw R.unauthorizedError('请先登录');
+    const keys = sanitizeKeys(body.keys);
+    if (!keys.length) {
+      return { success: true, data: { paywall: true, message: '免费体验只支持按目标公司出题' } };
+    }
+    const seed = normalizeSeed(body.seed);
+    const key = mockTrialKey(userId);
+    let state: MockTrialState | null;
+    try {
+      state = parseMockTrialState(await this.redisService.get(key));
+    } catch {
+      return paywall;
+    }
+    const decision = decideMockTrial(state, seed);
+    if (!decision.allowed || !decision.next) return paywall;
+    const save = (s: MockTrialState) =>
+      this.redisService.set(key, JSON.stringify(s), 'EX', MOCK_TRIAL_TTL_SECONDS);
+    try {
+      await save(decision.next);
+    } catch {
+      return paywall;
+    }
+    let company: Awaited<ReturnType<AiHTTPService['companyInterview']>> = null;
+    try {
+      company = await this.companyInterview(body, keys, userId, MOCK_TRIAL_QUESTIONS);
+    } catch {
+      company = null;
+    }
+    if (!company?.reply) {
+      // 第一轮就没出来：撤销「用过」，让人能重试；中途失败只是这一轮不算
+      if (!state) await this.redisService.del(key).catch(() => undefined);
+      else await save({ ...decision.next, calls: decision.next.calls - 1 }).catch(() => undefined);
+      throw R.error('面试官暂时没有回应，请稍后重试');
+    }
+    if (company.finished) await save({ ...decision.next, finished: true }).catch(() => undefined);
+    return { success: true, data: { ...company, trial: true } };
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
@@ -831,7 +911,8 @@ export class AiHTTPService {
   private async companyInterview(
     body: AIInterviewDTO,
     keys: string[],
-    userId: string
+    userId: string,
+    size?: number
   ) {
     const { index, knowledge, careerKeys } = await this.questionIndex.load();
     const { articlesAnalyzed, questions } = pickInterviewPlan(index, {
@@ -839,6 +920,7 @@ export class AiHTTPService {
       knowledgeTitles: knowledge,
       skipKeys: careerKeys,
       seed: normalizeSeed(body.seed),
+      ...(size ? { size } : {}),
     });
     if (!questions.length) return null;
     const all = Array.isArray(body.history) ? body.history : [];

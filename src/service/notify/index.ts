@@ -5,6 +5,8 @@ import { NotifySubscriptionEntity } from '../../entity/notifySubscription';
 import { ArticleService } from '../article';
 import { AiProxyService } from '../ai/proxy';
 import { sendEmail } from './sender';
+import { renderDigestHtml, unsubscribeUrl } from '../../common/digestMail';
+import { navIndex } from '../../mcp/tools/agent';
 
 @Provide()
 export class NotifyService {
@@ -76,28 +78,17 @@ export class NotifyService {
     return { reviewDueCount: reviewDue.length, reviewDue, weekly, streak: profile?.streak || 0 };
   }
 
-  private renderDigestHtml(d: any): string {
-    const items = (d.reviewDue || [])
-      .map((r: any) => `<li>${r.articleKey} —— ${r.reason}</li>`)
-      .join('');
-    return `<div style="font-family:sans-serif;max-width:560px">
-      <h2>你的学习周报</h2>
-      ${d.weekly ? `<p>${d.weekly}</p>` : ''}
-      <p>连续学习 <b>${d.streak}</b> 天，待复习 <b>${d.reviewDueCount}</b> 篇：</p>
-      <ul>${items || '<li>暂无到期内容，继续保持～</li>'}</ul>
-      <p style="color:#888;font-size:12px">如不想再收到，可在站内取消订阅。</p>
-    </div>`;
-  }
-
   /**
    * 定时任务：给已订阅邮箱投递学习简报（PRD-06）。由 FC 定时触发器调用。
    * 缺 SMTP 配置时安全跳过（sent:false）。
    */
-  async runDigestCron(limit = 200) {
+  async runDigestCron(limit = 200, secret?: string) {
     const subs = await this.subModel.find({
       where: { channel: 'email', enabled: true },
       take: limit,
     });
+    const nav = await this.articleService.getNavList('knowledge').catch(() => ({ navData: [] }));
+    const titles = navIndex((nav as any).navData || []);
     let sent = 0;
     let skipped = 0;
     for (const s of subs) {
@@ -111,8 +102,16 @@ export class NotifyService {
         }
         const r = await sendEmail({
           to: s.address,
-          subject: '你的学习周报 · Agent Journey',
-          html: this.renderDigestHtml(digest),
+          subject: digest.reviewDueCount
+            ? `这周有 ${digest.reviewDueCount} 个知识点该复习了 · Agent Journey`
+            : '你的学习周报 · Agent Journey',
+          html: renderDigestHtml({
+            weekly: digest.weekly,
+            streak: digest.streak,
+            reviewDue: digest.reviewDue,
+            titles,
+            unsubscribe: unsubscribeUrl(secret, s.userId),
+          }),
         });
         if (r.sent) sent += 1;
         else skipped += 1;
