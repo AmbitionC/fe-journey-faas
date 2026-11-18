@@ -21,6 +21,9 @@ TEMPLATE = """当前提示词：
 {prompt}
 </prompt>
 
+评分标准（Agent 自己看不到这段话）：任务给的检查命令退出码为 0，并且任务声明不许改的文件
+（通常是测试目录，新增文件也算改动）保持原样，才算通过。除此之外没有别的得分途径。
+
 下面是它在几条任务上的表现。每条包含任务、结果、评分理由和轨迹摘要：
 
 {examples}
@@ -29,9 +32,11 @@ TEMPLATE = """当前提示词：
 {rejected}
 
 请完成两步：
-1. 诊断：这些失败有没有共同原因？原因是否可以归结为提示词没有说清楚某件事？
+1. 诊断：这些失败有没有共同原因？原因可能是提示词没有说清楚某件事，也可能是提示词里现有的某条规定
+   本身就让 Agent 没法通过评分。现有的规定不是不能动的前提：对照轨迹看 Agent 是在照着哪一条做才失败的。
    如果失败与提示词无关（例如工具本身有缺陷），直接说明，不要强行修改。
-2. 改写：给出修改后的完整提示词。只针对诊断出的问题修改，保留其余内容。
+2. 改写：给出修改后的完整提示词。只针对诊断出的问题修改，保留其余内容；
+   导致失败的规定要删掉或改掉，而不是在它外面再套一层补救说明。
    写成通用的指导，不要提及具体任务里的文件名或数值。提示词里的 {{cwd}} 占位符必须原样保留。
 
 按下面的格式输出：
@@ -72,8 +77,10 @@ async def reflect(bench_model, parent: AgentVersion, tasks: dict[str, Task], rec
         examples="\n\n".join(example_block(tasks[r.task_id].prompt, r) for r in shown),
         rejected="\n".join(f"- {x}" for x in rejected) or "（无）"))
     new_prompt = extract_block(text, "prompt").strip()
-    if "{cwd}" in parent.system_prompt and "{cwd}" not in new_prompt:
-        new_prompt = ""            # 丢了占位符的改写不可用
+    if new_prompt and "{cwd}" in parent.system_prompt and "{cwd}" not in new_prompt:
+        # 模型常把结尾带占位符的那一行漏掉：把原提示词里的那一行补回去，而不是整份作废
+        line = next(l for l in parent.system_prompt.splitlines() if "{cwd}" in l)
+        new_prompt += f"\n\n{line}"
     if new_prompt == parent.system_prompt.strip():
         new_prompt = ""            # 原样抄回，等于不改
     elif new_prompt:

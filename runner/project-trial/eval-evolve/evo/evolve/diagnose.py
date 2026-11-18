@@ -1,7 +1,7 @@
 """失败分析：逐条把失败归因到具体环节，再把相似的归因聚成几类弱点。"""
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 from ..types import RunRecord, Task, TextModel
@@ -53,9 +53,14 @@ async def diagnose(model: TextModel, tasks: dict[str, Task], failures: list[RunR
 
 
 def cluster(diagnoses: list[Diagnosis]) -> list[tuple[str, list[Diagnosis]]]:
-    """按（环节，弱点）聚类，影响任务数多的排前面。"""
-    groups: dict[tuple[str, str], list[Diagnosis]] = defaultdict(list)
+    """按环节聚类，影响任务数多的排前面；每一类用其中出现最多的那个说法命名。
+
+    不按“弱点”的字面聚：同一个问题模型每次的说法都不太一样（“缺少写文件工具”“缺少可写工具”），
+    按字面会把一类拆成好几类。
+    """
+    groups: dict[str, list[Diagnosis]] = defaultdict(list)
     for d in diagnoses:
-        groups[(d.component, d.weakness)].append(d)
+        groups[d.component].append(d)
     ranked = sorted(groups.items(), key=lambda kv: (-len({d.task_id for d in kv[1]}), kv[0]))
-    return [(f"{component}：{weakness}", items) for (component, weakness), items in ranked]
+    return [(f"{component}：{Counter(d.weakness for d in items).most_common(1)[0][0]}", items)
+            for component, items in ranked]

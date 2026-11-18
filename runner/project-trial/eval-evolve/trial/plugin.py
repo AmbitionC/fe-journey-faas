@@ -34,7 +34,7 @@ from evo.types import AgentVersion  # noqa: E402
 
 MAX_SECONDS = int(os.environ.get("TRIAL_EVO_MAX_SECONDS", "240"))
 RUN_TIMEOUT = 80          # 单次任务运行的时间上限
-TRIAL_MAX_TURNS = 12      # 试用里每次任务运行的轮次上限，控制时长和用量
+TRIAL_MAX_TURNS = 16      # 试用里每次任务运行的轮次上限，控制时长和用量
 
 SCENARIOS = {
     "evolve-prompt": {
@@ -98,8 +98,8 @@ class Narrator:
             self.say("失败归因后聚成的弱点：\n" + "\n".join(lines))
         elif kind == "proposal":
             if d["level"] == 1:
-                self.say(f"反思的诊断：{d['diagnosis'] or '（没有给出）'}\n"
-                         + ("据此改写了提示词，先在小批量上和原来的比一比。" if d["changed"] else "判断不该改提示词。"))
+                self.say(f"第 {d['round']} 轮反思的诊断：{d['diagnosis'] or '（没有给出）'}\n"
+                         + ("据此改写了提示词，先在小批量上和原来的比一比。" if d["changed"] else "这一轮没有给出可用的改写。"))
             else:
                 self.say((f"提出的配置修改：{json.dumps(d['changes'], ensure_ascii=False)}\n理由：{d['rationale']}\n"
                           f"风险：{d['risk'] or '（未说明）'}\n先只在这类弱点涉及的任务上验证。")
@@ -173,7 +173,7 @@ async def run_evolution(scenario: dict, emit, *, agent=None, model=None, check=N
                       notify=narrator.notify, run_timeout=RUN_TIMEOUT)
         narrator.say(scenario["intro"])
         narrated = NarratedModel(model, narrator)
-        step = (prompt_level.evolve_prompt(bench, narrated, v0, rounds=1) if scenario["level"] == "prompt"
+        step = (prompt_level.evolve_prompt(bench, narrated, v0, rounds=2) if scenario["level"] == "prompt"
                 else config_level.evolve_config(bench, narrated, v0))
         try:
             version, decision = await asyncio.wait_for(step, timeout=MAX_SECONDS)
