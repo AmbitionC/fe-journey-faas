@@ -133,10 +133,22 @@ describe('modules.ts — 核心工具函数', () => {
   // ALL_MODULES
   // ------------------------------------------------------------------
   describe('ALL_MODULES', () => {
-    it('包含五个模块（含央国企科技岗 soe、考公选岗 civil）', () => {
+    it('包含六个模块（含央国企科技岗 soe、考公选岗 civil、实战项目 project）', () => {
       assert.deepStrictEqual(
         ALL_MODULES.slice().sort(),
-        ['civil', 'firstclass', 'interview', 'knowledge', 'soe']
+        ['civil', 'firstclass', 'interview', 'knowledge', 'project', 'soe']
+      );
+    });
+
+    it('project 与 knowledge 同布局：project/{项目标识}/{key}.md', () => {
+      assert.strictEqual(
+        articlePath('project', 'general-agent', 'ga-architecture'),
+        'project/general-agent/ga-architecture.md'
+      );
+      assert.strictEqual(manifestPath('project'), 'project/_tree.json');
+      assert.strictEqual(
+        moduleOfPath('project/eval-evolve/ee-audit.md'),
+        'project'
       );
     });
 
