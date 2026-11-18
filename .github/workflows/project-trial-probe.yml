@@ -1,0 +1,27 @@
+# 项目实战在线试用的演示效果探针：只在开发分支推送时运行；不部署、不改线上。
+# 用真模型、对着已部署的隔离沙箱直接跑试用场景，日志里能看到一轮进化的全过程。
+name: project-trial-probe
+on:
+  push:
+    branches: [claude/project-thread-lyay7j]
+    paths: ['runner/project-trial/**', 'scripts/probe-project-trial.py', '.github/workflows/project-trial-probe.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: probe
+        env:
+          OPENAI_BASE_URL: https://api.deepseek.com
+          OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: deepseek-flash
+          LLM_EXTRA_BODY: '{"thinking":{"type":"disabled"}}'
+          SANDBOX_URL: https://project-sandbox-aebjiggsbz.cn-hangzhou.fcapp.run
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+        run: python scripts/probe-project-trial.py

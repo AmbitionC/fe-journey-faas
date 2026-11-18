@@ -56,6 +56,22 @@ ALLOW = ["python*", "pytest*", "ls*", "cat *", "head*", "tail*", "grep*", "find*
 # 附在任务后面、不显示给用户：试用有轮次上限，让它修好就收尾
 TASK_SUFFIX = "\n\n（修好并确认测试通过后就停下来，用几句话说明原因和改法。不要新建临时文件。）"
 
+
+
+def load_plugins() -> None:
+    """同一个入口可以挂别的项目的试用场景：旁边的项目目录里有 trial/plugin.py 就加载，
+    由它的 register(SCENARIOS) 登记场景（带一个 run(task, emit) 协程）。加载失败只影响那个项目。"""
+    import importlib.util
+    for path in sorted(ROOT.parent.glob("*/trial/plugin.py")):
+        try:
+            spec = importlib.util.spec_from_file_location(f"trial_plugin_{path.parent.parent.name}", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.register(SCENARIOS)
+        except Exception as e:
+            print(f"试用场景加载失败 {path}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
 _used: dict[str, float] = {}  # 票据编号 -> 过期时间，防止同一张票据重复使用
 _used_lock = threading.Lock()
 
@@ -175,6 +191,9 @@ class Handler(BaseHTTPRequestHandler):
         if scenario is None:
             return self._json(400, {"error": "没有这个试用场景。"})
         task = str(req.get("task") or "").strip()[:MAX_TASK_CHARS] or scenario["default_task"]
+        if scenario.get("fixed_task"):
+            task = scenario["default_task"]
+        runner = scenario["run"] if "run" in scenario else (lambda task, emit: run_trial(scenario, task, emit))
 
         self.send_response(200)
         self._cors()
@@ -191,14 +210,14 @@ class Handler(BaseHTTPRequestHandler):
 
         def worker() -> None:
             try:
-                events.put({"type": "done", **asyncio.run(run_trial(scenario, task, events.put))})
+                events.put({"type": "done", **asyncio.run(runner(task, events.put))})
             except Exception as e:
                 events.put({"type": "error", "message": f"{type(e).__name__}: {e}"})
             events.put(None)
 
         threading.Thread(target=worker, daemon=True).start()
         try:
-            self._send({"type": "start", "task": task, "max_turns": MAX_TURNS})
+            self._send({"type": "start", "task": task, "max_turns": scenario.get("max_turns", MAX_TURNS)})
             while True:
                 try:
                     ev = events.get(timeout=10)
@@ -223,6 +242,8 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:
         pass
 
+
+load_plugins()
 
 if __name__ == "__main__":
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

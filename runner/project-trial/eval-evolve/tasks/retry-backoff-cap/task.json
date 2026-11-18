@@ -1,0 +1,18 @@
+{
+  "id": "retry-backoff-cap",
+  "split": "evolve",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "retry",
+  "prompt": "重试的等待时间应该有上限，但现在会无限增长，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

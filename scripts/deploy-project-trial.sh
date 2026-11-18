@@ -104,6 +104,8 @@ BRAIN_URL=$(fn_url project-trial-brain True)
 echo "project-trial-brain: $BRAIN_URL"
 wait_health "$BRAIN_URL" || { echo "入口函数没起来"; s projectTrialBrain logs --access aliyun || true; exit 1; }
 check /tmp/trial-health.json "r['configured'] is True" "入口函数配置不完整"
+# 别的项目的试用场景是入口启动时加载的插件，加载失败只会少场景、不会让入口起不来，所以要单独查
+check /tmp/trial-health.json "{'shop', 'evolve-prompt', 'evolve-config'} <= set(r['scenarios'])" "有试用场景没加载上"
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$BRAIN_URL/run" -H 'content-type: application/json' -d '{"ticket":"bad"}')
 [ "$code" = 401 ] || { echo "入口无票据调用返回 $code，应为 401"; exit 1; }

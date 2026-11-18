@@ -1,0 +1,18 @@
+{
+  "id": "paginate-last-page",
+  "split": "evolve",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "pagination",
+  "prompt": "分页函数在总数不能被每页条数整除时少算一页，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "settings-deep-merge",
+  "split": "regress",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "dict-merge",
+  "prompt": "合并配置时，嵌套的字典被整个覆盖了而不是逐项合并，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

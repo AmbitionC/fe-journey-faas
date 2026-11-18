@@ -1,0 +1,19 @@
+{
+  "id": "invoice-tax-rounding",
+  "split": "accept",
+  "source": "real_failure",
+  "difficulty": "single_file",
+  "similar_group": "money",
+  "prompt": "发票税额的四舍五入不对，测试挂了，帮我找到原因并修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ],
+  "rubric": "回复中是否说明了出错的根本原因与浮点数或舍入方式有关？"
+}

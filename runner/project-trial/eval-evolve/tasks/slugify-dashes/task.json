@@ -1,0 +1,18 @@
+{
+  "id": "slugify-dashes",
+  "split": "evolve",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "text-normalize",
+  "prompt": "标题转网址别名的函数在有连续空格或首尾标点时结果不对，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}
