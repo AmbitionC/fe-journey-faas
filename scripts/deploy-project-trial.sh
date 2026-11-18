@@ -20,16 +20,28 @@ PY_DIR=runner/project-trial/pyruntime
 if [ ! -x "$PY_DIR/bin/python3" ]; then
   pip install -q uv
   uv python install 3.12 --install-dir /tmp/trial-python
-  SRC=$(ls -d /tmp/trial-python/cpython-3.12*-linux-x86_64-gnu | head -1)
-  rm -rf "$PY_DIR" && cp -a "$SRC" "$PY_DIR"
+  # uv 会同时留一个 cpython-3.12-… 的软链指向带补丁号的真目录：只认真目录（-type d），
+  # 否则拷过来的只是一个指向 /tmp 的软链，本机能跑、打进代码包却是空的
+  SRC=$(find /tmp/trial-python -maxdepth 1 -type d -name 'cpython-3.12*-linux-x86_64-gnu' | head -1)
+  [ -n "$SRC" ] && [ -x "$SRC/bin/python3.12" ] || { echo "没找到下载好的 Python 3.12"; exit 1; }
+  rm -rf "$PY_DIR" && mkdir -p "$PY_DIR" && cp -a "$SRC/." "$PY_DIR/"
+  # 可执行文件只留一份真文件 python3；python / python3.12 用两行脚本转过去，不依赖打包工具对软链的处理
+  rm -f "$PY_DIR/bin/python3" "$PY_DIR/bin/python"
+  mv "$PY_DIR/bin/python3.12" "$PY_DIR/bin/python3"
+  for alias in python python3.12; do
+    printf '#!/bin/sh\nexec "$(dirname "$0")/python3" "$@"\n' > "$PY_DIR/bin/$alias"; chmod +x "$PY_DIR/bin/$alias"
+  done
   uv pip install --python "$PY_DIR/bin/python3" --break-system-packages pytest
   V=$(ls "$PY_DIR/lib" | grep '^python3\.' | head -1)
   rm -rf "$PY_DIR/lib/$V/test" "$PY_DIR/lib/$V/idlelib" "$PY_DIR/lib/$V/tkinter" "$PY_DIR/lib/$V/ensurepip" \
-         "$PY_DIR/lib/$V/config-"* "$PY_DIR/include" "$PY_DIR/share" "$PY_DIR"/lib/*.a
+         "$PY_DIR/lib/$V/config-"* "$PY_DIR/include" "$PY_DIR/share" "$PY_DIR"/lib/*.a "$PY_DIR"/lib/libtcl* "$PY_DIR"/lib/libtk* "$PY_DIR"/lib/tcl* "$PY_DIR"/lib/tk* \
+         "$PY_DIR/lib/$V/site-packages/pip"
   find "$PY_DIR" -name __pycache__ -type d -prune -exec rm -rf {} +
 fi
 "$PY_DIR/bin/python3" -c 'import sys, pytest; print("python", sys.version.split()[0], "pytest", pytest.__version__)'
 du -sh "$PY_DIR"
+[ ! -L "$PY_DIR" ] && [ "$(du -sm "$PY_DIR" | cut -f1)" -ge 20 ] || { echo "Python 运行时没有真正拷进代码包"; exit 1; }
+if find "$PY_DIR" -type l -lname '/*' | grep -q .; then echo "Python 运行时里有指向包外的软链："; find "$PY_DIR" -type l -lname '/*' | head; exit 1; fi
 
 # s 部署单个资源也会解析整份 s.yaml：其他资源引用、但本 job 没有的变量补占位值（只是占位，不进试用函数）
 for name in $(grep -o "env('[A-Z0-9_]*')" s.yaml | sed "s/env('\(.*\)')/\1/" | sort -u); do
