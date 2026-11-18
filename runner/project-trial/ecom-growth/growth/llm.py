@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
 import os
 import random
@@ -71,8 +72,8 @@ class ChatModel:
             if e.code >= 500:
                 raise TransientError(f"HTTP {e.code}")
             raise RuntimeError(f"模型接口返回 {e.code}：{e.read()[:200].decode(errors='replace')}")
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-            raise TransientError(str(e))
+        except (urllib.error.URLError, http.client.HTTPException, OSError, json.JSONDecodeError) as e:
+            raise TransientError(f"{type(e).__name__}: {e}")   # 连接中断、读到一半、回了半截 JSON，都值得重试
         usage = out.get("usage") or {}
         return (out["choices"][0]["message"].get("content") or "",
                 (usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)))

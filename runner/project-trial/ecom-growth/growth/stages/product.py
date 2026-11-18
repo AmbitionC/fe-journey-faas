@@ -117,6 +117,7 @@ async def understand(model: TextModel, product: Product, first_id: int = 1) -> d
     merged: list[dict] = []
     for c in candidates:      # 合并去重：详情和评价说的是同一件事时保留先出现的（详情优先），关键词合并
         same = next((m for m in merged if similarity(m["text"], c["text"]) > 0.5
+                     or normalize(m["text"]) in normalize(c["text"]) or normalize(c["text"]) in normalize(m["text"])
                      or set(m.get("keywords") or []) & set(c.get("keywords") or [])), None)
         if same:
             same["keywords"] = sorted(set(same.get("keywords") or []) | set(c.get("keywords") or []))
