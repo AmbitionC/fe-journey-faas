@@ -22,7 +22,8 @@ sync_project() {
 }
 sync_project general-agent agent trial fixtures
 sync_project eval-evolve evo trial tasks
+sync_project ecom-growth growth trial data
 find "$DEST" -name __pycache__ -type d -prune -exec rm -rf {} +
 find "$DEST" -name .pytest_cache -type d -prune -exec rm -rf {} +
 git -C "$SRC" rev-parse HEAD > "$DEST/SOURCE_COMMIT"
-echo "已同步 general-agent、eval-evolve @ $(cat "$DEST/SOURCE_COMMIT")"
+echo "已同步 general-agent、eval-evolve、ecom-growth @ $(cat "$DEST/SOURCE_COMMIT")"

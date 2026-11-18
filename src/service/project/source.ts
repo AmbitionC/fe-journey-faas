@@ -19,6 +19,7 @@ export interface SourceProject {
 export const SOURCE_PROJECTS: Record<string, SourceProject> = {
   'general-agent': { filename: 'agent-journey-general-agent.zip' },
   'eval-evolve': { filename: 'agent-journey-eval-evolve.zip' },
+  'ecom-growth': { filename: 'agent-journey-ecom-growth.zip' },
 };
 
 export const SOURCE_URL_EXPIRES_SEC = 3600;

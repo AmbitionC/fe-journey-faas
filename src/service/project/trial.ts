@@ -18,6 +18,8 @@ export const TRIAL_PROJECTS: Record<string, TrialProject> = {
   'general-agent': { scenarios: ['shop'] },
   // 现场跑一轮进化（第一级提示词 / 第三级配置），场景定义在 runner/project-trial/eval-evolve/trial/plugin.py
   'eval-evolve': { scenarios: ['evolve-prompt', 'evolve-config'] },
+  // 现场跑一轮完整的增长活动（卖点→人群→素材→审核→试投→归因→进化），场景定义在 runner/project-trial/ecom-growth/trial/plugin.py
+  'ecom-growth': { scenarios: ['campaign'] },
 };
 
 export const TRIAL_DAILY_LIMIT = { user: 3, member: 20 };

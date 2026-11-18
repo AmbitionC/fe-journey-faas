@@ -1,0 +1,357 @@
+{
+ "version": "rules-v1",
+ "note": "示例规则库，用来说明规则的形式，不构成法律意见。用于真实业务前需对照法规原文和平台规定逐条整理，并由懂行的人审过。",
+ "rules": [
+  {
+   "id": "AD-ABS-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "最佳",
+    "最好",
+    "最强",
+    "最高级",
+    "顶级",
+    "顶尖",
+    "极致",
+    "国家级",
+    "世界级",
+    "全网最低",
+    "史上最",
+    "唯一",
+    "独一无二",
+    "无敌",
+    "天花板"
+   ],
+   "reason": "绝对化用语"
+  },
+  {
+   "id": "AD-ABS-02",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "第一",
+    "首选",
+    "no1",
+    "top1",
+    "销量冠军",
+    "排名第一"
+   ],
+   "reason": "绝对化用语（“第一”类，常见正常用法走例外）",
+   "exceptions": [
+    "第一次",
+    "第一步",
+    "第一支",
+    "第一瓶",
+    "第一眼",
+    "第一天",
+    "第一反应",
+    "第一时间"
+   ]
+  },
+  {
+   "id": "AD-ABS-03",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "100%",
+    "百分百",
+    "百分之百",
+    "永久",
+    "永不",
+    "万能",
+    "零风险",
+    "绝对",
+    "彻底",
+    "根治",
+    "一劳永逸"
+   ],
+   "reason": "绝对化承诺"
+  },
+  {
+   "id": "AD-ABS-04",
+   "type": "keyword",
+   "level": "escalate",
+   "patterns": [
+    "最"
+   ],
+   "reason": "“最”字开头的比较级，交给裁判判断是否绝对化",
+   "exceptions": [
+    "最近",
+    "最后",
+    "最初",
+    "最多",
+    "最少",
+    "最起码"
+   ]
+  },
+  {
+   "id": "COS-MED-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "治疗",
+    "治愈",
+    "医治",
+    "消炎",
+    "抗炎",
+    "抗菌",
+    "杀菌",
+    "抑菌",
+    "祛痘",
+    "除螨",
+    "药用",
+    "处方",
+    "药妆",
+    "医学级",
+    "疗效"
+   ],
+   "reason": "化妆品不得明示或暗示医疗作用"
+  },
+  {
+   "id": "COS-MED-02",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "过敏",
+    "皮炎",
+    "湿疹",
+    "痤疮",
+    "玫瑰痤疮",
+    "红血丝",
+    "激素脸",
+    "脱敏"
+   ],
+   "reason": "不得宣称改善疾病或皮肤问题",
+   "exceptions": [
+    "不过敏性测试"
+   ]
+  },
+  {
+   "id": "COS-MED-03",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "医生推荐",
+    "皮肤科推荐",
+    "专家推荐",
+    "医院同款",
+    "三甲",
+    "临床验证",
+    "院线"
+   ],
+   "reason": "不得借医疗人员或机构名义背书"
+  },
+  {
+   "id": "COS-EFF-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "美白",
+    "祛斑",
+    "淡斑",
+    "抗衰",
+    "抗老",
+    "抗皱",
+    "去皱",
+    "紧致",
+    "提拉",
+    "修复屏障",
+    "再生",
+    "焕肤",
+    "瘦脸",
+    "排毒"
+   ],
+   "reason": "超出防晒范围的功效宣称"
+  },
+  {
+   "id": "COS-EFF-02",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "立竿见影",
+    "一抹见效",
+    "立刻见效",
+    "当天见效",
+    "无效退款",
+    "保证不晒黑",
+    "绝不晒黑",
+    "晒不黑",
+    "永不晒黑"
+   ],
+   "reason": "效果保证类表述"
+  },
+  {
+   "id": "COS-SAFE-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "无任何副作用",
+    "零刺激",
+    "零添加",
+    "纯天然",
+    "无添加",
+    "不含任何化学成分",
+    "孕妇可用",
+    "婴儿可用",
+    "人人适用"
+   ],
+   "reason": "安全性的绝对化表述"
+  },
+  {
+   "id": "AD-AUTH-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "国家认证",
+    "国家推荐",
+    "药监局推荐",
+    "官方指定",
+    "特供",
+    "专供",
+    "国宴"
+   ],
+   "reason": "不得使用国家机关或其工作人员名义"
+  },
+  {
+   "id": "AD-CMP-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "吊打",
+    "秒杀",
+    "碾压",
+    "完爆",
+    "智商税",
+    "别家都",
+    "其他牌子都",
+    "同行都"
+   ],
+   "reason": "贬低其他经营者",
+   "exceptions": [
+    "限时秒杀"
+   ]
+  },
+  {
+   "id": "AD-PRICE-01",
+   "type": "keyword",
+   "level": "escalate",
+   "patterns": [
+    "全网最低",
+    "史低",
+    "骨折价",
+    "亏本",
+    "跳楼价",
+    "地板价",
+    "原价"
+   ],
+   "reason": "虚构或无法核实的价格宣称"
+  },
+  {
+   "id": "AD-URG-01",
+   "type": "keyword",
+   "level": "escalate",
+   "patterns": [
+    "最后一天",
+    "仅此一次",
+    "错过再等一年",
+    "再不买就",
+    "马上涨价",
+    "抢完为止",
+    "手慢无"
+   ],
+   "reason": "虚假紧迫或诱导"
+  },
+  {
+   "id": "AD-FEAR-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "老十岁",
+    "毁容",
+    "晒成",
+    "癌",
+    "烂脸",
+    "没人要",
+    "被嫌弃"
+   ],
+   "reason": "制造容貌或健康焦虑"
+  },
+  {
+   "id": "AD-SUP-01",
+   "type": "keyword",
+   "level": "escalate",
+   "patterns": [
+    "神器",
+    "神仙",
+    "奇迹",
+    "逆天",
+    "开挂",
+    "黑科技",
+    "秘方"
+   ],
+   "reason": "迷信或夸张表述"
+  },
+  {
+   "id": "PLAT-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns": [
+    "微信",
+    "vx",
+    "加v",
+    "私信我",
+    "扫码",
+    "二维码",
+    "qq群"
+   ],
+   "reason": "站外导流"
+  },
+  {
+   "id": "BRAND-01",
+   "type": "keyword",
+   "level": "block",
+   "patterns_ref": "competitor_names",
+   "reason": "不得出现其他品牌名称"
+  },
+  {
+   "id": "DATA-01",
+   "type": "regex",
+   "level": "escalate",
+   "pattern": "\\d+(\\.\\d+)?\\s*(%|倍|小时|天|周|分钟|万人|万\\+)",
+   "reason": "出现数字声明，需确认卖点清单里有依据"
+  },
+  {
+   "id": "FMT-LEN-01",
+   "type": "length",
+   "level": "block",
+   "field": "short_copy",
+   "max": 40,
+   "reason": "短文案不超过 40 字"
+  },
+  {
+   "id": "FMT-LEN-02",
+   "type": "length",
+   "level": "block",
+   "field": "title",
+   "max": 30,
+   "reason": "商品标题不超过 30 字"
+  },
+  {
+   "id": "FMT-PUNC-01",
+   "type": "regex",
+   "level": "block",
+   "pattern": "[!！]{2,}|[?？]{3,}",
+   "reason": "连续感叹号或问号",
+   "raw": true
+  },
+  {
+   "id": "FMT-EMPTY-01",
+   "type": "length",
+   "level": "block",
+   "field": "*",
+   "min": 4,
+   "reason": "正文过短或为空"
+  }
+ ]
+}

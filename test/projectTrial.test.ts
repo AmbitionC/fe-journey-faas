@@ -58,6 +58,14 @@ describe('项目实战在线试用票据', () => {
     await assert.rejects(controller().c.trialTicket({ projectId: 'eval-evolve', scenario: 'shop' }), /场景/);
   });
 
+  it('电商营销增长助手只有一个场景', async () => {
+    const r = await controller().c.trialTicket({ projectId: 'ecom-growth' });
+    const payload = JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString());
+    assert.strictEqual(payload.scenario, 'campaign');
+    assert.strictEqual(payload.project, 'ecom-growth');
+    await assert.rejects(controller().c.trialTicket({ projectId: 'ecom-growth', scenario: 'shop' }), /场景/);
+  });
+
   it('未登录、未知项目、未知场景、未配置都拒绝', async () => {
     await assert.rejects(controller({ userId: '' }).c.trialTicket({ projectId: 'general-agent' }), /登录/);
     await assert.rejects(controller().c.trialTicket({ projectId: 'nope' }), /还没有开放/);
@@ -123,7 +131,7 @@ describe('项目实战源码下载', () => {
   it('未登记的项目、代码包里没有 zip 时给出明确提示', async () => {
     const { c } = controller({ member: true });
     withOss(c);
-    await assert.rejects(() => c.sourceDownload('ecom-growth'), /还没有开放源码下载/);
+    await assert.rejects(() => c.sourceDownload('not-a-project'), /还没有开放源码下载/);
     fs.rmSync(path.join(root, 'project-source', 'general-agent.zip'));
     c.sourceRoot = path.join(root, 'nope');
     await assert.rejects(() => c.sourceDownload('general-agent'), /暂时不可用/);
