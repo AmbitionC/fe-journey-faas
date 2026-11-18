@@ -62,7 +62,8 @@ class Narrator:
             self.n += 1
             self.steps += 1
             self.open = (f"s{self.n}", d["action"])
-            label = ACTIONS[d["action"]] + (f"｜{d['reason']}" if d["reason"] and "下一步" not in d["reason"] else "")
+            # 页面按动作名显示中文步骤名，这里只补主管选这一步的理由（只有一个可选动作时没有理由可说）
+            label = d["reason"] if d["reason"] and "下一步" not in d["reason"] else ""
             self.emit({"type": "tool_start", "id": self.open[0], "name": d["action"], "arguments": {"query": label}})
         elif kind == "result" and self.open:
             step, name = self.open

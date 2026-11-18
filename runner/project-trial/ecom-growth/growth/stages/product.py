@@ -140,7 +140,7 @@ async def understand(model: TextModel, product: Product, first_id: int = 1) -> d
         reply = await model.ask(LEVEL_SYSTEM, LEVEL_PROMPT.format(
             points="\n".join(f"#{p.id} [{p.category}] {p.text}（来源：{SOURCE_NAMES[p.source]}；依据：{p.evidence}）" for p in points)),
             data={"task": "product.levels", "points": points})
-        levels = {int(x["id"]): x.get("level") for x in (extract_json(reply) or [])
+        levels = {int(str(x["id"]).lstrip("#")): x.get("level") for x in (extract_json(reply) or [])
                   if isinstance(x, dict) and str(x.get("id", "")).lstrip("#").isdigit()}
         for p in points:
             level = levels.get(p.id)
