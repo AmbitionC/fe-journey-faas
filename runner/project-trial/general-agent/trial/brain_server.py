@@ -39,7 +39,7 @@ TICKET_SECRET = os.environ.get("TRIAL_TICKET_SECRET", "")
 SANDBOX_URL = os.environ.get("SANDBOX_URL", "")
 SANDBOX_TOKEN = os.environ.get("SANDBOX_TOKEN", "")
 ALLOWED_ORIGINS = [o for o in os.environ.get("TRIAL_ALLOWED_ORIGINS", "").split(",") if o]
-MAX_TURNS = int(os.environ.get("TRIAL_MAX_TURNS", "14"))
+MAX_TURNS = int(os.environ.get("TRIAL_MAX_TURNS", "24"))
 MAX_SECONDS = int(os.environ.get("TRIAL_MAX_SECONDS", "150"))
 MAX_TASK_CHARS = 300
 
@@ -50,7 +50,11 @@ SCENARIOS = {
         "default_task": "tests/test_cart.py 里有用例挂了，帮我找到原因并修好。不要修改测试。",
     },
 }
-ALLOW = ["python -m pytest*", "pytest*", "python3 -m pytest*", "ls*", "cat *", "git status*", "git diff*"]
+# 命令都在隔离沙箱里执行，放行面可以宽一些；没列出的（比如 curl、pip）仍会被权限闸门拦下
+ALLOW = ["python*", "pytest*", "ls*", "cat *", "head*", "tail*", "grep*", "find*", "wc*", "echo*", "rm *",
+         "git status*", "git diff*"]
+# 附在任务后面、不显示给用户：试用有轮次上限，让它修好就收尾
+TASK_SUFFIX = "\n\n（修好并确认测试通过后就停下来，用几句话说明原因和改法。不要新建临时文件。）"
 
 _used: dict[str, float] = {}  # 票据编号 -> 过期时间，防止同一张票据重复使用
 _used_lock = threading.Lock()
@@ -112,7 +116,7 @@ async def run_trial(scenario: dict, task: str, emit) -> dict:
             executor=RemoteExecutor(SANDBOX_URL, SANDBOX_TOKEN), command_timeout=45,
             max_turns=MAX_TURNS, on_event=lambda e: (ev := public_event(e)) and emit(ev))
         try:
-            outcome = await asyncio.wait_for(agent.run(task), timeout=MAX_SECONDS)
+            outcome = await asyncio.wait_for(agent.run(task + TASK_SUFFIX), timeout=MAX_SECONDS)
             summary = {"stopped": outcome.stopped, "turns": outcome.turns,
                        "input_tokens": outcome.usage.input, "output_tokens": outcome.usage.output}
         except asyncio.TimeoutError:
@@ -177,6 +181,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
+        # 必须分块传输：只写 Connection: close 的话，函数计算的网关会等连接关闭才把整段响应交给浏览器
+        self.send_header("Transfer-Encoding", "chunked")
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
@@ -197,17 +203,21 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     ev = events.get(timeout=10)
                 except queue.Empty:
-                    self.wfile.write(b": keep-alive\n\n")
-                    self.wfile.flush()
+                    self._chunk(b": keep-alive\n\n")
                     continue
                 if ev is None:
                     break
                 self._send(ev)
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass  # 浏览器关了页面
 
     def _send(self, ev: dict) -> None:
-        self.wfile.write(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode())
+        self._chunk(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode())
+
+    def _chunk(self, data: bytes) -> None:
+        self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
         self.wfile.flush()
 
     def log_message(self, *args) -> None:
