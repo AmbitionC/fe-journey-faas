@@ -1,0 +1,18 @@
+{
+  "id": "dedupe-keep-order",
+  "split": "regress",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "collections",
+  "prompt": "去重函数把原来的顺序打乱了，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

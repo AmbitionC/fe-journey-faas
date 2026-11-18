@@ -18,6 +18,7 @@ export interface SourceProject {
 /** 已开放源码下载的项目。新增项目时在这里登记，并在 sync-project-trial.sh 里加上打包。 */
 export const SOURCE_PROJECTS: Record<string, SourceProject> = {
   'general-agent': { filename: 'agent-journey-general-agent.zip' },
+  'eval-evolve': { filename: 'agent-journey-eval-evolve.zip' },
 };
 
 export const SOURCE_URL_EXPIRES_SEC = 3600;

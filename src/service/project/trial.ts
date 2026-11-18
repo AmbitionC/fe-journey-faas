@@ -16,6 +16,8 @@ export interface TrialProject {
 /** 已接入在线试用的项目。新增项目时在这里登记。 */
 export const TRIAL_PROJECTS: Record<string, TrialProject> = {
   'general-agent': { scenarios: ['shop'] },
+  // 现场跑一轮进化（第一级提示词 / 第三级配置），场景定义在 runner/project-trial/eval-evolve/trial/plugin.py
+  'eval-evolve': { scenarios: ['evolve-prompt', 'evolve-config'] },
 };
 
 export const TRIAL_DAILY_LIMIT = { user: 3, member: 20 };

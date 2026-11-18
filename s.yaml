@@ -213,7 +213,8 @@ resources:
       cpu: 0.5
       memorySize: 512
       diskSize: 512
-      timeout: 200
+      # 评测与自进化的试用一轮要跑十几次任务，比单次 Agent 运行长
+      timeout: 300
       instanceConcurrency: 5
       internetAccess: true
       customRuntimeConfig:

@@ -1,0 +1,18 @@
+{
+  "id": "csv-quoted-comma",
+  "split": "evolve",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "parsing",
+  "prompt": "解析一行 CSV 时，引号里的逗号被当成了分隔符，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

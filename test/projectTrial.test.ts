@@ -48,6 +48,16 @@ describe('项目实战在线试用票据', () => {
     assert.strictEqual(payload.exp, Math.floor(new Date('2026-11-18T23:30:00+08:00').getTime() / 1000) + 120);
   });
 
+  it('评测与自进化项目有两个场景，默认第一个', async () => {
+    const r = await controller().c.trialTicket({ projectId: 'eval-evolve' });
+    const payload = JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString());
+    assert.strictEqual(payload.scenario, 'evolve-prompt');
+    assert.strictEqual(payload.project, 'eval-evolve');
+    const r2 = await controller().c.trialTicket({ projectId: 'eval-evolve', scenario: 'evolve-config' });
+    assert.strictEqual(r2.data.scenario, 'evolve-config');
+    await assert.rejects(controller().c.trialTicket({ projectId: 'eval-evolve', scenario: 'shop' }), /场景/);
+  });
+
   it('未登录、未知项目、未知场景、未配置都拒绝', async () => {
     await assert.rejects(controller({ userId: '' }).c.trialTicket({ projectId: 'general-agent' }), /登录/);
     await assert.rejects(controller().c.trialTicket({ projectId: 'nope' }), /还没有开放/);
