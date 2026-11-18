@@ -6,6 +6,7 @@ const CONTENT_MODULES = [
   'firstclass',
   'soe',
   'civil',
+  'project',
 ] as const;
 
 export class TreeQueryDTO {
