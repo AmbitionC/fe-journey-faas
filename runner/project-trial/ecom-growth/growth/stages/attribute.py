@@ -11,7 +11,7 @@ import statistics
 from collections import Counter, defaultdict
 
 from ..llm import extract_json
-from ..stats import interval
+from ..stats import interval, similarity
 from ..types import Creative, Finding, Impression, Segment, SellingPoint, TextModel
 
 MIN_N = 30            # 一个属性取值至少要有这么多曝光才参与比较
@@ -100,6 +100,17 @@ def clickbait(summary: dict[int, dict], creatives: list[Creative], segment_id: i
             and summary[i]["cvr_after_click"] < seg_cvr * 0.6]
 
 
+def match_feedback(quote: str, known: set[str]) -> str:
+    """模型摘录原话时常会掉标点或截掉半句：逐字相同、互相包含或只差几个字，都对回日志里的那一条。"""
+    if quote in known or not quote:
+        return quote if quote in known else ""
+    hit = next((k for k in known if len(quote) >= 6 and (quote in k or k in quote)), "")
+    if hit:
+        return hit
+    best = max(known, key=lambda k: similarity(quote, k), default="")
+    return best if best and similarity(quote, best) >= 0.7 else ""
+
+
 async def summarize_feedback(model: TextModel, segment: Segment, impressions: list[Impression], limit: int = 60) -> dict:
     """反馈量大，先按原话合并计数再交给模型归纳。"""
     tally: dict[str, list[int]] = defaultdict(lambda: [0, 0])
@@ -122,7 +133,7 @@ async def summarize_feedback(model: TextModel, segment: Segment, impressions: li
         for item in (out.get(key) or [])[:4]:
             if isinstance(item, dict) and item.get(name):
                 quotes = [re.sub(r"^（点击.*?人）", "", str(q)).strip() for q in item.get("quotes") or []]
-                quotes = [q for q in dict.fromkeys(quotes) if q in known]          # 原话对不上的不要
+                quotes = [m for m in dict.fromkeys(match_feedback(q, known) for q in quotes) if m]   # 原话对不上的不要
                 count = sum(sum(tally[q]) for q in quotes) if quotes else 0        # 人数由程序按原话数，不用模型报的
                 clean[key].append({name: str(item[name]), "count": count, "quotes": quotes[:6]})
     return clean
