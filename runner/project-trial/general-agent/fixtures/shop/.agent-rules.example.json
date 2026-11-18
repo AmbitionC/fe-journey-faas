@@ -1,0 +1,5 @@
+[
+  {"tool": "run_command", "pattern": "python -m pytest*", "decision": "allow"},
+  {"tool": "run_command", "pattern": "pytest*", "decision": "allow"},
+  {"tool": "run_command", "pattern": "git push*", "decision": "deny"}
+]

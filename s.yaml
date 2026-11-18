@@ -115,6 +115,9 @@ resources:
         # Iris run_code：隔离运行函数 iris-code-runner 的地址与调用令牌（deploy.yml 先部署它再注入）。缺任一则不提供该工具。
         CODE_RUNNER_URL: ${env('CODE_RUNNER_URL', '')}
         CODE_RUNNER_TOKEN: ${env('CODE_RUNNER_TOKEN', '')}
+        # 项目实战在线试用：试用入口函数地址与票据密钥（deploy.yml 先部署试用函数再注入）。缺任一则不发票据。
+        PROJECT_TRIAL_URL: ${env('PROJECT_TRIAL_URL', '')}
+        PROJECT_TRIAL_TICKET_SECRET: ${env('PROJECT_TRIAL_TICKET_SECRET', '')}
       triggers:
         - triggerName: httpTrigger
           triggerType: http
@@ -163,6 +166,80 @@ resources:
             methods:
               - GET
               - POST
+
+  # ══ 项目实战在线试用（两个函数，说明见 runner/project-trial/README.md）═══════════
+  # 沙箱：只执行命令。关公网出站、不挂 VPC、不绑角色、除调用令牌外不带任何环境变量；单实例单并发。
+  projectTrialSandbox:
+    component: fc3
+    props:
+      region: cn-hangzhou
+      functionName: project-trial-sandbox
+      description: '项目实战在线试用：隔离执行命令（无公网、无密钥）'
+      runtime: custom.debian10
+      handler: index.handler
+      code: ./runner/project-trial
+      cpu: 1
+      memorySize: 1024
+      diskSize: 512
+      timeout: 90
+      instanceConcurrency: 1
+      internetAccess: false
+      customRuntimeConfig:
+        command:
+          - pyruntime/bin/python3
+          - general-agent/trial/sandbox_server.py
+        port: 9000
+      environmentVariables:
+        SANDBOX_TOKEN: ${env('PROJECT_TRIAL_SANDBOX_TOKEN', '')}
+      triggers:
+        - triggerName: httpTrigger
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
+
+  # 入口：验票据、跑 Agent 内核和模型调用、SSE 推送过程。这里不执行模型或用户决定的代码。
+  projectTrialBrain:
+    component: fc3
+    props:
+      region: cn-hangzhou
+      functionName: project-trial-brain
+      description: '项目实战在线试用：Agent 内核与模型调用，命令交给 project-trial-sandbox'
+      runtime: custom.debian10
+      handler: index.handler
+      code: ./runner/project-trial
+      cpu: 0.5
+      memorySize: 512
+      diskSize: 512
+      timeout: 200
+      instanceConcurrency: 5
+      internetAccess: true
+      customRuntimeConfig:
+        command:
+          - pyruntime/bin/python3
+          - general-agent/trial/brain_server.py
+        port: 9000
+      environmentVariables:
+        OPENAI_BASE_URL: https://api.deepseek.com
+        OPENAI_API_KEY: ${env('LLM_API_KEY')}
+        LLM_MODEL: deepseek-flash
+        # DeepSeek 省略 thinking 时默认开启思考；试用要快，显式关闭
+        LLM_EXTRA_BODY: '{"thinking":{"type":"disabled"}}'
+        TRIAL_TICKET_SECRET: ${env('PROJECT_TRIAL_TICKET_SECRET', '')}
+        SANDBOX_URL: ${env('PROJECT_TRIAL_SANDBOX_URL', '')}
+        SANDBOX_TOKEN: ${env('PROJECT_TRIAL_SANDBOX_TOKEN', '')}
+        TRIAL_ALLOWED_ORIGINS: https://www.agent-journey.cn,https://agent-journey.cn
+      triggers:
+        - triggerName: httpTrigger
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
+              - OPTIONS
 
   # ══ Personal OS 健康预警定时器 ══════════════════════════════════════
   # 只按时调 Web 函数 /pos/alerts/push 与 /pos/review/weekly/run（计算/去重/推送都在 Web 函数里）。

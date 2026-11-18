@@ -130,6 +130,17 @@ jobs:
           ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
         run: bash scripts/deploy-code-runner.sh
 
+      # 项目实战在线试用：先部署两个试用函数并冒烟（含真模型跑一遍示例任务），通过后把入口地址/票据密钥
+      # 写进 GITHUB_ENV 给主函数。失败不阻断主函数发布（主函数拿不到地址时试用入口返回「暂时不可用」）。
+      - name: Deploy project trial functions (+ smoke)
+        continue-on-error: true
+        env:
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+          AK_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+          AK_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+          ACCOUNT_ID: ${{ secrets.ALIBABA_CLOUD_ACCOUNT_ID }}
+        run: bash scripts/deploy-project-trial.sh
+
       # FC 3.0 Web 函数：单函数 server.js，环境变量经 ${env('...')} 注入到函数
       - name: Deploy (FC3 web function)
         run: s fcJourneyMain deploy -y --access aliyun
