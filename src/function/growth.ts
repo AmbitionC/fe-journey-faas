@@ -187,6 +187,16 @@ export class GrowthHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '题卡使用情况：按模块和知识点文章统计打开与答题人数（管理员只读，只出计数）',
+    functionName: 'growthPractice', name: 'growthPractice', path: '/growth/practice', method: 'get',
+  })
+  async practice(@Query(ALL) query: { days?: number }) {
+    await assertAdmin(this.ctx, this.redisService);
+    const days = Math.min(Math.max(Number(query?.days) || 14, 1), 90);
+    return { success: true, data: await this.growthService.practiceSummary(days) };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '转化漏斗',
     functionName: 'growthFunnel',
     name: 'growthFunnel',

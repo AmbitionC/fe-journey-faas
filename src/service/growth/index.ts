@@ -114,6 +114,16 @@ export function countSignupSites(
  * 白屏是发版后旧分包失效（stale）还是网络（network）；提示卡是不是分包错误；Skill 入口是从哪个位置点进来的。
  * 只拆这里列出的（事件, 属性），值也只放行短标识长相（见 propValueLabel）——props 来自免登录的 /event/track。
  */
+/** 题卡试点看的事件：打开带题文章 → 答选择题 / 跳到题目 / 看主观题参考答案 / 问 Iris。 */
+export const PRACTICE_SUMMARY_EVENTS = [
+  'practice_view',
+  'practice_answer',
+  'practice_jump',
+  'practice_open_reveal',
+  'practice_essay_iris',
+  'practice_ask_iris',
+];
+
 export const EVENT_PROP_BREAKDOWN: [string, string, [string, string]?][] = [
   ['chunk_reload', 'kind'],
   ['app_error_card', 'chunk'],
@@ -791,6 +801,62 @@ export class GrowthService {
       };
     } catch {
       return { days, list: [], error: 'query_failed' };
+    }
+  }
+
+  /**
+   * 题卡使用情况（近 N 天）：按模块统计打开带题文章、答题、看参考答案、问 Iris 的人数，
+   * 知识点模块再按文章拆「打开 / 答题」人数。用来判断题卡试点值不值得铺开。
+   * 只出计数和文章 key，不出用户。
+   */
+  async practiceSummary(days = 14, exclude?: string[]) {
+    const since = new Date(Date.now() - days * 86400000);
+    const ex = this.excludedUserIds(exclude);
+    // practice_open_reveal 只带 key（module:articleKey:题号），其余事件带 module / articleKey
+    const moduleExpr =
+      "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.module')), SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.key')), ':', 1))";
+    const articleExpr =
+      "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.articleKey')), SUBSTRING_INDEX(SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(e.props, '$.key')), ':', 2), ':', -1))";
+    const events = PRACTICE_SUMMARY_EVENTS;
+    try {
+      const byModule = this.eventLogModel
+        .createQueryBuilder('e')
+        .select(moduleExpr, 'module')
+        .addSelect('e.event', 'event')
+        .addSelect('COUNT(*)', 'count')
+        .addSelect('COUNT(DISTINCT e.userId)', 'users')
+        .where('e.event IN (:...events)', { events })
+        .andWhere('e.createTime >= :since', { since })
+        .groupBy(moduleExpr)
+        .addGroupBy('e.event');
+      const byArticle = this.eventLogModel
+        .createQueryBuilder('e')
+        .select(articleExpr, 'article')
+        .addSelect('e.event', 'event')
+        .addSelect('COUNT(DISTINCT e.userId)', 'users')
+        .where('e.event IN (:...events)', { events: ['practice_view', 'practice_answer', 'practice_open_reveal'] })
+        .andWhere(`${moduleExpr} = 'knowledge'`)
+        .andWhere('e.createTime >= :since', { since })
+        .groupBy(articleExpr)
+        .addGroupBy('e.event');
+      if (ex.length) {
+        byModule.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+        byArticle.andWhere('(e.userId IS NULL OR e.userId NOT IN (:...ex))', { ex });
+      }
+      const [moduleRows, articleRows] = await Promise.all([byModule.getRawMany(), byArticle.getRawMany()]);
+      const modules: Record<string, Record<string, { count: number; users: number }>> = {};
+      for (const r of moduleRows) {
+        const m = String(r.module ?? '(无)');
+        (modules[m] ??= {})[r.event] = { count: Number(r.count || 0), users: Number(r.users || 0) };
+      }
+      const articles: Record<string, Record<string, number>> = {};
+      for (const r of articleRows) {
+        const a = String(r.article ?? '(无)').slice(0, 120);
+        (articles[a] ??= {})[r.event] = Number(r.users || 0);
+      }
+      return { days, events, modules, knowledgeArticles: articles };
+    } catch {
+      return { days, events, modules: {}, knowledgeArticles: {}, error: 'query_failed' };
     }
   }
 
