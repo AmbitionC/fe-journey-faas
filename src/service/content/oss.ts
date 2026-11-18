@@ -42,6 +42,12 @@ export function buildObjectKey(
   return articlePath(module, filePath, key);
 }
 
+/** 兜底文件名沿用真实扩展名（老浏览器不认 filename* 时用）；取不到按 .pdf */
+function extOf(filename: string): string {
+  const m = /\.[A-Za-z0-9]{1,8}$/.exec(filename);
+  return m ? m[0].toLowerCase() : '.pdf';
+}
+
 @Provide()
 export class OssService {
   private client: OSS | undefined;
@@ -155,7 +161,7 @@ export class OssService {
     if (filename) {
       const encoded = encodeURIComponent(filename);
       options.response = {
-        'content-disposition': `attachment; filename="download.pdf"; filename*=UTF-8''${encoded}`,
+        'content-disposition': `attachment; filename="download${extOf(filename)}"; filename*=UTF-8''${encoded}`,
       };
     }
     return this.client!.signatureUrl(objKey, options);

@@ -24,3 +24,5 @@ invest-dist/
 invest-model-src/
 runner/code-runner/noderuntime/
 runner/project-trial/pyruntime/
+# 会员下载的项目源码包随仓库提交（scripts/sync-project-trial.sh 生成）
+!project-source/*.zip
