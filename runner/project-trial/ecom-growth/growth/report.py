@@ -1,7 +1,10 @@
 """给人看的输出：最终报告、素材谱系、成本表。所有出现效果数字的地方都带上模拟环境的说明。"""
 from __future__ import annotations
 
+import re
+
 from .stages.attribute import summarize
+from .stats import similarity
 
 
 def disclaimer(sim: dict, users: int) -> str:
@@ -47,6 +50,20 @@ def costs(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def distinct_questions(questions: list[str], limit: int = 6) -> list[str]:
+    """同一类人群在不同轮次会反复问到同一件事，措辞略有出入。每件事只留最近的一条。"""
+    def key(q: str) -> tuple[str, str]:
+        parts = re.findall(r"「(.*?)」", q)
+        return (parts[0], parts[1]) if len(parts) >= 2 else ("", q)
+
+    kept: list[str] = []
+    for q in reversed(questions):
+        seg, topic = key(q)
+        if not any(s == seg and (similarity(topic, t) > 0.25 or topic[:2] == t[:2]) for s, t in map(key, kept)):
+            kept.append(q)
+    return kept[::-1][:limit]
+
+
 def final_report(campaign, holdout: dict) -> str:
     store, cfg, state = campaign.store, campaign.config, campaign.state
     creatives = store.creatives()
@@ -82,7 +99,7 @@ def final_report(campaign, holdout: dict) -> str:
     baits = [b for r in range(1, state["round"] + 1) for b in store.get(f"clickbait:{r}", []) if b["confirmed"]]
     if top or store.questions() or baits:
         lines += ["", "主要发现"]
-        lines += [f"  {i}. {t}" for i, t in enumerate(top[:5] + store.questions()
+        lines += [f"  {i}. {t}" for i, t in enumerate(top[:5] + distinct_questions(store.questions())
                                                  + ([f"出现 {len(baits)} 版标题党素材，已淘汰"] if baits else []), 1)]
     rates = state["block_rates"]
     if rates:
