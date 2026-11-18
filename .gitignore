@@ -23,3 +23,4 @@ run/
 invest-dist/
 invest-model-src/
 runner/code-runner/noderuntime/
+runner/project-trial/pyruntime/
