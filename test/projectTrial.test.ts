@@ -123,7 +123,7 @@ describe('项目实战源码下载', () => {
   it('未登记的项目、代码包里没有 zip 时给出明确提示', async () => {
     const { c } = controller({ member: true });
     withOss(c);
-    await assert.rejects(() => c.sourceDownload('eval-evolve'), /还没有开放源码下载/);
+    await assert.rejects(() => c.sourceDownload('ecom-growth'), /还没有开放源码下载/);
     fs.rmSync(path.join(root, 'project-source', 'general-agent.zip'));
     c.sourceRoot = path.join(root, 'nope');
     await assert.rejects(() => c.sourceDownload('general-agent'), /暂时不可用/);
