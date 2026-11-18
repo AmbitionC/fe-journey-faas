@@ -1,0 +1,19 @@
+{
+  "name": "sim-v1",
+  "users": 600,
+  "seed": 42,
+  "holdout_share": 0.2,
+  "bystander_share": 0.15,
+  "base_ctr": 0.05,
+  "base_cvr": 0.08,
+  "coef": {"motive": 0.6, "concern": 0.4, "aversion": 0.8},
+  "noise_sd": 0.35,
+  "hidden": [
+    {"name": "反感夸张语气", "share": 0.3, "persona": "你反感夸张、喊口号式的广告语气，看到感叹号连发就想划走。"},
+    {"name": "只在乎价格", "share": 0.2, "persona": "你买东西主要看价格和活动力度，别的说得再好也不太打动你。"},
+    {"name": "担心假白", "share": 0.25, "persona": "你担心防晒涂上去会假白，这一点没说清楚你就不太想点。"},
+    {"name": "嫌卸妆麻烦", "share": 0.25, "persona": "你嫌防晒还要专门卸妆很麻烦，能用洗面奶洗掉才会考虑。"}
+  ],
+  "bystander_persona": "你最近没有买这类商品的打算，刷到相关广告通常直接划走。",
+  "note": "基准率、系数和隐藏属性的分布都是本项目设定的起步值，没有实证依据。行为特征抽样自 data/behavior_sample.csv。"
+}
