@@ -1,4 +1,4 @@
-import { Provide, ServerlessTrigger, ServerlessTriggerType, Inject, Body, ALL } from '@midwayjs/core';
+import { Provide, ServerlessTrigger, ServerlessTriggerType, Inject, Body, Query, ALL } from '@midwayjs/core';
 import { Context } from '@midwayjs/faas';
 import { RedisService } from '@midwayjs/redis';
 import * as crypto from 'crypto';
@@ -10,8 +10,10 @@ import {
   TRIAL_DAILY_LIMIT, TRIAL_PROJECTS, TRIAL_TICKET_TTL_SEC,
   signTrialTicket, trialConfigured, trialQuotaKey,
 } from '../service/project/trial';
+import { SOURCE_PROJECTS, SOURCE_URL_EXPIRES_SEC, loadSourcePackage } from '../service/project/source';
+import { OssService } from '../service/content/oss';
 
-/** 项目实战：在线试用的票据签发。 */
+/** 项目实战：在线试用的票据签发、会员源码下载。 */
 @Provide()
 export class ProjectHTTPService {
   /** 当前时间；单测注入 */
@@ -25,6 +27,12 @@ export class ProjectHTTPService {
 
   @Inject()
   entitlementService: EntitlementService;
+
+  @Inject()
+  ossService: OssService;
+
+  /** 代码包根目录；单测注入 */
+  sourceRoot: string | undefined;
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '项目实战在线试用：检查登录与每日次数后签发一次性票据',
@@ -69,5 +77,34 @@ export class ProjectHTTPService {
         ticket, scenario, remaining: limit - used, limit, member,
       },
     };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '项目实战源码下载（会员权益）：签发 1 小时临时链接',
+    functionName: 'projectSourceDownload',
+    name: 'projectSourceDownload',
+    path: '/project/source/download',
+    method: 'get',
+  })
+  @NoAuth()
+  async sourceDownload(@Query('projectId') projectId?: string): Promise<any> {
+    const project = SOURCE_PROJECTS[String(projectId || '')];
+    if (!project) throw R.error('这个项目还没有开放源码下载');
+
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    const userId = info?.userId || '';
+    if (!userId) throw R.unauthorizedError('登录后即可下载源码');
+    const member = (await this.entitlementService.check(userId, 'materials_pdf', {})).allowed;
+    if (!member) throw R.forbiddenError('源码下载是会员权益，开通会员后即可下载');
+
+    const pkg = loadSourcePackage(String(projectId), this.sourceRoot);
+    if (!pkg) throw R.error('源码包暂时不可用，请稍后再试');
+    // 对象名带内容哈希：代码更新后自然是新对象，已有的不重复上传
+    if (!(await this.ossService.rawMeta(pkg.objKey))) {
+      await this.ossService.putPrivate(pkg.objKey, pkg.buf, 'application/zip');
+    }
+    // 站点是 https，签名链接也必须是，否则浏览器会拦下载
+    const url = this.ossService.signedUrl(pkg.objKey, SOURCE_URL_EXPIRES_SEC, project.filename).replace(/^http:\/\//, 'https://');
+    return { success: true, data: { url, filename: project.filename, size: pkg.buf.length, expiresInSec: SOURCE_URL_EXPIRES_SEC } };
   }
 }

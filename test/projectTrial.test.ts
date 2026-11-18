@@ -65,3 +65,57 @@ describe('项目实战在线试用票据', () => {
     await assert.rejects(m.trialTicket({ projectId: 'general-agent' }), /已用完/);
   });
 });
+
+describe('项目实战源码下载', () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'project-source-'));
+    fs.mkdirSync(path.join(root, 'project-source'));
+    fs.writeFileSync(path.join(root, 'project-source', 'general-agent.zip'), Buffer.from('PK-fixture'));
+  });
+  afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  function withOss(c: ProjectHTTPService, existing: string[] = []) {
+    const puts: string[] = [];
+    const store = new Set(existing);
+    c.ossService = {
+      rawMeta: async (k: string) => (store.has(k) ? { lastModified: 'x' } : null),
+      putPrivate: async (k: string, buf: Buffer, type: string) => { assert.strictEqual(type, 'application/zip'); puts.push(k); store.add(k); return buf.length; },
+      signedUrl: (k: string, expires: number, filename: string) => `https://fixture.invalid/${k}?e=${expires}&f=${filename}`,
+    } as any;
+    c.sourceRoot = root;
+    return puts;
+  }
+
+  it('会员拿到私有对象的临时链接；同一份代码只上传一次', async () => {
+    const { c } = controller({ member: true });
+    const puts = withOss(c);
+    const r1 = await c.sourceDownload('general-agent');
+    const r2 = await c.sourceDownload('general-agent');
+    assert.strictEqual(puts.length, 1);
+    assert.ok(/^project-source\/general-agent\/[0-9a-f]{16}\.zip$/.test(puts[0]));
+    assert.strictEqual(r1.data.url, `https://fixture.invalid/${puts[0]}?e=3600&f=agent-journey-general-agent.zip`);
+    assert.strictEqual(r2.data.url, r1.data.url);
+    assert.strictEqual(r1.data.size, 10);
+  });
+
+  it('未登录 401、非会员 403，且都不触碰存储', async () => {
+    const guest = controller({ userId: '' }).c;
+    const p1 = withOss(guest);
+    await assert.rejects(() => guest.sourceDownload('general-agent'), (e: any) => e.status === 401);
+    const user = controller({ member: false }).c;
+    const p2 = withOss(user);
+    await assert.rejects(() => user.sourceDownload('general-agent'), (e: any) => e.status === 403 && /会员/.test(e.message));
+    assert.deepStrictEqual([p1, p2], [[], []]);
+  });
+
+  it('未登记的项目、代码包里没有 zip 时给出明确提示', async () => {
+    const { c } = controller({ member: true });
+    withOss(c);
+    await assert.rejects(() => c.sourceDownload('eval-evolve'), /还没有开放源码下载/);
+    fs.rmSync(path.join(root, 'project-source', 'general-agent.zip'));
+    c.sourceRoot = path.join(root, 'nope');
+    await assert.rejects(() => c.sourceDownload('general-agent'), /暂时不可用/);
+  });
+});
