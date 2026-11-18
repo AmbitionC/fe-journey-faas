@@ -115,7 +115,13 @@ body = base64.urlsafe_b64encode(json.dumps({"jti": "deploy-smoke-%d" % time.time
 print(body + "." + hmac.new(os.environ["PROJECT_TRIAL_TICKET_SECRET"].encode(), body.encode(), hashlib.sha256).hexdigest())
 PY
 )
-curl -sS -N --max-time 220 -X POST "$BRAIN_URL/run" -H 'content-type: application/json' -d "{\"ticket\":\"$TICKET\",\"scenario\":\"shop\"}" > /tmp/trial-run.sse || true
+# 同时量首字节时间：流式生效时首字节应远早于结束；两者几乎相等说明响应被网关攒到最后才下发
+curl -sS -N --max-time 220 -X POST "$BRAIN_URL/run" -H 'content-type: application/json' -d "{\"ticket\":\"$TICKET\",\"scenario\":\"shop\"}" \
+  -o /tmp/trial-run.sse -w '%{time_starttransfer} %{time_total}\n' > /tmp/trial-timing.txt || true
+read -r TTFB TOTAL < /tmp/trial-timing.txt || true
+echo "首字节 ${TTFB:-?}s，全程 ${TOTAL:-?}s"
+python3 -c "import sys; t,a=float(sys.argv[1]),float(sys.argv[2]); sys.exit(0 if t < max(5.0, a*0.5) else 1)" "${TTFB:-999}" "${TOTAL:-0}" \
+  || echo "::warning::在线试用的事件流不是流式下发的（首字节太晚），页面会等到结束才一次性显示"
 python3 - <<'PY'
 import json, sys
 events = [json.loads(l[6:]) for l in open('/tmp/trial-run.sse', encoding='utf-8') if l.startswith('data: ')]
@@ -129,7 +135,7 @@ err = next((e for e in events if e['type'] == 'error'), None)
 if err or not done:
     print('试用运行没有正常结束：', err or kinds[-3:]); sys.exit(1)
 fixed = any(c['path'] == 'shop/cart.py' for c in done['changed_files'])
-passed = any(n == 'run_command' and 'passed' in r and 'failed' not in r for n, _, r in tools)
+passed = any(n == 'run_command' and r.startswith('[退出码 0]') for n, _, r in tools)
 print('结束方式', done['stopped'], '轮次', done['turns'], '输入', done['input_tokens'], '输出', done['output_tokens'])
 print('真模型结果：改了 cart.py =', fixed, '，测试全部通过 =', passed)
 if done['stopped'] == 'model_error':
