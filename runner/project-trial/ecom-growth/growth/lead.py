@@ -261,7 +261,8 @@ class Campaign:
         out = await segment_stage.segment_audience(self.models.stage("segment"), self.store.points(),
                                                    self.store.get("cons", []), p.reviews)
         if not out["segments"]:
-            raise RuntimeError("没有划分出任何有评价依据的人群")
+            why = "；".join(f"{d['name']}（{d['reason']}）" for d in out["dropped"]) or "模型没有给出人群"
+            raise RuntimeError(f"没有划分出任何有评价依据的人群：{why}")
         out["segments"] = out["segments"][:self.config.max_segments]
         total = sum(s.size_share for s in out["segments"])
         for s in out["segments"]:

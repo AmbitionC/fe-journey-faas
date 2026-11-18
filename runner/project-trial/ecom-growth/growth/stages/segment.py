@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from ..llm import extract_json
 from ..types import Segment, SellingPoint, TextModel
 from ..stats import similarity
@@ -56,12 +58,32 @@ async def segment_audience(model: TextModel, points: list[SellingPoint], cons: l
             cons="\n".join(f"- {c['theme']}（{c['count']} 次）" for c in cons) or "（无）",
             reviews="\n".join(reviews[:sample])) + note,
             data={"task": "segment", "points": usable, "cons": cons, "reviews": reviews})
-        out = check_segments(extract_json(reply), usable, reviews, first_id)
+        raw = extract_json(reply)
+        if isinstance(raw, dict):      # 有的模型会把数组包在一个对象里
+            raw = next((v for v in raw.values() if isinstance(v, list)), [raw])
+        out = check_segments(raw, usable, reviews, first_id)
+        if not out["segments"] and not out["dropped"]:
+            out["dropped"].append({"name": "（回复无法解析）", "reason": reply.strip()[:200]})
         if len(out["segments"]) >= 2:
             break
         note = ("\n\n上一次提出的人群大多没有通过检查：" + "；".join(f"{d['name']}（{d['reason']}）" for d in out["dropped"])
                 + "。请重新提出，核心动机只能引用上面清单里的卖点编号，原话必须逐字摘自上面的评价。")
     return out
+
+
+def as_list(value) -> list:
+    return value if isinstance(value, list) else [] if value in (None, "") else [value]
+
+
+def point_id(value, usable: list[SellingPoint]) -> int:
+    """模型给的卖点引用可能是 3、"#3"、"卖点3"、{"id": 3}，也可能直接写了卖点文字。对不上返回 0。"""
+    if isinstance(value, dict):
+        value = value.get("id", value.get("text", ""))
+    text = str(value).strip()
+    digits = re.fullmatch(r"\D{0,4}(\d+)\D{0,2}", text)
+    if digits:
+        return int(digits.group(1))
+    return next((p.id for p in usable if text and (p.text in text or text in p.text)), 0)
 
 
 def check_segments(raw, usable: list[SellingPoint], reviews: list[str], first_id: int = 1) -> dict:
@@ -70,8 +92,9 @@ def check_segments(raw, usable: list[SellingPoint], reviews: list[str], first_id
     for item in raw or []:
         if not isinstance(item, dict) or not item.get("name"):
             continue
-        motives = [int(str(m).lstrip("#")) for m in item.get("motives") or [] if str(m).lstrip("#").isdigit() and int(str(m).lstrip("#")) in ok_ids]
-        quotes = list(dict.fromkeys(q for q in (match_quote(str(x), reviews) for x in item.get("review_quotes") or []) if q))
+        motives = [m for m in (point_id(x, usable) for x in as_list(item.get("motives"))) if m in ok_ids]
+        motives = list(dict.fromkeys(motives))
+        quotes = list(dict.fromkeys(q for q in (match_quote(str(x), reviews) for x in as_list(item.get("review_quotes"))) if q))
         reason = ("核心动机没有引用可用卖点" if not motives else "评价里找不到对应的原话" if not quotes
                   else "核心动机和别的人群相同" if tuple(sorted(motives)) in seen_motives else "")
         if reason:

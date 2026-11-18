@@ -41,9 +41,11 @@ REVIEW_PROMPT = """下面是一批用户评价，每行一条。
   "cons": [{{"theme": "缺点，十个字以内", "keywords": ["..."], "quote": "逐字摘录一条评价"}}]}}
 只输出 JSON。"""
 
+SOURCE_NAMES = {"detail": "商品详情", "review": "用户评价", "spec": "规格表"}
 LEVEL_SYSTEM = "你在给广告卖点标注声明等级。拿不准时往严的方向标。"
 LEVEL_PROMPT = """对每个卖点判断声明等级：
 - 可以由规格表或成分表直接核实的客观事实，标 verified。
+- 来源是用户评价的使用感受（质地、肤感、气味、好不好卸、好不好带这类主观体验，不承诺效果），属于如实转述用户反馈，标 verified。
 - 涉及功效、效果程度、适用人群、与其他产品比较的，标 needs_proof。
 - 涉及疾病治疗或预防、使用“最”“第一”“唯一”等绝对化表述的，标 forbidden。
 拿不准时标 needs_proof。
@@ -135,7 +137,7 @@ async def understand(model: TextModel, product: Product, first_id: int = 1) -> d
 
     if points:
         reply = await model.ask(LEVEL_SYSTEM, LEVEL_PROMPT.format(
-            points="\n".join(f"#{p.id} [{p.category}] {p.text}（依据：{p.evidence}）" for p in points)),
+            points="\n".join(f"#{p.id} [{p.category}] {p.text}（来源：{SOURCE_NAMES[p.source]}；依据：{p.evidence}）" for p in points)),
             data={"task": "product.levels", "points": points})
         levels = {int(x["id"]): x.get("level") for x in (extract_json(reply) or [])
                   if isinstance(x, dict) and str(x.get("id", "")).lstrip("#").isdigit()}
@@ -152,7 +154,7 @@ def brief(points: list[SellingPoint], cons: list[dict]) -> str:
     usable = [p for p in points if p.usable]
     lines = [f"卖点清单（共 {len(usable)} 条可用）"]
     for p in usable:
-        state = "verified" if p.claim_level == "verified" else "已确认"
+        state = "可核实" if p.claim_level == "verified" else "已确认"
         lines.append(f"#{p.id}  {p.category}  {p.text}  {state}  评价提及 {p.review_support} 次")
     blocked = [p for p in points if not p.usable]
     if blocked:
