@@ -74,5 +74,5 @@ class Tool:
 
 @dataclass
 class Event:
-    kind: Literal["text_delta", "tool_start", "tool_end", "ask_permission", "done"]
+    kind: Literal["text_delta", "tool_delta", "tool_start", "tool_end", "ask_permission", "done"]
     data: dict[str, Any]

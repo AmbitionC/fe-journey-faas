@@ -42,6 +42,11 @@ STORE_TASKS = {
     "store-oversell": "有用户反馈同一件商品被卖超了。检查 store/inventory.py 的预占逻辑，有问题就修掉，并补一条能复现这个问题的测试。",
     "store-shipping": "给订单加上运费：实付金额满 99 元免运费，否则收 8 元。在 Order 上加 shipping_cents 字段，并补上测试。仓库里原本就挂着的几条用例和这件事无关，先不用管。",
     "store-explain": "下一张订单会依次经过哪些函数？按调用顺序讲一遍，指出每一步在哪个文件。不要改代码。",
+    "store-pelican": "用 SVG 画一只骑自行车的鹈鹕，放在 app/pelican.html。要画得认得出来：大嘴和喉囊、翅膀扶着车把、脚踩在踏板上；再加一点动画，让车轮转起来、腿跟着蹬，背景有往后退的路面。",
+    "store-shooter": "做一个打飞机的小游戏，放在 app/shooter.html：用 canvas 画，自己的飞机在下方，能用方向键或鼠标、手指移动，自动开火；敌机从上方一波波飞下来，打中有爆炸效果并加分，被撞到掉一条命，三条命用完显示得分和重新开始按钮。难度随时间慢慢提高。",
+    "store-pomodoro": "做一个番茄钟小应用，放在 app/pomodoro.html：25 分钟专注、5 分钟休息，能开始、暂停、重置，有环形进度，下面能记今天要做的几件事并勾选完成。界面做得精致一些。",
+    "store-ledger": "做一个记账小应用，放在 app/ledger.html：能记一笔收入或支出（金额、分类、备注），列表按时间倒序，顶部显示本月收入、支出和结余，再用一个环形图显示各分类的支出占比。先放几条示例数据。界面做得精致一些。",
+    "store-kanban": "做一个任务看板小应用，放在 app/kanban.html：待办、进行中、已完成三列，能新增卡片、在三列之间拖动、删除，每列顶部显示数量。先放几条示例卡片。界面做得精致一些。",
 }
 # 场景名 → （怎么跑, 跑成什么样算正常）
 RUNNERS = {**{name: (lambda emit, sc=sc: evo.run_evolution(sc, emit), "admitted") for name, sc in evo.SCENARIOS.items()},
