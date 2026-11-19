@@ -40,7 +40,7 @@ evo, growth, brain = load("eval-evolve"), load("ecom-growth"), load_brain()
 STORE_TASKS = {
     "store-fix-tests": "跑一下测试，有几条用例挂了。找到原因并修好，不要修改测试。",
     "store-oversell": "有用户反馈同一件商品被卖超了。检查 store/inventory.py 的预占逻辑，有问题就修掉，并补一条能复现这个问题的测试。",
-    "store-shipping": "给订单加上运费：实付金额满 99 元免运费，否则收 8 元。在 Order 上加 shipping_cents 字段，并补上测试。",
+    "store-shipping": "给订单加上运费：实付金额满 99 元免运费，否则收 8 元。在 Order 上加 shipping_cents 字段，并补上测试。仓库里原本就挂着的几条用例和这件事无关，先不用管。",
     "store-explain": "下一张订单会依次经过哪些函数？按调用顺序讲一遍，指出每一步在哪个文件。不要改代码。",
 }
 # 场景名 → （怎么跑, 跑成什么样算正常）

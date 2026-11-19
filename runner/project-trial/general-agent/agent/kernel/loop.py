@@ -123,7 +123,9 @@ class Agent:
         verdict = await self.gate.check(tool, call)
         if not verdict.allowed:
             self.session.note("tool_denied", id=call.id, name=call.name, reason=verdict.reason)
-            self.emit(Event("tool_end", {"id": call.id, "name": call.name, "denied": True, "result": verdict.reason}))
+            # 被拦下的调用没有 tool_start，把参数带在这里，界面才能显示拦下的是什么
+            self.emit(Event("tool_end", {"id": call.id, "name": call.name, "denied": True, "result": verdict.reason,
+                                         "arguments": call.arguments}))
             return verdict.reason
         self.session.note("tool_start", id=call.id, name=call.name, arguments=call.arguments)
         self.emit(Event("tool_start", {"id": call.id, "name": call.name, "arguments": call.arguments}))
