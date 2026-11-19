@@ -11,6 +11,8 @@ from typing import Any, Callable, Protocol
 from .types import Message, ToolCall, Usage
 
 TextSink = Callable[[str], None]
+# 工具调用的参数还在生成时的进度：(第几个调用, 工具名, 新到的一段参数原文)
+ToolSink = Callable[[int, str, str], None]
 
 
 class ModelError(Exception):
@@ -42,10 +44,10 @@ class OpenAICompatModel:
         self.timeout = timeout
         self.extra_body: dict[str, Any] = json.loads(os.environ.get("LLM_EXTRA_BODY") or "{}")
 
-    async def chat(self, messages, tools, on_text=None):
-        return await asyncio.to_thread(self._chat_sync, messages, tools, on_text)
+    async def chat(self, messages, tools, on_text=None, on_tool=None):
+        return await asyncio.to_thread(self._chat_sync, messages, tools, on_text, on_tool)
 
-    def _chat_sync(self, messages, tools, on_text):
+    def _chat_sync(self, messages, tools, on_text, on_tool=None):
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [m.to_api() for m in messages],
@@ -62,7 +64,7 @@ class OpenAICompatModel:
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return parse_stream(resp, on_text)
+                return parse_stream(resp, on_text, on_tool)
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
             # 4xx 里只有限流值得重试，其余是请求本身有问题
@@ -71,10 +73,11 @@ class OpenAICompatModel:
             raise ModelError(f"模型接口连接失败：{e}")
 
 
-def parse_stream(lines, on_text: TextSink | None) -> tuple[Message, Usage]:
+def parse_stream(lines, on_text: TextSink | None, on_tool: ToolSink | None = None) -> tuple[Message, Usage]:
     """把流式响应拼成一条完整消息。
 
     工具调用的参数是一小段一小段到达的 JSON 片段，必须按调用序号拼完整再解析。
+    写一个大文件时参数要生成十几秒：on_tool 把每一段原文交出去，界面可以边生成边显示。
     """
     text: list[str] = []
     reasoning: list[str] = []
@@ -107,6 +110,8 @@ def parse_stream(lines, on_text: TextSink | None) -> tuple[Message, Usage]:
                 if fn.get("name"):
                     slot["name"] = fn["name"]
                 slot["args"] += fn.get("arguments") or ""
+                if on_tool and fn.get("arguments") and slot["name"]:
+                    on_tool(tc.get("index", 0), slot["name"], fn["arguments"])
     tool_calls = []
     for index in sorted(calls):
         slot = calls[index]

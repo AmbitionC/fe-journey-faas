@@ -65,7 +65,13 @@ SCENARIOS = {
 ALLOW = ["python*", "pytest*", "ls*", "cat *", "head*", "tail*", "grep*", "find*", "wc*", "echo*", "rm *",
          "git status*", "git diff*"]
 # 附在任务后面、不显示给用户：试用有轮次上限，让它做完就收尾
-TASK_SUFFIX = "\n\n（这是网页上的试用，轮次有限：做完就停下来，用几句话说明结论和改了什么。不要新建临时文件。）"
+TASK_SUFFIX = ("\n\n（这是网页上的试用，轮次有限：做完就停下来，用几句话说明结论和改了什么。不要新建临时文件。"
+               "如果任务是做一个网页，就写成单个 HTML 文件，样式和脚本都内联、不引用外部资源，一次写完整；"
+               "页面会直接显示在用户旁边的预览里，不需要你验证，也不要顺手改仓库里别的文件。"
+               "收尾时用两三句话说做了什么、怎么用，不用交代没做哪些验证。）")
+# 只有写文件、改文件的参数值得边生成边推给页面；每攒够这么多字符推一次
+STREAMED_TOOLS = ("write_file", "edit_file")
+DELTA_FLUSH_CHARS = 240
 
 
 def read_tree(root: Path) -> dict[str, str]:
@@ -180,6 +186,10 @@ def public_event(event: Event) -> dict | None:
         return {"type": "text", "text": d["text"]}
     if event.kind == "tool_start":
         return {"type": "tool_start", "id": d["id"], "name": d["name"], "arguments": d["arguments"]}
+    if event.kind == "tool_delta":
+        if d["name"] not in STREAMED_TOOLS:
+            return None
+        return {"type": "tool_delta", "index": d["index"], "name": d["name"], "delta": d["delta"]}
     if event.kind == "tool_end":
         out = {"type": "tool_end", "id": d["id"], "name": d["name"], "denied": d["denied"],
                "result": d["result"][:3000]}
@@ -196,13 +206,34 @@ async def run_trial(scenario: dict, task: str, emit, workspace=None, history=Non
     pristine = read_tree(workdir)
     apply_workspace(workdir, *clean_workspace(workspace))
     before = read_tree(workdir)
+    pending: dict[tuple[int, str], str] = {}
+
+    def flush() -> None:
+        for (index, name), text in list(pending.items()):
+            emit({"type": "tool_delta", "index": index, "name": name, "delta": text})
+        pending.clear()
+
+    def forward(event: Event) -> None:
+        """参数片段一个词一段，攒一攒再推；别的事件到来前先把攒着的推完，顺序才对。"""
+        ev = public_event(event)
+        if ev is None:
+            return
+        if ev["type"] == "tool_delta":
+            key = (ev["index"], ev["name"])
+            pending[key] = pending.get(key, "") + ev["delta"]
+            if len(pending[key]) >= DELTA_FLUSH_CHARS:
+                flush()
+            return
+        flush()
+        emit(ev)
+
     try:
         agent = build_coding_agent(
             OpenAICompatModel(), workdir, headless=True, home=tmp, subagents=False,
             rules=[Rule("run_command", p, "allow") for p in ALLOW]
             + [Rule(t, "*", "allow") for t in ("write_file", "edit_file")],
             executor=RemoteExecutor(SANDBOX_URL, SANDBOX_TOKEN), command_timeout=45,
-            max_turns=MAX_TURNS, on_event=lambda e: (ev := public_event(e)) and emit(ev))
+            max_turns=MAX_TURNS, on_event=forward)
         # 之前几句对话接在系统提示词后面。上一轮的工具调用细节不带，文件的现状已经在工作区里了
         for role, text in clean_history(history):
             agent.messages.append(Message(role, text))

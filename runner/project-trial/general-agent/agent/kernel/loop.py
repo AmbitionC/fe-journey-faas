@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from dataclasses import dataclass, field
 from typing import Callable, Literal
@@ -48,6 +49,8 @@ class Agent:
         self.repeat_limit = repeat_limit
         self.context = context
         self.depth = depth  # 0 是主任务，子任务是 1
+        # 模型客户端支持的话，把工具参数的生成进度也转成事件（界面可以边写边显示）
+        self._tool_progress = "on_tool" in inspect.signature(model.chat).parameters
         self.messages: list[Message] = []
         self._append(Message("system", system_prompt))
         self._recent: list[str] = []
@@ -92,9 +95,11 @@ class Agent:
         attempt = 0
         while True:
             try:
+                extra = {"on_tool": lambda i, name, part: self.emit(
+                    Event("tool_delta", {"index": i, "name": name, "delta": part}))} if self._tool_progress else {}
                 reply, used = await self.model.chat(
                     self.messages, self.registry.schemas() if tools else [],
-                    on_text=lambda t: self.emit(Event("text_delta", {"text": t})))
+                    on_text=lambda t: self.emit(Event("text_delta", {"text": t})), **extra)
                 if self.context:
                     self.context.observe(used)
                 return reply, used
