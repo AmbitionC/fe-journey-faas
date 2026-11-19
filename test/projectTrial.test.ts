@@ -11,6 +11,7 @@ function controller(opts: { userId?: string; member?: boolean } = {}) {
   c.redisService = {
     incr: async (k: string) => { counts.set(k, (counts.get(k) || 0) + 1); return counts.get(k); },
     expire: async () => 1,
+    get: async (k: string) => (counts.has(k) ? String(counts.get(k)) : null),
   } as any;
   c.entitlementService = { check: async () => ({ allowed: !!opts.member }) } as any;
   c.now = () => new Date('2026-11-18T23:30:00+08:00');
@@ -44,7 +45,7 @@ describe('项目实战在线试用票据', () => {
     assert.strictEqual(r.data.url, 'https://trial.fixture.invalid/run');
     assert.strictEqual(r.data.remaining, 2);
     const payload = JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString());
-    assert.strictEqual(payload.scenario, 'shop');
+    assert.strictEqual(payload.scenario, 'store');
     assert.strictEqual(payload.exp, Math.floor(new Date('2026-11-18T23:30:00+08:00').getTime() / 1000) + 120);
   });
 
@@ -64,6 +65,21 @@ describe('项目实战在线试用票据', () => {
     assert.strictEqual(payload.scenario, 'campaign');
     assert.strictEqual(payload.project, 'ecom-growth');
     await assert.rejects(controller().c.trialTicket({ projectId: 'ecom-growth', scenario: 'shop' }), /场景/);
+  });
+
+  it('通用 Agent 默认是电商后端的示例仓库，最早的购物车场景仍可指定', async () => {
+    const r = await controller().c.trialTicket({ projectId: 'general-agent', scenario: 'shop' });
+    assert.strictEqual(JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString()).scenario, 'shop');
+  });
+
+  it('查今天还剩几次：只读不占次数，未登录返回空', async () => {
+    const { c } = controller();
+    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 3, remaining: 3, member: false });
+    await c.trialTicket({ projectId: 'general-agent' });
+    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 3, remaining: 2, member: false });
+    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 3, remaining: 2, member: false });
+    assert.deepStrictEqual((await controller({ member: true }).c.trialQuota()).data, { limit: 20, remaining: 20, member: true });
+    assert.strictEqual((await controller({ userId: '' }).c.trialQuota()).data, null);
   });
 
   it('未登录、未知项目、未知场景、未配置都拒绝', async () => {

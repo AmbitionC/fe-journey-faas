@@ -32,7 +32,7 @@ from agent.build import build_coding_agent  # noqa: E402
 from agent.kernel.permission import Rule  # noqa: E402
 from agent.model import OpenAICompatModel  # noqa: E402
 from agent.sandbox import RemoteExecutor  # noqa: E402
-from agent.types import Event  # noqa: E402
+from agent.types import Event, Message  # noqa: E402
 
 PORT = int(os.environ.get("FC_SERVER_PORT") or os.environ.get("PORT") or 9000)
 TICKET_SECRET = os.environ.get("TRIAL_TICKET_SECRET", "")
@@ -41,9 +41,20 @@ SANDBOX_TOKEN = os.environ.get("SANDBOX_TOKEN", "")
 ALLOWED_ORIGINS = [o for o in os.environ.get("TRIAL_ALLOWED_ORIGINS", "").split(",") if o]
 MAX_TURNS = int(os.environ.get("TRIAL_MAX_TURNS", "24"))
 MAX_SECONDS = int(os.environ.get("TRIAL_MAX_SECONDS", "150"))
-MAX_TASK_CHARS = 300
+MAX_TASK_CHARS = 500
+# 同一个会话里接着下任务：浏览器把上一轮结束时的工作区改动和最近几句对话带回来
+MAX_HISTORY_MESSAGES = 6
+MAX_HISTORY_CHARS = 1500
+MAX_CARRIED_FILES = 40
+MAX_CARRIED_BYTES = 120_000
+SKIP_DIRS = ("__pycache__", ".pytest_cache")
 
 SCENARIOS = {
+    "store": {
+        "title": "在一个小型电商后端里干活",
+        "repo": ROOT / "fixtures" / "store",
+        "default_task": "跑一下测试，有几条用例挂了。找到原因并修好，不要修改测试。",
+    },
     "shop": {
         "title": "修好购物车的金额计算",
         "repo": ROOT / "fixtures" / "shop",
@@ -53,9 +64,65 @@ SCENARIOS = {
 # 命令都在隔离沙箱里执行，放行面可以宽一些；没列出的（比如 curl、pip）仍会被权限闸门拦下
 ALLOW = ["python*", "pytest*", "ls*", "cat *", "head*", "tail*", "grep*", "find*", "wc*", "echo*", "rm *",
          "git status*", "git diff*"]
-# 附在任务后面、不显示给用户：试用有轮次上限，让它修好就收尾
-TASK_SUFFIX = "\n\n（修好并确认测试通过后就停下来，用几句话说明原因和改法。不要新建临时文件。）"
+# 附在任务后面、不显示给用户：试用有轮次上限，让它做完就收尾
+TASK_SUFFIX = "\n\n（这是网页上的试用，轮次有限：做完就停下来，用几句话说明结论和改了什么。不要新建临时文件。）"
 
+
+def read_tree(root: Path) -> dict[str, str]:
+    """工作区里全部文本文件的内容，用来比较一次运行前后的变化。"""
+    out = {}
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or p.is_symlink() or set(SKIP_DIRS) & set(p.parts):
+            continue
+        try:
+            out[p.relative_to(root).as_posix()] = p.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+    return out
+
+
+def safe_rel(path: str) -> bool:
+    parts = Path(path).parts
+    return (bool(parts) and not Path(path).is_absolute() and ".." not in parts and len(path) < 200
+            and not set(SKIP_DIRS) & set(parts) and not parts[0].startswith("."))
+
+
+def clean_workspace(raw) -> tuple[dict[str, str], list[str]]:
+    """校验浏览器带回来的工作区改动：只收相对路径的文本，数量和体积都有上限，超了就整个不要。"""
+    if not isinstance(raw, dict):
+        return {}, []
+    files = raw.get("files") if isinstance(raw.get("files"), dict) else {}
+    deleted = raw.get("deleted") if isinstance(raw.get("deleted"), list) else []
+    ok = {k: v for k, v in files.items() if isinstance(k, str) and isinstance(v, str) and safe_rel(k)}
+    gone = [k for k in deleted if isinstance(k, str) and safe_rel(k)]
+    if (len(ok) != len(files) or len(gone) != len(deleted) or len(ok) + len(gone) > MAX_CARRIED_FILES
+            or sum(len(v.encode()) for v in ok.values()) > MAX_CARRIED_BYTES):
+        return {}, []
+    return ok, gone
+
+
+def clean_history(raw) -> list[tuple[str, str]]:
+    """最近几句对话，只认用户和助手两种角色，每句截断。用来让它知道“刚才那个”指什么。"""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for m in raw[-MAX_HISTORY_MESSAGES:]:
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
+            text = m["content"].strip()[:MAX_HISTORY_CHARS]
+            if text:
+                out.append((m["role"], text))
+    return out
+
+
+def apply_workspace(workdir: Path, files: dict[str, str], deleted: list[str]) -> None:
+    for rel in deleted:
+        target = workdir / rel
+        if target.is_file():
+            target.unlink()
+    for rel, content in files.items():
+        target = workdir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
 
 
 def load_plugins() -> None:
@@ -119,11 +186,13 @@ def public_event(event: Event) -> dict | None:
     return None
 
 
-async def run_trial(scenario: dict, task: str, emit) -> dict:
+async def run_trial(scenario: dict, task: str, emit, workspace=None, history=None) -> dict:
     tmp = Path(tempfile.mkdtemp(prefix="trial-"))
     workdir = tmp / "repo"
-    shutil.copytree(scenario["repo"], workdir, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
-    before = {str(p.relative_to(workdir)): p.read_text(encoding="utf-8") for p in workdir.rglob("*.py")}
+    shutil.copytree(scenario["repo"], workdir, ignore=shutil.ignore_patterns(*SKIP_DIRS))
+    pristine = read_tree(workdir)
+    apply_workspace(workdir, *clean_workspace(workspace))
+    before = read_tree(workdir)
     try:
         agent = build_coding_agent(
             OpenAICompatModel(), workdir, headless=True, home=tmp, subagents=False,
@@ -131,15 +200,21 @@ async def run_trial(scenario: dict, task: str, emit) -> dict:
             + [Rule(t, "*", "allow") for t in ("write_file", "edit_file")],
             executor=RemoteExecutor(SANDBOX_URL, SANDBOX_TOKEN), command_timeout=45,
             max_turns=MAX_TURNS, on_event=lambda e: (ev := public_event(e)) and emit(ev))
+        # 之前几句对话接在系统提示词后面。上一轮的工具调用细节不带，文件的现状已经在工作区里了
+        for role, text in clean_history(history):
+            agent.messages.append(Message(role, text))
         try:
             outcome = await asyncio.wait_for(agent.run(task + TASK_SUFFIX), timeout=MAX_SECONDS)
             summary = {"stopped": outcome.stopped, "turns": outcome.turns,
                        "input_tokens": outcome.usage.input, "output_tokens": outcome.usage.output}
         except asyncio.TimeoutError:
             summary = {"stopped": "timeout", "turns": 0, "input_tokens": 0, "output_tokens": 0}
-        after = {str(p.relative_to(workdir)): p.read_text(encoding="utf-8") for p in workdir.rglob("*.py")}
-        summary["changed_files"] = [{"path": k, "before": before.get(k, ""), "after": v}
-                                    for k, v in sorted(after.items()) if before.get(k) != v][:10]
+        after = read_tree(workdir)
+        # 这一轮改了什么（给页面显示改动），以及相对初始仓库的全部改动（下一轮带回来）
+        summary["changed_files"] = [{"path": k, "before": before.get(k, ""), "after": after.get(k, "")}
+                                    for k in sorted(set(before) | set(after)) if before.get(k) != after.get(k)][:20]
+        summary["workspace"] = {"files": {k: v for k, v in after.items() if pristine.get(k) != v},
+                                "deleted": [k for k in pristine if k not in after]}
         return summary
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -181,19 +256,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "not found"})
         try:
             length = int(self.headers.get("Content-Length") or 0)
-            req = json.loads(self.rfile.read(length)) if 0 < length < 20_000 else {}
+            req = json.loads(self.rfile.read(length)) if 0 < length < 400_000 else {}
         except Exception:
             req = {}
         ticket = verify(str(req.get("ticket", "")), TICKET_SECRET)
         if ticket is None:
             return self._json(401, {"error": "试用票据无效或已过期，请刷新页面重试。"})
-        scenario = SCENARIOS.get(str(req.get("scenario") or ticket.get("scenario") or "shop"))
+        scenario = SCENARIOS.get(str(req.get("scenario") or ticket.get("scenario") or "store"))
         if scenario is None:
             return self._json(400, {"error": "没有这个试用场景。"})
         task = str(req.get("task") or "").strip()[:MAX_TASK_CHARS] or scenario["default_task"]
         if scenario.get("fixed_task"):
             task = scenario["default_task"]
-        runner = scenario["run"] if "run" in scenario else (lambda task, emit: run_trial(scenario, task, emit))
+        runner = scenario["run"] if "run" in scenario else (
+            lambda task, emit: run_trial(scenario, task, emit, req.get("workspace"), req.get("history")))
 
         self.send_response(200)
         self._cors()
