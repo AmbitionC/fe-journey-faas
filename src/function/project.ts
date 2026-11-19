@@ -80,6 +80,25 @@ export class ProjectHTTPService {
   }
 
   @ServerlessTrigger(ServerlessTriggerType.HTTP, {
+    description: '项目实战在线试用：今天还剩几次（只读，不占次数）',
+    functionName: 'projectTrialQuota',
+    name: 'projectTrialQuota',
+    path: '/project/trial/quota',
+    method: 'get',
+  })
+  @NoAuth()
+  async trialQuota(): Promise<any> {
+    const info = await resolveUserInfo(this.ctx, this.redisService);
+    const userId = info?.userId || '';
+    // 没登录不算错：页面据此不显示次数
+    if (!userId) return { success: true, data: null };
+    const member = (await this.entitlementService.check(userId, 'materials_pdf', {})).allowed;
+    const limit = member ? TRIAL_DAILY_LIMIT.member : TRIAL_DAILY_LIMIT.user;
+    const used = Number(await this.redisService.get(trialQuotaKey(userId, this.now()))) || 0;
+    return { success: true, data: { limit, remaining: Math.max(0, limit - used), member } };
+  }
+
+  @ServerlessTrigger(ServerlessTriggerType.HTTP, {
     description: '项目实战源码下载（会员权益）：签发 1 小时临时链接',
     functionName: 'projectSourceDownload',
     name: 'projectSourceDownload',
