@@ -181,8 +181,11 @@ def public_event(event: Event) -> dict | None:
     if event.kind == "tool_start":
         return {"type": "tool_start", "id": d["id"], "name": d["name"], "arguments": d["arguments"]}
     if event.kind == "tool_end":
-        return {"type": "tool_end", "id": d["id"], "name": d["name"], "denied": d["denied"],
-                "result": d["result"][:3000]}
+        out = {"type": "tool_end", "id": d["id"], "name": d["name"], "denied": d["denied"],
+               "result": d["result"][:3000]}
+        if d["denied"]:
+            out["arguments"] = d.get("arguments", {})  # 被权限闸门拦下的调用没有 tool_start
+        return out
     return None
 
 

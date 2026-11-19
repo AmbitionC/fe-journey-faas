@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>通用 Agent · 本地工作台</title>
+<style>
+:root{--bg:#0b0c0d;--panel:#131517;--raised:#1a1d20;--hover:#22262a;--border:#2a2e33;--text:#f2f3f4;--sub:#b6bcc2;--muted:#7d858d;--accent:#a7b7ad;--ok:#6fcf97;--bad:#f28b82;--warn:#e6b450;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:light){:root{--bg:#eef0ee;--panel:#f7f8f7;--raised:#fff;--hover:#e6e9e6;--border:#d5d9d5;--text:#17191b;--sub:#40464b;--muted:#6f777e;--accent:#3f6b55;--ok:#1e7d4a;--bad:#c0392b;--warn:#a86a00}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+button{font:inherit;color:inherit;cursor:pointer}
+.app{display:grid;grid-template-columns:230px minmax(0,1fr) minmax(0,1fr);height:100%}
+.col{min-width:0;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--panel)}
+.col:last-child{border-right:0}
+.bar{flex:none;display:flex;align-items:center;gap:8px;height:48px;padding:0 14px;border-bottom:1px solid var(--border);font-weight:600}
+.bar small{font-weight:400;color:var(--muted);font-family:var(--mono)}
+.grow{flex:1;min-height:0;overflow:auto}
+.btn{border:1px solid var(--border);background:var(--raised);border-radius:8px;padding:6px 12px}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0b0c0d;font-weight:600}
+.btn:disabled{opacity:.5;cursor:default}
+.side{padding:12px;display:flex;flex-direction:column;gap:6px}
+.side h4{margin:14px 4px 4px;font-size:12px;font-weight:500;color:var(--muted)}
+.side .item{display:block;width:100%;text-align:left;border:0;background:transparent;border-radius:8px;padding:8px 10px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side .item:hover,.side .item.on{background:var(--hover);color:var(--text)}
+.thread{padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.user{align-self:flex-end;max-width:85%;background:var(--raised);border:1px solid var(--border);border-radius:12px;padding:10px 14px;white-space:pre-wrap}
+.text{white-space:pre-wrap;word-break:break-word}
+.text code{font-family:var(--mono);font-size:12.5px;background:var(--raised);padding:1px 5px;border-radius:4px}
+.step{border-left:2px solid var(--border);padding:2px 0 2px 12px}
+.step summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:baseline;color:var(--sub);min-width:0}
+.step summary::-webkit-details-marker{display:none}
+.step summary b{flex:none;font-weight:500}
+.step summary code{font-family:var(--mono);font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.step .out{flex:none;margin-left:auto;font-size:12px;color:var(--muted);font-family:var(--mono)}
+.step.run{border-color:var(--warn)}.step.ok{border-color:var(--ok)}.step.denied{border-color:var(--bad)}
+.step.denied .out{color:var(--bad)}
+pre{margin:8px 0 4px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font:12px/1.6 var(--mono);overflow:auto;max-height:280px;white-space:pre}
+.summary{border:1px solid var(--border);border-radius:10px;background:var(--raised);overflow:hidden}
+.summary header{padding:10px 14px;font-weight:600}
+.summary header span{font-weight:400;color:var(--muted);margin-left:8px}
+.summary button{display:flex;width:100%;gap:10px;align-items:center;border:0;border-top:1px solid var(--border);background:transparent;padding:9px 14px;text-align:left;font-family:var(--mono);font-size:12.5px}
+.summary button:hover{background:var(--hover)}
+.summary button i{font-style:normal;margin-left:auto}
+.add{color:var(--ok)}.del{color:var(--bad)}
+.error{color:var(--bad);border:1px solid var(--bad);border-radius:8px;padding:10px 12px}
+.welcome h2{margin:24px 0 6px;font-size:20px}
+.welcome p{margin:0 0 16px;color:var(--sub)}
+.samples{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.samples button{text-align:left;border:1px solid var(--border);background:var(--raised);border-radius:10px;padding:12px 14px}
+.samples button:hover{border-color:var(--accent)}
+.samples b{display:block;margin-bottom:4px}
+.samples span{color:var(--muted);font-size:12.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.composer{flex:none;padding:12px 16px 16px;border-top:1px solid var(--border)}
+.composer .box{display:flex;gap:8px;align-items:flex-end;border:1px solid var(--border);background:var(--raised);border-radius:12px;padding:8px}
+.composer textarea{flex:1;min-height:40px;max-height:160px;resize:none;border:0;outline:0;background:transparent;color:var(--text);font:inherit;padding:6px 8px}
+.composer small{display:block;margin-top:6px;color:var(--muted)}
+.tabs{margin-left:auto;display:flex;gap:4px}
+.tabs button{border:0;background:transparent;border-radius:6px;padding:4px 10px;color:var(--muted);font-weight:400}
+.tabs button.on{background:var(--hover);color:var(--text)}
+.ws{display:grid;grid-template-columns:210px minmax(0,1fr);flex:1;min-height:0}
+.tree{border-right:1px solid var(--border);overflow:auto;padding:8px}
+.tree .dir{padding:4px 8px;color:var(--muted);font-size:12.5px}
+.tree button{display:flex;width:100%;gap:6px;align-items:center;border:0;background:transparent;border-radius:6px;padding:4px 8px;text-align:left;font-size:13px;white-space:nowrap}
+.tree button:hover,.tree button.on{background:var(--hover)}
+.tree em{font-style:normal;font-size:11px;border:1px solid currentColor;border-radius:4px;padding:0 4px;line-height:1.4}
+.m{color:var(--warn)}.a{color:var(--ok)}.d{color:var(--bad);text-decoration:line-through}
+.view{min-width:0;overflow:auto}
+.view .path{position:sticky;top:0;background:var(--panel);padding:8px 14px;border-bottom:1px solid var(--border);font:12px var(--mono);color:var(--sub)}
+.code{margin:0;border:0;border-radius:0;max-height:none;background:transparent;counter-reset:n}
+.code span{display:block;min-height:1.6em}
+.code .ln::before{counter-increment:n;content:counter(n);display:inline-block;width:2.4em;margin-right:14px;text-align:right;color:var(--muted)}
+.code .p{background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
+.code .n{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.code .f{color:var(--muted)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warn);animation:b 1s infinite alternate}
+@keyframes b{to{opacity:.25}}
+@media (max-width:1000px){.app{grid-template-columns:minmax(0,1fr)}.col:first-child,.col:last-child{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="col">
+    <div class="bar">通用 Agent</div>
+    <div class="grow side">
+      <button class="btn" id="new">＋ 新会话（重置仓库）</button>
+      <h4>本次会话</h4>
+      <div id="turns"></div>
+      <h4>样例任务</h4>
+      <div id="sampleList"></div>
+    </div>
+  </aside>
+  <main class="col">
+    <div class="bar"><span id="title">新会话</span><small id="status"></small></div>
+    <div class="grow" id="scroll"><div class="thread" id="thread"></div></div>
+    <div class="composer">
+      <div class="box">
+        <textarea id="input" rows="1" placeholder="描述一个任务，比如：跑一下测试，把挂掉的用例修好"></textarea>
+        <button class="btn primary" id="send">发送</button>
+      </div>
+      <small>命令在你的电脑上执行。默认只放行跑测试和只读命令，其余会被权限闸门拦下；Agent 只改工作副本，不动原目录。</small>
+    </div>
+  </main>
+  <section class="col">
+    <div class="bar">工作区 <small id="repo"></small>
+      <div class="tabs"><button id="tabFiles" class="on">文件</button><button id="tabChanges">改动</button></div>
+    </div>
+    <div class="ws"><div class="tree" id="tree"></div><div class="view" id="view"></div></div>
+  </section>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const LABEL = { read_file: '读文件', write_file: '写文件', edit_file: '改文件', run_command: '运行命令', find_files: '找文件', search_text: '搜索' };
+const S = { files: {}, pristine: {}, samples: [], running: false, tab: 'files', open: null, turns: 0 };
+
+// 逐行对比：最长公共子序列。文件都不大，够用
+function diff(a, b) {
+  const x = a ? a.replace(/\n$/, '').split('\n') : [], y = b ? b.replace(/\n$/, '').split('\n') : [];
+  const m = x.length, n = y.length, t = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < m && j < n) { if (x[i] === y[j]) { out.push([' ', x[i]]); i++; j++; } else if (t[i + 1][j] >= t[i][j + 1]) out.push(['-', x[i++]]); else out.push(['+', y[j++]]); }
+  while (i < m) out.push(['-', x[i++]]); while (j < n) out.push(['+', y[j++]]);
+  return out;
+}
+const count = (d) => [d.filter((l) => l[0] === '+').length, d.filter((l) => l[0] === '-').length];
+function diffHtml(a, b, fold = true) {
+  const d = diff(a, b), keep = d.map((l, i) => l[0] !== ' ' || d.slice(Math.max(0, i - 3), i + 4).some((k) => k[0] !== ' '));
+  let html = '', skipped = 0;
+  d.forEach((l, i) => {
+    if (fold && !keep[i]) { skipped++; return; }
+    if (skipped) { html += `<span class="f">  ⋯ 省略 ${skipped} 行没改的</span>`; skipped = 0; }
+    html += `<span class="${l[0] === '+' ? 'p' : l[0] === '-' ? 'n' : ''}">${l[0]} ${esc(l[1])}</span>`;
+  });
+  return `<pre class="code">${html || '<span class="f">没有改动</span>'}</pre>`;
+}
+const status = (p) => !(p in S.pristine) ? 'a' : !(p in S.files) ? 'd' : S.files[p] !== S.pristine[p] ? 'm' : '';
+const MARK = { a: '新', m: '改', d: '删' };
+const changed = () => [...new Set([...Object.keys(S.files), ...Object.keys(S.pristine)])].filter(status).sort();
+
+function renderTree() {
+  const paths = S.tab === 'changes' ? changed() : [...new Set([...Object.keys(S.files), ...Object.keys(S.pristine)])].sort((a, b) => (b.includes('/') - a.includes('/')) || a.localeCompare(b));
+  $('tabChanges').textContent = `改动 ${changed().length || ''}`;
+  $('tabFiles').className = S.tab === 'files' ? 'on' : ''; $('tabChanges').className = S.tab === 'changes' ? 'on' : '';
+  if (!paths.length) { $('tree').innerHTML = '<div class="dir">还没有改动</div>'; return; }
+  let html = '', dir = null;
+  for (const p of paths) {
+    const d = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+    if (d !== dir) { dir = d; if (d) html += `<div class="dir">${esc(d)}/</div>`; }
+    const s = status(p);
+    html += `<button data-p="${esc(p)}" class="${p === S.open ? 'on' : ''}" style="padding-left:${d ? 20 : 8}px"><span class="${s}">${esc(p.slice(d ? d.length + 1 : 0))}</span>${s ? `<em class="${s}">${MARK[s]}</em>` : ''}</button>`;
+  }
+  $('tree').innerHTML = html;
+}
+function renderView() {
+  const p = S.open;
+  if (!p) { $('view').innerHTML = ''; return; }
+  const s = status(p);
+  const body = s ? diffHtml(S.pristine[p] || '', S.files[p] || '', false)
+    : `<pre class="code">${(S.files[p] || '').replace(/\n$/, '').split('\n').map((l) => `<span class="ln">${esc(l)}</span>`).join('')}</pre>`;
+  $('view').innerHTML = `<div class="path">${esc(p)}${s ? ` · <span class="${s}">${MARK[s]}</span>` : ''}</div>${body}`;
+}
+function openFile(p) { S.open = p; renderTree(); renderView(); }
+$('tree').onclick = (e) => { const b = e.target.closest('button'); if (b) openFile(b.dataset.p); };
+$('tabFiles').onclick = () => { S.tab = 'files'; renderTree(); };
+$('tabChanges').onclick = () => { S.tab = 'changes'; renderTree(); };
+
+function welcome() {
+  $('thread').innerHTML = `<div class="welcome"><h2>把一个任务交给它</h2><p>右边是它干活的仓库。给它一个任务，看它怎么读代码、跑测试、改文件。同一个会话里可以接着下任务，改动会留在工作副本里。</p>${S.samples.length ? `<div class="samples">${S.samples.map((s, i) => `<button data-i="${i}"><b>${esc(s.title)}</b><span>${esc(s.task)}</span></button>`).join('')}</div>` : ''}</div>`;
+}
+$('thread').addEventListener('click', (e) => {
+  const s = e.target.closest('.samples button'); if (s) { $('input').value = S.samples[s.dataset.i].task; $('input').focus(); return; }
+  const f = e.target.closest('.summary button'); if (f) { S.tab = 'changes'; openFile(f.dataset.p); }
+});
+function add(html) { const el = document.createElement('div'); el.innerHTML = html; const node = el.firstElementChild; $('thread').appendChild(node); return node; }
+const stick = () => { const s = $('scroll'); s.scrollTop = s.scrollHeight; };
+const fmt = (t) => esc(t).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+function outcome(name, result, denied) {
+  if (denied) return '被权限规则拦下';
+  const lines = result.trim().split('\n').filter(Boolean);
+  if (name === 'read_file') return `${lines.length} 行`;
+  if (name === 'find_files' || name === 'search_text') return `${lines.length} 条结果`;
+  if (name === 'run_command') { const v = [...lines].reverse().find((l) => /\d+ (passed|failed|error)/.test(l)); return v ? v.replace(/=/g, '').trim() : lines[0] || ''; }
+  return '';
+}
+
+async function run(task) {
+  if (S.running || !task.trim()) return;
+  S.running = true; $('send').textContent = '停止'; $('status').innerHTML = '<span class="dot"></span> 运行中';
+  if (!S.turns) $('thread').innerHTML = '';
+  S.turns++; $('title').textContent = S.turns === 1 ? task.slice(0, 24) : $('title').textContent;
+  $('turns').insertAdjacentHTML('beforeend', `<div class="item">${esc(task.slice(0, 30))}</div>`);
+  add(`<div class="user">${esc(task)}</div>`); stick();
+  let text = null, raw = ''; const steps = {};
+  const onEvent = (ev) => {
+    if (ev.type === 'text') { if (!text) { text = add('<div class="text"></div>'); raw = ''; } raw += ev.text; text.innerHTML = fmt(raw); }
+    else if (ev.type === 'tool_start') {
+      text = null; const a = ev.arguments || {}; const target = a.path || a.command || a.pattern || '';
+      let detail = '';
+      if (ev.name === 'edit_file') detail = diffHtml(a.old_text || '', a.new_text || '', false);
+      if (ev.name === 'write_file') detail = diffHtml('', a.content || '', false);
+      steps[ev.id] = add(`<details class="step run"><summary><b>${LABEL[ev.name] || esc(ev.name)}</b><code>${esc(target)}</code><span class="out">执行中</span></summary>${detail}</details>`);
+      steps[ev.id].dataset.keep = detail ? '1' : '';
+    } else if (ev.type === 'tool_end') {
+      let el = steps[ev.id];
+      if (!el) { // 被权限闸门拦下的调用没有 tool_start，在这里补一行
+        const a = ev.arguments || {}; text = null;
+        el = steps[ev.id] = add(`<details class="step" open><summary><b>${LABEL[ev.name] || esc(ev.name)}</b><code>${esc(a.path || a.command || a.pattern || '')}</code><span class="out"></span></summary></details>`);
+      }
+      el.className = `step ${ev.denied ? 'denied' : 'ok'}`; el.querySelector('.out').textContent = outcome(ev.name, ev.result, ev.denied);
+      if (!el.dataset.keep || ev.denied) el.insertAdjacentHTML('beforeend', `<pre>${esc(ev.result)}</pre>`);
+    } else if (ev.type === 'done') {
+      S.files = ev.files;
+      const stop = { finished: '任务完成', max_turns: '到了轮次上限', interrupted: '已停止' }[ev.stopped] || ev.stopped;
+      add(`<div class="summary"><header>${stop}<span>${ev.turns} 轮 · 输入 ${ev.input_tokens} / 输出 ${ev.output_tokens} token</span></header>${ev.changed_files.map((f) => { const [p, n] = count(diff(f.before, f.after)); return `<button data-p="${esc(f.path)}">${esc(f.path)}<i><span class="add">+${p}</span> <span class="del">−${n}</span></i></button>`; }).join('')}</div>`);
+      if (ev.changed_files.length) { S.tab = 'changes'; S.open = ev.changed_files[0].path; }
+      renderTree(); renderView();
+    } else if (ev.type === 'error') add(`<div class="error">没跑起来：${esc(ev.message)}<br>检查 OPENAI_API_KEY、OPENAI_BASE_URL、LLM_MODEL 三个环境变量。</div>`);
+    stick();
+  };
+  try {
+    const res = await fetch('/api/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task }) });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf('\n\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 2); if (line.startsWith('data: ')) onEvent(JSON.parse(line.slice(6))); }
+    }
+  } catch (e) { add(`<div class="error">${esc(e.message)}</div>`); }
+  S.running = false; $('send').textContent = '发送'; $('status').textContent = '';
+}
+$('send').onclick = () => { if (S.running) return fetch('/api/stop', { method: 'POST' }); const v = $('input').value; $('input').value = ''; run(v); };
+$('input').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('send').click(); } };
+$('sampleList').onclick = (e) => { const b = e.target.closest('button'); if (b) { $('input').value = S.samples[b.dataset.i].task; $('input').focus(); } };
+async function load(reset) {
+  const res = await fetch(reset ? '/api/reset' : '/api/state', { method: reset ? 'POST' : 'GET' });
+  const st = await res.json(); if (!res.ok) { alert(st.error); return; }
+  Object.assign(S, { files: st.files, pristine: st.pristine, samples: st.samples, turns: 0, tab: 'files' });
+  S.open = 'README.md' in S.files ? 'README.md' : Object.keys(S.files)[0] || null;
+  $('repo').textContent = st.repo; $('title').textContent = '新会话'; $('turns').innerHTML = '';
+  $('sampleList').innerHTML = S.samples.map((s, i) => `<button class="item" data-i="${i}">${esc(s.title)}</button>`).join('');
+  welcome(); renderTree(); renderView();
+}
+$('new').onclick = () => { if (!S.running) load(true); };
+load(false);
+</script>
+</body>
+</html>
