@@ -10,8 +10,11 @@ export const ORT_PREFIX = 'little-circle-web/ort';
 export const ORT_SIGN_SECONDS = 2 * 3600;
 
 const BOOK_ID = /^ort-l([1-9])-(\d{2})$/;
-/** 一本书里只有这三种文件：book.json、每页图 pNN.webp、每句音频 lNN.mp3 */
-const BOOK_FILE = /^(book\.json|p\d{2,3}\.webp|l\d{2,3}\.mp3)$/;
+/**
+ * 一本书里只有这几种文件：book.json、每页图 pNN.webp、每页朗读 lNN.mp3，
+ * 以及混了音效的整页朗读 lNN-fx<一个小写字母>.mp3（字母是混音版本，换一版就换字母，免得缓存）
+ */
+const BOOK_FILE = /^(book\.json|p\d{2,3}\.webp|l\d{2,3}(-fx[a-z])?\.mp3)$/;
 
 export function ortBookId(raw: unknown): string | null {
   const id = typeof raw === 'string' ? raw.trim() : '';
@@ -35,6 +38,8 @@ interface OrtLine {
 }
 interface OrtPage {
   image?: string;
+  /** 混了音效的整页朗读（阅读器「音效」开着时用） */
+  fx?: string | null;
   lines?: OrtLine[];
   [k: string]: unknown;
 }
@@ -56,7 +61,7 @@ function signFile(bookId: string, file: unknown, sign: Sign): string | null {
   return key ? sign(key) : null;
 }
 
-/** 把一本书里的封面、每页图、每句音频都换成签名地址 */
+/** 把一本书里的封面、每页图、每句音频、音效版整页朗读都换成签名地址 */
 export function signOrtBook(
   bookId: string,
   book: OrtBook,
@@ -69,6 +74,8 @@ export function signOrtBook(
     pages: (book.pages || []).map(page => ({
       ...page,
       image: signFile(bookId, page.image, sign) || '',
+      // 文件名不合法就去掉 fx，阅读器退回不带音效的朗读
+      ...(page.fx ? { fx: signFile(bookId, page.fx, sign) || undefined } : {}),
       lines: (page.lines || []).map(line => ({
         ...line,
         audio: line.audio ? signFile(bookId, line.audio, sign) : null,
