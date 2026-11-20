@@ -15,6 +15,7 @@ import { ValidateErrorFilter } from './filter/validate';
 import { seedSwordOffer } from './bootstrap/seedSwordOffer';
 import { seedMissions } from './bootstrap/seedMissions';
 import { ensureInvestAdmin } from './bootstrap/ensureInvestAdmin';
+import { ensureEntityColumns } from './bootstrap/ensureEntityColumns';
 
 @Configuration({
   imports: [
@@ -51,6 +52,10 @@ export class MainConfiguration implements ILifeCycle {
       DefaultErrorFilter,
       ValidateErrorFilter,
     ]);
+
+    // 补齐实体声明、库里缺的列（synchronize 已关；缺列会让读这张表的接口报 Unknown column）。
+    // 必须排在其他读库的启动步骤之前。只加列，不删不改。
+    await ensureEntityColumns(this.app.getApplicationContext());
 
     // 幂等导入剑指 Offer 题库(仅首次冷启动实际写入；自带 try/catch，不阻断启动)。
     await seedSwordOffer(this.app.getApplicationContext());
