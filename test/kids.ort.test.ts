@@ -23,11 +23,13 @@ describe('栗栗学英语 牛津树签名', () => {
     assert.strictEqual(ortObjectKey('ort-l2-05', 'p03.webp'), 'little-circle-web/ort/l2/ort-l2-05/p03.webp');
     assert.strictEqual(ortObjectKey('ort-l2-05', 'l12.mp3'), 'little-circle-web/ort/l2/ort-l2-05/l12.mp3');
     assert.strictEqual(ortObjectKey('ort-l2-05', 'book.json'), 'little-circle-web/ort/l2/ort-l2-05/book.json');
+    assert.strictEqual(ortObjectKey('ort-l3-05', 'l06-fxb.mp3'), 'little-circle-web/ort/l3/ort-l3-05/l06-fxb.mp3');
     assert.strictEqual(ORT_SHELF_KEY, 'little-circle-web/ort/shelf.json');
   });
 
   it('越权路径和别的文件一律不签', () => {
-    for (const bad of ['../shelf.json', '../../secret.txt', 'p03.webp/../../x', 'p03.png', 'a/p03.webp', '%2e%2e/p01.webp', '', null]) {
+    for (const bad of ['../shelf.json', '../../secret.txt', 'p03.webp/../../x', 'p03.png', 'a/p03.webp', '%2e%2e/p01.webp', '', null,
+      'l06-fx.mp3', 'l06-fxB.mp3', 'l06-fxbb.mp3', 'l06-fx1.mp3', 'l06-fxb.mp3/../x', 'l06-fxb.wav', 'p03-fxb.webp', 'x-l06-fxb.mp3']) {
       assert.strictEqual(ortObjectKey('ort-l2-05', bad), null, String(bad));
     }
     assert.strictEqual(ortObjectKey('../ort-l2-05', 'p01.webp'), null);
@@ -51,6 +53,21 @@ describe('栗栗学英语 牛津树签名', () => {
     assert.strictEqual(out.pages![1].lines![0].audio, null);
     assert.strictEqual(out.pages![2].image, '');
     assert.strictEqual(out.pages![2].lines![0].audio, null);
+  });
+
+  it('音效版整页朗读 fx 换成签名地址，不合法的去掉，没有的不加', () => {
+    const book = {
+      pages: [
+        { image: 'p06.webp', fx: 'l06-fxb.mp3', fx_shift: 1, lines: [{ en: 'Splat!', audio: 'l06.mp3', s: 3.5 }] },
+        { image: 'p07.webp', fx: '../l07-fxb.mp3', lines: [] },
+        { image: 'p08.webp', lines: [] },
+      ],
+    };
+    const out = signOrtBook('ort-l3-05', book, sign);
+    assert.strictEqual(out.pages![0].fx, 'signed:little-circle-web/ort/l3/ort-l3-05/l06-fxb.mp3');
+    assert.strictEqual(out.pages![0].fx_shift, 1);
+    assert.strictEqual(out.pages![1].fx, undefined);
+    assert.ok(!('fx' in out.pages![2]));
   });
 
   it('书目只留合法书号，封面签名', () => {
