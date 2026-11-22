@@ -169,7 +169,7 @@ async def run_evolution(scenario: dict, emit, *, agent=None, model=None, check=N
         v0 = v0.derive(v0.note, config={**v0.config_dict, "loop.max_turns": TRIAL_MAX_TURNS})
         store.save_version(v0, "merged", "起点版本")
         bench = Bench(agent, CommandGrader(timeout=60, **({"check": check} if check else {})),
-                      load_tasks(tasks_dir or ROOT / "tasks"), store, attempts=1, concurrency=4,
+                      load_tasks(tasks_dir or ROOT / "tasks"), store, attempts=1, concurrency=6,
                       notify=narrator.notify, run_timeout=RUN_TIMEOUT)
         narrator.say(scenario["intro"])
         narrated = NarratedModel(model, narrator)

@@ -72,6 +72,7 @@ class Task:
     difficulty: str = "single_file"
     similar_group: str = ""
     rubric: str = ""               # 给模型裁判的细则；为空则不用裁判
+    expect_noop: bool = False      # “不该动手”的任务：什么都不改才是对的（只回答问题、确认没问题）
 
 
 @dataclass

@@ -1,0 +1,20 @@
+{
+  "id": "explain-only",
+  "split": "regress",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "explain",
+  "prompt": "我在读 spans/merge.py，没看懂 merge_intervals 为什么要先排序。给我讲讲原因就行，不要修改任何文件。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/",
+    "spans/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ],
+  "expect_noop": true
+}

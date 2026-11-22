@@ -27,6 +27,7 @@ class Bench:
     concurrency: int = 4
     notify: Notify = lambda kind, data: None
     max_cost_ratio: float = 1.5      # 候选的平均用量最多是基线的多少倍
+    min_gain: float = 0.0            # 波动门槛：验收集通过率的提升要超过它才算数。用同一版本连跑两遍的差值来定
     run_timeout: float = 600         # 单次运行的时间上限（秒）
     _cache: dict = field(default_factory=dict)
 
@@ -58,6 +59,8 @@ class Decision:
     reason: str
     accept: dict = field(default_factory=dict)
     regressed: list[str] = field(default_factory=list)
+    rule: str = ""                 # 被哪条规则拦下：same | regress | no_gain | noise | cost；合入为 admitted
+    regress_skipped: list[str] = field(default_factory=list)   # 基线本来就不稳定通过、报不了警的回归任务
 
 
 def tokens(records: list[RunRecord]) -> float:
@@ -68,7 +71,7 @@ async def admit(bench: Bench, candidate: AgentVersion, baseline: AgentVersion) -
     """先跑回归集（便宜，且一票否决），再跑验收集。"""
     bench.store.save_version(candidate, "candidate")
     if candidate.id == baseline.id:
-        decision = Decision(False, "候选与基线内容相同")
+        decision = Decision(False, "候选与基线内容相同", rule="same")
         bench.store.save_version(candidate, "rejected", decision.reason)
         return decision
 
@@ -76,22 +79,35 @@ async def admit(bench: Bench, candidate: AgentVersion, baseline: AgentVersion) -
     base_r, cand_r = await asyncio.gather(bench.run(baseline, regress, "基线·回归集"),
                                           bench.run(candidate, regress, "候选·回归集"))
     a, b = by_task(base_r), by_task(cand_r)
-    regressed = sorted(t for t in a if mean(b.get(t, [False])) < mean(a[t]))
+    # 回归集的作用是报警：只有基线每次都通过的任务才报得了警。基线本来就过不了的不计入，并在结论里写明
+    skipped = sorted(t for t in a if mean(a[t]) < 1)
+    stable = [t for t in a if t not in skipped]
+    regressed = sorted(t for t in stable if mean(b.get(t, [False])) < 1)
+    held = (f"回归集 {len(stable)} 条无退步" if stable else "回归集没有基线稳定通过的任务，未能检查退步") + \
+           (f"（另有 {len(skipped)} 条基线本来就不通过，不计入）" if skipped and stable else "")
     if regressed:
-        decision = Decision(False, f"回归集退步：{', '.join(regressed)}", regressed=regressed)
+        decision = Decision(False, f"回归集退步：{', '.join(regressed)}", regressed=regressed, rule="regress",
+                            regress_skipped=skipped)
     else:
         accept = bench.split("accept")
         base_a, cand_a = await asyncio.gather(bench.run(baseline, accept, "基线·验收集"),
                                               bench.run(candidate, accept, "候选·验收集"))
         cmp = compare(base_a, cand_a)
         if cmp["cand"]["mean"] <= cmp["base"]["mean"]:
-            decision = Decision(False, f"验收集没有变好（{cmp['base']['mean']:.0%} → {cmp['cand']['mean']:.0%}）", cmp)
+            decision = Decision(False, f"验收集没有变好（{cmp['base']['mean']:.0%} → {cmp['cand']['mean']:.0%}）", cmp,
+                                rule="no_gain", regress_skipped=skipped)
+        elif cmp["cand"]["mean"] - cmp["base"]["mean"] <= bench.min_gain:
+            decision = Decision(False, f"验收集 {cmp['base']['mean']:.0%} → {cmp['cand']['mean']:.0%}，"
+                                       f"提升没有超过波动门槛 {bench.min_gain:.0%}，不算数", cmp,
+                                rule="noise", regress_skipped=skipped)
         elif tokens(base_a) and tokens(cand_a) > tokens(base_a) * bench.max_cost_ratio:
             decision = Decision(False, f"验收集变好了，但平均用量是基线的 {tokens(cand_a) / tokens(base_a):.1f} 倍，"
-                                       f"超过上限 {bench.max_cost_ratio} 倍", cmp)
+                                       f"超过上限 {bench.max_cost_ratio} 倍", cmp, rule="cost", regress_skipped=skipped)
         else:
-            decision = Decision(True, f"验收集 {cmp['base']['mean']:.0%} → {cmp['cand']['mean']:.0%}，回归集无退步", cmp)
+            decision = Decision(True, f"验收集 {cmp['base']['mean']:.0%} → {cmp['cand']['mean']:.0%}，{held}", cmp,
+                                rule="admitted", regress_skipped=skipped)
     bench.store.save_version(candidate, "merged" if decision.admitted else "rejected", decision.reason)
     bench.notify("gate", {"candidate": candidate.id, "baseline": baseline.id, "admitted": decision.admitted,
-                          "reason": decision.reason})
+                          "reason": decision.reason, "rule": decision.rule,
+                          "regress_skipped": decision.regress_skipped})
     return decision

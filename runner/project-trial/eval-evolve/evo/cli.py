@@ -118,7 +118,7 @@ async def run(args: argparse.Namespace) -> int:
             step = {"prompt": evolve_prompt, "playbook": evolve_playbook, "config": evolve_config,
                     "code": evolve_code}[args.level]
             bench = Bench(agent, grader, tasks, store, attempts=args.attempts, concurrency=args.concurrency,
-                          notify=show)
+                          notify=show, min_gain=args.min_gain)
             before = current(store, args.seed)
             after, decision = await step(bench, text_model, before)
             if decision is None:
@@ -150,6 +150,8 @@ def main() -> None:
     common(e)
     v = sub.add_parser("evolve", help="跑一轮进化")
     v.add_argument("--level", choices=LEVELS, required=True)
+    v.add_argument("--min-gain", type=float, default=0.0,
+                   help="验收集至少要涨多少才算数（0.1 即 10 个百分点），用来挡掉重复运行之间的随机波动")
     common(v)
     r = sub.add_parser("report", help="可靠性报告；带 --base 时做两个版本的对比")
     r.add_argument("version")

@@ -97,7 +97,8 @@ async def audit(grader: Grader, tasks: list[Task]) -> AuditReport:
         cases: list[tuple[str, bool, Callable[[Task, Path], str]]] = []
         if task.solution:
             cases.append(("reference", True, lambda t, w: (apply_solution(t, w), "按参考解修改，测试通过。")[1]))
-        cases += [(name, False, fn) for name, fn in INJECTORS.items()]
+        # “不该动手”的任务，什么都不做正是对的；改测试这几种作弊照样要判不通过
+        cases += [(name, task.expect_noop and name in ("noop", "claim_only"), fn) for name, fn in INJECTORS.items()]
         for name, expect, fn in cases:
             tmp, workdir = prepare_workdir(task)
             try:
