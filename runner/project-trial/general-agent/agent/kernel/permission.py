@@ -35,13 +35,20 @@ class Answer:
 Asker = Callable[[ToolCall, str], Awaitable[Answer]]
 
 KEY_ARG = {"run_command": "command", "read_file": "path", "write_file": "path", "edit_file": "path"}
-_SPLIT = re.compile(r"&&|\|\||;|\||\n")
+# 单个 & 是后台执行，也能把两条命令接在一起；>& 和 &> 里的 & 属于重定向，不拆
+_SPLIT = re.compile(r"&&|\|\||;|\||\n|(?<![>&])&(?![>&])")
+_REDIRECT = re.compile(r"(?:\d*|&)>>?\s*([^\s&|;<>]+)")
 _SUBSTITUTION = re.compile(r"\$\(|`")
 
 
 def split_command(command: str) -> list[str]:
-    """按 &&、||、;、| 拆成若干段，每一段分别判定。"""
+    """按 &&、||、;、|、单个 & 拆成若干段，每一段分别判定。"""
     return [seg.strip() for seg in _SPLIT.split(command) if seg.strip()]
+
+
+def redirect_targets(segment: str) -> list[str]:
+    """输出重定向写到哪些文件。/dev/null 这类不算。"""
+    return [m.strip("'\"") for m in _REDIRECT.findall(segment) if not m.startswith("/dev/")]
 
 
 def builtin_deny(segment: str) -> str | None:
@@ -116,6 +123,16 @@ class PermissionGate:
                 return "deny", f"内置拒绝规则：{why}"
             if self._match("run_command", seg, "deny"):
                 return "deny", f"命中拒绝规则：{seg}"
+            # 重定向等于写文件，和写文件工具守同一条边界
+            for target in redirect_targets(seg):
+                if target.startswith("~") or "$" in target:
+                    return "deny", f"重定向的目标在项目目录之外或无法静态判断：{target}"
+                try:
+                    self.ws.resolve(target)
+                except PathError as e:
+                    return "deny", f"重定向的目标不允许：{e}"
+                if self.ws.is_sensitive(target):
+                    return "deny", f"重定向会改写敏感文件：{target}"
         if _SUBSTITUTION.search(command):
             return "ask", "命令里有命令替换，无法静态判断会执行什么"
         # 任何一段需要确认，则整条需要确认
