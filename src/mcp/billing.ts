@@ -123,6 +123,19 @@ export const SKUS: Sku[] = [
     products: ['agent'],
   },
   {
+    // owner 2026-11-23：Invest Journey 加半年档，定价与 Agent Journey 半年通行证一致（原价 ¥98、优惠价 ¥49，
+    // 在支付宝单笔 ¥50 限额内）。单独一个 SKU 而不复用 member_pass：名称与文案按本站来，订单也能按产品分开统计。
+    sku: 'member_half',
+    name: '会员半年卡',
+    kind: 'plan',
+    tier: 'member',
+    months: 6,
+    points: MEMBER_MONTHLY_POINTS,
+    listCents: 9800,
+    desc: `一次买 6 个月 · 每月 ${MEMBER_MONTHLY_POINTS} 点`,
+    products: ['invest'],
+  },
+  {
     sku: 'pack_100',
     name: '加油包 100 点',
     kind: 'pack',

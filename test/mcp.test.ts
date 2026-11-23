@@ -721,6 +721,31 @@ describe('MCP HTTP 适配', () => {
       }
     });
 
+    it('Invest 半年卡：价格与 Agent 半年通行证一致（原价 ¥98 / 优惠 ¥49 可买），只在 Invest 摆出来卖；下单金额一致', async () => {
+      const get = async (q: string) => {
+        const rt = fakeRuntime({ now: NOV }).rt;
+        rt.alipay = { ...fakeAlipayCfg, maxCents: 5000 };
+        return (await run(rt, { path: '/mcp/pricing' + q, method: 'GET' })).json.data.skus;
+      };
+      const inv = await get('?product=invest');
+      const half = inv.find((x: any) => x.sku === 'member_half');
+      const pass = (await get('?product=agent')).find((x: any) => x.sku === 'member_pass');
+      assert.deepStrictEqual(
+        [half.price, half.listPrice, half.months, half.tier, half.points, half.soldOut, half.purchasable],
+        [pass.price, pass.listPrice, 6, 'member', pass.points, false, true]
+      );
+      assert.strictEqual(half.name, '会员半年卡');
+      assert.deepStrictEqual(
+        inv.filter((x: any) => x.kind === 'plan').map((x: any) => x.sku),
+        ['member_month', 'member_year', 'member_half']
+      );
+      for (const q of ['?product=agent', '']) {
+        assert.ok(!(await get(q)).some((x: any) => x.sku === 'member_half'), q);
+      }
+      assert.strictEqual(phasePrice(findSku('member_half')!, 'half', 'invest'), 4900);
+      assert.strictEqual(phasePrice(findSku('member_half')!, 'full', 'invest'), 9800);
+    });
+
     it('Agent Journey 月卡单独定价 ¥19.9（原价 ¥29 照常展示），Invest 月卡不受影响；下单金额与展示一致', async () => {
       const ag = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=agent', method: 'GET' });
       const inv = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=invest', method: 'GET' });
