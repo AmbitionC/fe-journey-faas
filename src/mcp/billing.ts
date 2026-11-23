@@ -107,6 +107,9 @@ export const SKUS: Sku[] = [
     points: MEMBER_MONTHLY_POINTS,
     listCents: 23900,
     desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 × 12 个月 · 约 7 折`,
+    // owner 2026-11-23：Invest 下掉年卡——年卡价比半年卡还贵不合理，支付宝单笔 ¥50 也收不了年卡；
+    // Invest 只卖月卡 + 半年卡。Agent Journey 不在本次范围，照旧。
+    products: ['agent'],
   },
   {
     // owner 2026-11-13：Agent Journey 加 ¥49 通行证、月卡保留，「相当于之前的年卡」——

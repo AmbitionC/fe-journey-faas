@@ -662,7 +662,7 @@ describe('MCP HTTP 适配', () => {
       const { rt } = fakeRuntime();
       const r = await run(rt, { path: '/mcp/pricing', method: 'GET' });
       assert.strictEqual(r.status, 200);
-      assert.ok(r.json.data.skus.length >= 5);
+      assert.ok(r.json.data.skus.length >= 4);
       assert.ok(r.json.data.skus.every((s: any) => s.price <= s.listPrice));
     });
 
@@ -686,6 +686,7 @@ describe('MCP HTTP 适配', () => {
         halfRt.alipay = { ...fakeAlipayCfg, maxCents: 5000 };
         const half = await run(halfRt, { path: '/mcp/pricing', method: 'GET' });
         assert.strictEqual(half.json.data.phase.id, 'half');
+        const halfAgent = await run(halfRt, { path: '/mcp/pricing?product=agent', method: 'GET' });
         assert.strictEqual(half.json.data.chargeCalls, true);
         assert.deepStrictEqual(half.json.data.phases.map((p: any) => p.id), ['half', 'full']);
         assert.strictEqual(half.json.data.trialPoints, 100);
@@ -695,7 +696,7 @@ describe('MCP HTTP 适配', () => {
         const hm = half.json.data.skus.find((x: any) => x.sku === 'member_month');
         assert.deepStrictEqual([hm.price, hm.listPrice, hm.purchasable], [14.5, 29, true]);
         // 微信收款已关（2026-11-04）：超过支付宝单笔 ¥50 的年卡显示缺货
-        const hy = half.json.data.skus.find((x: any) => x.sku === 'member_year');
+        const hy = halfAgent.json.data.skus.find((x: any) => x.sku === 'member_year');
         assert.deepStrictEqual([hy.soldOut, hy.purchasable], [true, false]);
         assert.deepStrictEqual(half.json.data.payChannels, ['alipay']);
       }
@@ -721,7 +722,7 @@ describe('MCP HTTP 适配', () => {
       }
     });
 
-    it('Invest 半年卡：价格与 Agent 半年通行证一致（原价 ¥98 / 优惠 ¥49 可买），只在 Invest 摆出来卖；下单金额一致', async () => {
+    it('Invest 半年卡：价格与 Agent 半年通行证一致（原价 ¥98 / 优惠 ¥49 可买），只在 Invest 摆出来卖；Invest 不再卖年卡；下单金额一致', async () => {
       const get = async (q: string) => {
         const rt = fakeRuntime({ now: NOV }).rt;
         rt.alipay = { ...fakeAlipayCfg, maxCents: 5000 };
@@ -737,7 +738,7 @@ describe('MCP HTTP 适配', () => {
       assert.strictEqual(half.name, '会员半年卡');
       assert.deepStrictEqual(
         inv.filter((x: any) => x.kind === 'plan').map((x: any) => x.sku),
-        ['member_month', 'member_year', 'member_half']
+        ['member_month', 'member_half']
       );
       for (const q of ['?product=agent', '']) {
         assert.ok(!(await get(q)).some((x: any) => x.sku === 'member_half'), q);
