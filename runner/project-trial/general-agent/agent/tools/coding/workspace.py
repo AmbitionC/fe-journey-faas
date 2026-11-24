@@ -30,6 +30,9 @@ class Workspace:
 
     def is_sensitive(self, path: str) -> bool:
         name = Path(path).name.lower()
+        # Agent 自己的规则、钩子、外部服务配置：改了它们等于改了自己的权限，要用户点头
+        if ".agent" in Path(path).parts and name in ("hooks.json", "rules.json", "mcp.json"):
+            return True
         return any(name == s or name.endswith(s) or name.startswith(s + ".") for s in SENSITIVE_NAMES)
 
     def mark_read(self, full: Path) -> None:

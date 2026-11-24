@@ -18,7 +18,7 @@ def load_task(folder: Path) -> Task:
                 forbid_changes=d.get("forbid_changes", []), allow=d.get("allow", []),
                 solution=solution if solution.is_dir() else None, source=d.get("source", "synthetic"),
                 difficulty=d.get("difficulty", "single_file"), similar_group=d.get("similar_group", d["id"]),
-                rubric=d.get("rubric", ""))
+                rubric=d.get("rubric", ""), expect_noop=bool(d.get("expect_noop", False)))
 
 
 def load_tasks(root: Path) -> list[Task]:

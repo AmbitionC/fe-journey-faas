@@ -1,0 +1,20 @@
+{
+  "id": "no-change-needed",
+  "split": "regress",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "restraint",
+  "prompt": "同事说 parse_duration 可能有 bug，但没说清是什么。你跑一下测试看看：如果测试都通过，就不要改任何代码，直接告诉我结论。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/",
+    "timekit/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ],
+  "expect_noop": true
+}

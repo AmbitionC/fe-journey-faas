@@ -37,7 +37,7 @@ class Agent:
                  system_prompt: str, session: Session | None = None,
                  on_event: EventSink | None = None, max_turns: int = 40,
                  max_retries: int = 3, retry_base_delay: float = 1.0, repeat_limit: int = 3,
-                 context: ContextManager | None = None, depth: int = 0):
+                 context: ContextManager | None = None, depth: int = 0, hooks=None):
         self.model = model
         self.registry = registry
         self.gate = gate
@@ -49,6 +49,7 @@ class Agent:
         self.repeat_limit = repeat_limit
         self.context = context
         self.depth = depth  # 0 是主任务，子任务是 1
+        self.hooks = hooks  # 项目自己配的钩子（extensions/hooks.py），没有配就是 None
         # 模型客户端支持的话，把工具参数的生成进度也转成事件（界面可以边写边显示）
         self._tool_progress = "on_tool" in inspect.signature(model.chat).parameters
         self.messages: list[Message] = []
@@ -132,9 +133,17 @@ class Agent:
             self.emit(Event("tool_end", {"id": call.id, "name": call.name, "denied": True, "result": verdict.reason,
                                          "arguments": call.arguments}))
             return verdict.reason
+        blocked = await self.hooks.before(call) if self.hooks else None
+        if blocked:      # 钩子排在闸门后面：闸门不让做的事，钩子没有机会放行
+            self.session.note("tool_denied", id=call.id, name=call.name, reason=blocked)
+            self.emit(Event("tool_end", {"id": call.id, "name": call.name, "denied": True, "result": blocked,
+                                         "arguments": call.arguments}))
+            return blocked
         self.session.note("tool_start", id=call.id, name=call.name, arguments=call.arguments)
         self.emit(Event("tool_start", {"id": call.id, "name": call.name, "arguments": call.arguments}))
         result = await self.registry.execute(call)
+        if self.hooks:
+            result = await self.hooks.after(call, result)
         self.emit(Event("tool_end", {"id": call.id, "name": call.name, "denied": False, "result": result}))
         return result
 

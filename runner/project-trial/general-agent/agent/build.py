@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+from .extensions.hooks import Hooks
 from .extensions.skills import discover, skill_tool, skills_index
 from .kernel.context import ContextManager
 from .kernel.loop import Agent, EventSink
@@ -32,9 +33,11 @@ def build_coding_agent(model: ModelClient, cwd: str | Path, *, rules: list[Rule]
                        home: Path | None = None, subagents: bool = True,
                        executor: Executor | None = None, system_prompt: str | None = None,
                        extra_system: str = "", enabled_tools: list[str] | None = None,
-                       result_hook: ResultHook | None = None) -> Agent:
+                       result_hook: ResultHook | None = None, hooks: bool = False) -> Agent:
     """后四个参数是给评测与自进化平台留的口子：换系统提示词、追加一段内容（经验手册）、
-    限定工具集、加工工具结果。不传时行为和原来完全一样。"""
+    限定工具集、加工工具结果。不传时行为和原来完全一样。
+    hooks=True 时读取项目的 .agent/hooks.json。默认不读：钩子会在本机执行命令，
+    只有用户自己在终端里启动时才打开，评测和线上试用不打开。"""
     ws = Workspace(cwd)
     registry = ToolRegistry(timeout=command_timeout + 30)
 
@@ -88,4 +91,4 @@ def build_coding_agent(model: ModelClient, cwd: str | Path, *, rules: list[Rule]
         registry.register(scheduler.as_tool(depth=0))
 
     return Agent(model, registry, gate, system, session=Session(session_file), on_event=on_event,
-                 max_turns=max_turns, context=context())
+                 max_turns=max_turns, context=context(), hooks=Hooks.load(ws.root) if hooks else None)

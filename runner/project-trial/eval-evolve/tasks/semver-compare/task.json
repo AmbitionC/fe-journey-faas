@@ -1,0 +1,18 @@
+{
+  "id": "semver-compare",
+  "split": "accept",
+  "source": "synthetic",
+  "difficulty": "single_file",
+  "similar_group": "versions",
+  "prompt": "升级提示出错了：线上明明是 1.9.3，发了 1.10.0 却不提示有新版本，测试也挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

@@ -21,6 +21,12 @@ sync_project() {
   unzip -l "project-source/$project.zip" "$project/README.md" >/dev/null || { echo "$project 的源码包里没有 README"; exit 1; }
 }
 sync_project general-agent agent trial fixtures
+# 通用 Agent 的 Java 版和 Python 版放在同一个源码包里：同一个项目，两种语言
+rm -f project-source/general-agent.zip
+git -C "$SRC" archive --format=zip -o "$PWD/project-source/general-agent.zip" HEAD general-agent general-agent-java
+for f in general-agent/README.md general-agent-java/README.md general-agent-java/pom.xml; do
+  unzip -l project-source/general-agent.zip "$f" >/dev/null || { echo "通用 Agent 的源码包里没有 $f"; exit 1; }
+done
 sync_project eval-evolve evo trial tasks
 sync_project ecom-growth growth trial data
 find "$DEST" -name __pycache__ -type d -prune -exec rm -rf {} +

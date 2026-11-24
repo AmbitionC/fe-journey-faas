@@ -6,6 +6,7 @@
   python -m growth.cli review-eval [--offline]          在审核评测集上算漏放率和误拦率
   python -m growth.cli sim-check [--offline]            四项环境检验
   python -m growth.cli alloc-bench                      对比三种预算分配方式
+  python -m growth.cli compare [--offline]              对照实验：多环节各有上下文，对一个上下文 + Skill
 """
 from __future__ import annotations
 
@@ -138,6 +139,30 @@ def cmd_alloc_bench(args) -> None:
         print(f"  {name:<6} 累计损失 {row['regret']:>6}　选对的比例 {row['correct']:.0%}")
 
 
+def cmd_compare(args) -> None:
+    from .single import render, run_one
+    data = json.loads(Path(args.product).read_text())
+    data.pop("note", None)
+    product = Product(**data)
+
+    def make(cls, on_call):
+        m = build_models(args)
+        return cls(m.default, m.tiers, ledger=Ledger(max_calls=args.max_calls), max_concurrency=args.concurrency,
+                   rpm=60000 if args.offline else args.rpm, on_call=on_call)
+
+    rows = []
+    for mode in ("multi", "single"):
+        config = Config(budget=args.budget, round_budget=args.round_budget, max_rounds=args.rounds,
+                        per_segment=args.per_segment, sim=load_sim(args.sim))
+        print(f"正在跑：{mode} …", flush=True)
+        rows.append(asyncio.run(run_one(mode, product, config, make, lambda: build_models(args))))
+    print("\n" + render(rows))
+    if args.offline:
+        print("\n离线替身不看上下文，两边写出的内容一样，这张表只看得出花费和用时的差别。"
+              "审核独立性的差别要接上真模型才看得出来。")
+    print("试投环境是模拟的，这张表比的是两种上下文组织方式的工程代价，不是文案对真实用户的效果。")
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(prog="growth", description="电商营销增长助手")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -170,6 +195,15 @@ def main(argv=None) -> None:
     p = sub.add_parser("sim-check", help="环境检验")
     common(p)
     p.set_defaults(fn=cmd_sim_check)
+    p = sub.add_parser("compare", help="对照实验：多环节各有上下文，对一个上下文 + Skill")
+    common(p)
+    p.add_argument("--product", default=str(ROOT / "data" / "products" / "sunscreen.json"))
+    p.add_argument("--budget", type=int, default=1600)
+    p.add_argument("--round-budget", type=int, default=800)
+    p.add_argument("--rounds", type=int, default=2)
+    p.add_argument("--per-segment", type=int, default=3)
+    p.add_argument("--max-calls", type=int, default=None, help="每一边最多调用多少次模型")
+    p.set_defaults(fn=cmd_compare)
     p = sub.add_parser("alloc-bench", help="分配策略对比")
     p.add_argument("--budget", type=int, default=3000)
     p.add_argument("--repeats", type=int, default=40)
