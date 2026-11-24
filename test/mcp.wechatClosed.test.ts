@@ -33,7 +33,7 @@ async function post(r: any, path: string, body: any) {
 describe('微信收款关闭', () => {
   it('开关是关的；价目只给支付宝，超过单笔限额的年卡显示缺货、不可买', () => {
     assert.strictEqual(WECHAT_QR_ENABLED, false);
-    const p = pricing(HALF, true, 5000);
+    const p = pricing(HALF, true, 5000, 'agent');
     assert.deepStrictEqual(p.payChannels, ['alipay']);
     const year = p.skus.find(s => s.sku === 'member_year')!;
     const month = p.skus.find(s => s.sku === 'member_month')!;
@@ -41,7 +41,7 @@ describe('微信收款关闭', () => {
     assert.deepStrictEqual([year.soldOut, year.purchasable], [true, false]);
     assert.deepStrictEqual([month.soldOut, month.purchasable], [false, true]);
     // 提额后（限额 0＝不限）年卡恢复
-    assert.strictEqual(pricing(HALF, true, 0).skus.find(s => s.sku === 'member_year')!.soldOut, false);
+    assert.strictEqual(pricing(HALF, true, 0, 'agent').skus.find(s => s.sku === 'member_year')!.soldOut, false);
     // 支付宝没开通：全部缺货
     assert.ok(pricing(HALF, false).skus.every(s => s.soldOut && !s.purchasable));
   });

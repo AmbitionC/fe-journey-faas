@@ -107,6 +107,9 @@ export const SKUS: Sku[] = [
     points: MEMBER_MONTHLY_POINTS,
     listCents: 23900,
     desc: `每月 ${MEMBER_MONTHLY_POINTS} 点 × 12 个月 · 约 7 折`,
+    // owner 2026-11-23：Invest 下掉年卡——年卡价比半年卡还贵不合理，支付宝单笔 ¥50 也收不了年卡；
+    // Invest 只卖月卡 + 半年卡。Agent Journey 不在本次范围，照旧。
+    products: ['agent'],
   },
   {
     // owner 2026-11-13：Agent Journey 加 ¥49 通行证、月卡保留，「相当于之前的年卡」——
@@ -121,6 +124,19 @@ export const SKUS: Sku[] = [
     listCents: 9800,
     desc: `一次买 6 个月，覆盖一整个求职 / 备考季 · 每月 ${MEMBER_MONTHLY_POINTS} 点`,
     products: ['agent'],
+  },
+  {
+    // owner 2026-11-23：Invest Journey 加半年档，定价与 Agent Journey 半年通行证一致（原价 ¥98、优惠价 ¥49，
+    // 在支付宝单笔 ¥50 限额内）。单独一个 SKU 而不复用 member_pass：名称与文案按本站来，订单也能按产品分开统计。
+    sku: 'member_half',
+    name: '会员半年卡',
+    kind: 'plan',
+    tier: 'member',
+    months: 6,
+    points: MEMBER_MONTHLY_POINTS,
+    listCents: 9800,
+    desc: `一次买 6 个月 · 每月 ${MEMBER_MONTHLY_POINTS} 点`,
+    products: ['invest'],
   },
   {
     sku: 'pack_100',
