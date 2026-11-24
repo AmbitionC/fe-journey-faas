@@ -79,12 +79,28 @@ class MemoryStore:
         self.db.commit()
         return f"{row[0]}（更新于 {row[2]}，请自行判断是否过时）\n{row[1]}"
 
-    def index(self) -> str:
-        """常驻上下文的标题列表。"""
+    def index(self, limit: int = 30) -> str:
+        """常驻上下文的标题列表。条数有上限：记忆攒多了，全部标题常驻会把每次请求都变贵。
+        超出的部分按“被取用次数多、更新时间近”留下，其余用 search_memory 按关键词找。"""
         rows = self._rows()
         if not rows:
             return ""
-        return "\n".join(f"#{rid} [{kind}] {title}（{updated}）" for rid, kind, title, _, updated, _ in rows)
+        shown = rows
+        if len(rows) > limit:
+            shown = sorted(sorted(rows, key=lambda r: (r[5], r[4]), reverse=True)[:limit])   # 留下的仍按编号排
+        lines = [f"#{rid} [{kind}] {title}（{updated}）" for rid, kind, title, _, updated, _ in shown]
+        if len(rows) > len(shown):
+            lines.append(f"（另有 {len(rows) - len(shown)} 条没有列出，用 search_memory 按关键词查找）")
+        return "\n".join(lines)
+
+    def search(self, query: str, limit: int = 5) -> str:
+        """按用词重合度找记忆，返回标题。没列在常驻标题里的记忆靠它找到。"""
+        want = _terms(query)
+        scored = [(len(want & _terms(t + " " + c)), rid, kind, t, updated) for rid, kind, t, c, updated, _ in self._rows()]
+        hits = sorted((x for x in scored if x[0] > 0), key=lambda x: (-x[0], x[1]))[:limit]
+        if not hits:
+            return "没有找到相关的记忆。"
+        return "\n".join(f"#{rid} [{kind}] {t}（{updated}）" for _, rid, kind, t, updated in hits)
 
     def stale(self, max_hits: int = 0) -> list[tuple[int, str]]:
         """整理命令用：长期没被取用的条目，列出来请用户确认删除，不自动删。"""
@@ -123,4 +139,13 @@ def memory_tools(store: MemoryStore) -> list[Tool]:
         """
         return store.read(memory_id)
 
-    return [remember, recall]
+    @tool(read_only=True)
+    async def search_memory(query: str) -> str:
+        """按关键词查找长期记忆，返回匹配的标题和编号。标题列表末尾提示“另有若干条没有列出”时，用它找没列出的。
+
+        Args:
+            query: 关键词或一句话，描述你想找的是哪方面的记忆
+        """
+        return store.search(query)
+
+    return [remember, recall, search_memory]

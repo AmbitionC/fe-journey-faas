@@ -84,7 +84,11 @@ async def run(args: argparse.Namespace) -> int:
 
         if args.cmd == "rollback":
             target = pick(store, args.version)
-            store.promote(target.id, "手动回退")
+            try:
+                store.promote(target.id, "手动回退")
+            except ValueError as e:
+                print(e)
+                return 1
             print(f"当前版本已回到 {target.id}")
             return 0
 

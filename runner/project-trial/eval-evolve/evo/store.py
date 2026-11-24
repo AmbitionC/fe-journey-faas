@@ -51,8 +51,11 @@ class Store:
         return AgentVersion.from_json(json.loads(row["body"])) if row else None
 
     def promote(self, version_id: str, reason: str = "") -> None:
-        """把一个已有版本重新设为当前版本：删掉再插入，让它排到最后。"""
-        row = self.db.execute("SELECT parent, note, body FROM version WHERE id=?", (version_id,)).fetchone()
+        """把一个合入过的版本重新设为当前版本：删掉再插入，让它排到最后。"""
+        row = self.db.execute("SELECT parent, note, body, status FROM version WHERE id=?", (version_id,)).fetchone()
+        if row is None or row["status"] != "merged":
+            # 被闸门拒绝的、还没判定的候选，不能绕过闸门直接成为当前版本
+            raise ValueError(f"版本 {version_id} 没有合入过，不能设为当前版本")
         self.db.execute("DELETE FROM version WHERE id=?", (version_id,))
         self.db.execute("INSERT INTO version (id, parent, note, body, status, reason) VALUES (?,?,?,?,'merged',?)",
                         (version_id, row["parent"], row["note"], row["body"], reason))

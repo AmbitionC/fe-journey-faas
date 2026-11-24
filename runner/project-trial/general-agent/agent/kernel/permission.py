@@ -66,7 +66,8 @@ def builtin_deny(segment: str) -> str | None:
     long_flags = {a for a in args if a.startswith("--")}
     targets = [a for a in args if not a.startswith("-")]
     if cmd == "rm" and ("r" in flags or "R" in flags or "--recursive" in long_flags):
-        if any(t in ("/", "/*", "~", "~/", "$HOME", ".", "..", "*") or t.startswith("/") for t in targets):
+        if any(t in ("/", "/*", "~", "$HOME", ".", "..", "*") or t.startswith(("/", "~/", "../", "$HOME/"))
+               for t in targets):
             return "递归删除项目之外或整个目录"
     if cmd in ("mkfs", "fdisk", "shutdown", "reboot", "halt", "poweroff") or cmd.startswith("mkfs."):
         return "改写磁盘或关机"
@@ -83,6 +84,7 @@ class PermissionGate:
         self.session_rules: list[Rule] = []  # 本次会话里用户新同意的，退出即失效
         self.asker = asker
         self.headless = headless
+        self.plan_mode = False  # 计划模式：只许读，任何会改东西的工具都拦下
 
     # --- 规则匹配 -------------------------------------------------------
     def _match(self, tool: str, value: str, decision: str) -> bool:
@@ -142,6 +144,10 @@ class PermissionGate:
 
     # --- 对外入口 -------------------------------------------------------
     async def check(self, tool: Tool, call: ToolCall) -> Verdict:
+        if self.plan_mode and not tool.read_only:
+            # 计划模式靠闸门强制，不靠提示词里的一句“请先不要动手”
+            return Verdict(False, f"现在是计划模式，只能查看不能改动，{call.name} 没有执行。"
+                                  "请继续用只读的工具了解情况，然后直接用文字给出计划，等用户同意后再动手。")
         decision, reason = self.decide(tool, call)
         if decision == "allow":
             return Verdict(True)
