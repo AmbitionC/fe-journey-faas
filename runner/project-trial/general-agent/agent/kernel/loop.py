@@ -19,6 +19,7 @@ EventSink = Callable[[Event], None]
 
 WRAP_UP = ("已达到本次任务的轮次上限。请不要再调用任何工具，直接用文字总结："
            "已经完成了什么、还剩什么没做、你建议用户下一步做什么。")
+INTERRUPTED = "（这次调用被用户中断，没有执行完，结果未知。）"
 REPEAT_HINT = ("你已经连续多次用完全相同的参数调用同一个工具，结果不会变化。"
                "请换一种做法，或者说明卡在了哪里。")
 
@@ -84,7 +85,15 @@ class Agent:
                 return self._finish(reply.content, "max_turns", turns, usage)
             if not reply.tool_calls:
                 return self._finish(reply.content, "finished", turns, usage)
-            for msg in await self._execute_batch(reply.tool_calls):
+            try:
+                results = await self._execute_batch(reply.tool_calls)
+            except asyncio.CancelledError:
+                # 工具跑到一半被取消：调用已经记进对话了，给每个调用补一条结果再退出。
+                # 不补的话，下一次请求会带着没有结果的调用，接口会直接拒绝。
+                for c in reply.tool_calls:
+                    self._append(Message("tool", INTERRUPTED, tool_call_id=c.id))
+                raise
+            for msg in results:
                 self._append(msg)
             if self._stuck(reply.tool_calls):
                 self._append(Message("user", REPEAT_HINT))
