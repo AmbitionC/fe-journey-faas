@@ -1,0 +1,63 @@
+name: paid-orders-probe
+
+# 临时只读查询（2026-11-24）：invest-model 私仓 Actions 额度用完，ops-query 跑不了。
+# 本仓公开、日志公开，所以查询结果不打日志，只写到 invest-model 私仓的工作分支。
+on:
+  push:
+    branches: [claude/project-thread-04ftr1]
+    paths: ['.github/workflows/paid-orders-probe.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  q:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: query
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          cat > q.sql <<'SQL'
+          SET time_zone = '+08:00';
+          SET SESSION TRANSACTION READ ONLY;
+          SELECT '== status by sku (all, excl pay_test) ==' AS t;
+          SELECT m.status, m.sku, COUNT(*) n, SUM(m.amount_cents)/100 yuan
+            FROM `fe-journey`.mcp_order m WHERE m.sku <> 'pay_test' GROUP BY m.status, m.sku ORDER BY m.status, m.sku;
+          SELECT '== paid / self_reported orders detail ==' AS t;
+          SELECT m.id, m.status, m.sku, m.amount_cents/100 yuan, m.created_at, m.paid_at,
+                 LEFT(m.handled_by, 12) via,
+                 CONCAT(LEFT(m.user_id,3),'****',RIGHT(m.user_id,4)) uid,
+                 IFNULL(u.role,'-') role,
+                 (m.user_id IN ('17394940726','19900001101','19900001102') OR u.phoneNumber IN ('17394940726','19900001101','19900001102')) internal,
+                 (SELECT JSON_UNQUOTE(JSON_EXTRACT(c.props,'$.site')) FROM `fe-journey`.mcp_event c WHERE c.event='order_created' AND JSON_UNQUOTE(JSON_EXTRACT(c.props,'$.orderNo'))=m.order_no ORDER BY c.id LIMIT 1) site_created,
+                 (SELECT JSON_UNQUOTE(JSON_EXTRACT(c.props,'$.site')) FROM `fe-journey`.mcp_event c WHERE c.event='order_paid' AND JSON_UNQUOTE(JSON_EXTRACT(c.props,'$.orderNo'))=m.order_no ORDER BY c.id LIMIT 1) site_paid,
+                 (SELECT JSON_UNQUOTE(JSON_EXTRACT(c.props,'$.entryPage')) FROM `fe-journey`.mcp_event c WHERE c.event='order_created' AND JSON_UNQUOTE(JSON_EXTRACT(c.props,'$.orderNo'))=m.order_no ORDER BY c.id LIMIT 1) entry_page,
+                 (SELECT c.product FROM `fe-journey`.mcp_event c WHERE c.event IN ('order_created','order_paid') AND JSON_UNQUOTE(JSON_EXTRACT(c.props,'$.orderNo'))=m.order_no ORDER BY c.id LIMIT 1) ev_product,
+                 LEFT(IFNULL(m.note,''),40) note
+            FROM `fe-journey`.mcp_order m
+            LEFT JOIN `fe-journey`.`user` u ON (u.id = m.user_id OR u.phoneNumber = m.user_id)
+           WHERE m.sku <> 'pay_test' AND m.status IN ('paid','self_reported')
+           ORDER BY m.id;
+          SELECT '== members (tier active) ==' AS t;
+          SELECT a.tier, COUNT(*) n, SUM(a.tier_expire_at > NOW()) active
+            FROM `fe-journey`.mcp_account a WHERE a.tier IS NOT NULL AND a.tier <> 'free' GROUP BY a.tier;
+          SQL
+          mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" --connect-timeout=15 -B < q.sql > out.tsv 2> err.txt || { echo "query failed: $(wc -c < err.txt) bytes of error"; sed 's/[0-9]\{11\}/***/g' err.txt | head -5; }
+          echo "rows: $(wc -l < out.tsv)"
+          B64=$(base64 -w0 out.tsv)
+          SHA=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/AmbitionC/invest-model/contents/ops/tmp/paid-orders.tsv?ref=claude/project-thread-04ftr1" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("sha",""))' || true)
+          python3 - "$B64" "$SHA" > body.json <<'PY'
+          import json,sys
+          b={"message":"临时查询结果","content":sys.argv[1],"branch":"claude/project-thread-04ftr1"}
+          if sys.argv[2]: b["sha"]=sys.argv[2]
+          print(json.dumps(b))
+          PY
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/AmbitionC/invest-model/contents/ops/tmp/paid-orders.tsv -d @body.json)
+          echo "upload http $code"
