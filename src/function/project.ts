@@ -55,14 +55,13 @@ export class ProjectHTTPService {
 
     const member = (await this.entitlementService.check(userId, 'materials_pdf', {})).allowed;
     const limit = member ? TRIAL_DAILY_LIMIT.member : TRIAL_DAILY_LIMIT.user;
+    if (limit <= 0) throw R.forbiddenError('现场运行是会员功能，开通后每天 ' + TRIAL_DAILY_LIMIT.member + ' 次；示例回放不用开通就能看');
     const now = this.now();
     const key = trialQuotaKey(userId, now);
     const used = await this.redisService.incr(key);
     if (used === 1) await this.redisService.expire(key, 2 * 86400);
     if (used > limit) {
-      throw R.forbiddenError(member
-        ? `今天的 ${limit} 次在线试用已用完，明天再来`
-        : `今天的 ${limit} 次在线试用已用完。会员每天 ${TRIAL_DAILY_LIMIT.member} 次，也可以下载源码在自己电脑上运行`);
+      throw R.forbiddenError(`今天的 ${limit} 次在线试用已用完，明天再来`);
     }
 
     const exp = Math.floor(now.getTime() / 1000) + TRIAL_TICKET_TTL_SEC;

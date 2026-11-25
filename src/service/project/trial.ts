@@ -23,7 +23,8 @@ export const TRIAL_PROJECTS: Record<string, TrialProject> = {
   'ecom-growth': { scenarios: ['campaign'] },
 };
 
-export const TRIAL_DAILY_LIMIT = { user: 3, member: 20 };
+/** 现场运行每次都要调真模型，只对会员开放；非会员看前端的示例回放（不经过后端） */
+export const TRIAL_DAILY_LIMIT = { user: 0, member: 20 };
 export const TRIAL_TICKET_TTL_SEC = 120;
 
 export function trialConfigured(env: NodeJS.ProcessEnv = process.env): boolean {

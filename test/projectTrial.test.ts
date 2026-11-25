@@ -39,61 +39,62 @@ describe('项目实战在线试用票据', () => {
     assert.strictEqual(trialQuotaKey('u1', new Date('2026-11-18T00:00:00+08:00')), 'project:trial:2026-11-18:u1');
   });
 
-  it('登录用户拿到票据和试用地址，返回剩余次数', async () => {
-    const { c } = controller();
+  it('会员拿到票据和试用地址，返回剩余次数', async () => {
+    const { c } = controller({ member: true });
     const r = await c.trialTicket({ projectId: 'general-agent' });
     assert.strictEqual(r.data.url, 'https://trial.fixture.invalid/run');
-    assert.strictEqual(r.data.remaining, 2);
+    assert.strictEqual(r.data.remaining, 19);
     const payload = JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString());
     assert.strictEqual(payload.scenario, 'store');
     assert.strictEqual(payload.exp, Math.floor(new Date('2026-11-18T23:30:00+08:00').getTime() / 1000) + 120);
   });
 
   it('评测与自进化项目有两个场景，默认第一个', async () => {
-    const r = await controller().c.trialTicket({ projectId: 'eval-evolve' });
+    const r = await controller({ member: true }).c.trialTicket({ projectId: 'eval-evolve' });
     const payload = JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString());
     assert.strictEqual(payload.scenario, 'evolve-prompt');
     assert.strictEqual(payload.project, 'eval-evolve');
-    const r2 = await controller().c.trialTicket({ projectId: 'eval-evolve', scenario: 'evolve-config' });
+    const r2 = await controller({ member: true }).c.trialTicket({ projectId: 'eval-evolve', scenario: 'evolve-config' });
     assert.strictEqual(r2.data.scenario, 'evolve-config');
-    await assert.rejects(controller().c.trialTicket({ projectId: 'eval-evolve', scenario: 'shop' }), /场景/);
+    await assert.rejects(controller({ member: true }).c.trialTicket({ projectId: 'eval-evolve', scenario: 'shop' }), /场景/);
   });
 
   it('电商营销增长助手只有一个场景', async () => {
-    const r = await controller().c.trialTicket({ projectId: 'ecom-growth' });
+    const r = await controller({ member: true }).c.trialTicket({ projectId: 'ecom-growth' });
     const payload = JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString());
     assert.strictEqual(payload.scenario, 'campaign');
     assert.strictEqual(payload.project, 'ecom-growth');
-    await assert.rejects(controller().c.trialTicket({ projectId: 'ecom-growth', scenario: 'shop' }), /场景/);
+    await assert.rejects(controller({ member: true }).c.trialTicket({ projectId: 'ecom-growth', scenario: 'shop' }), /场景/);
   });
 
   it('通用 Agent 默认是电商后端的示例仓库，最早的购物车场景仍可指定', async () => {
-    const r = await controller().c.trialTicket({ projectId: 'general-agent', scenario: 'shop' });
+    const r = await controller({ member: true }).c.trialTicket({ projectId: 'general-agent', scenario: 'shop' });
     assert.strictEqual(JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString()).scenario, 'shop');
   });
 
-  it('查今天还剩几次：只读不占次数，未登录返回空', async () => {
-    const { c } = controller();
-    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 3, remaining: 3, member: false });
+  it('查今天还剩几次：只读不占次数，未登录返回空，非会员是 0 次', async () => {
+    const { c } = controller({ member: true });
+    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 20, remaining: 20, member: true });
     await c.trialTicket({ projectId: 'general-agent' });
-    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 3, remaining: 2, member: false });
-    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 3, remaining: 2, member: false });
-    assert.deepStrictEqual((await controller({ member: true }).c.trialQuota()).data, { limit: 20, remaining: 20, member: true });
+    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 20, remaining: 19, member: true });
+    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 20, remaining: 19, member: true });
+    assert.deepStrictEqual((await controller().c.trialQuota()).data, { limit: 0, remaining: 0, member: false });
     assert.strictEqual((await controller({ userId: '' }).c.trialQuota()).data, null);
   });
 
   it('未登录、未知项目、未知场景、未配置都拒绝', async () => {
     await assert.rejects(controller({ userId: '' }).c.trialTicket({ projectId: 'general-agent' }), /登录/);
-    await assert.rejects(controller().c.trialTicket({ projectId: 'nope' }), /还没有开放/);
-    await assert.rejects(controller().c.trialTicket({ projectId: 'general-agent', scenario: 'x' }), /场景/);
+    await assert.rejects(controller({ member: true }).c.trialTicket({ projectId: 'nope' }), /还没有开放/);
+    await assert.rejects(controller({ member: true }).c.trialTicket({ projectId: 'general-agent', scenario: 'x' }), /场景/);
     delete process.env.PROJECT_TRIAL_URL;
-    await assert.rejects(controller().c.trialTicket({ projectId: 'general-agent' }), /暂时不可用/);
+    await assert.rejects(controller({ member: true }).c.trialTicket({ projectId: 'general-agent' }), /暂时不可用/);
   });
 
-  it('普通用户每天 3 次，会员 20 次', async () => {
-    const { c } = controller();
-    for (let i = 0; i < 3; i++) await c.trialTicket({ projectId: 'general-agent' });
-    await assert.rejects(c.trialTicket({ projectId: 'general-agent' }), /已用完/);
+  it('现场运行只对会员开放：非会员拿不到票据也不占计数，会员每天 20 次', async () => {
+    const { c, counts } = controller();
+    await assert.rejects(c.trialTicket({ projectId: 'general-agent' }), (e: any) => e.status === 403 && /会员功能/.test(e.message));
+    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 0, remaining: 0, member: false });
+    assert.strictEqual(counts.size, 0);
     const m = controller({ member: true }).c;
     for (let i = 0; i < 20; i++) await m.trialTicket({ projectId: 'general-agent' });
     await assert.rejects(m.trialTicket({ projectId: 'general-agent' }), /已用完/);
