@@ -7,8 +7,8 @@ import { EntitlementService } from '../service/entitlement';
 import { resolveUserInfo } from '../common/admin.guard';
 import { R } from '../common/base.error.utils';
 import {
-  TRIAL_DAILY_LIMIT, TRIAL_PROJECTS, TRIAL_TICKET_TTL_SEC,
-  signTrialTicket, trialConfigured, trialQuotaKey,
+  TRIAL_PROJECTS, TRIAL_TICKET_TTL_SEC,
+  signTrialTicket, trialConfigured, trialDailyLimit, trialQuotaKey,
 } from '../service/project/trial';
 import { SOURCE_PROJECTS, SOURCE_URL_EXPIRES_SEC, loadSourcePackage } from '../service/project/source';
 import { OssService } from '../service/content/oss';
@@ -54,15 +54,14 @@ export class ProjectHTTPService {
     if (!userId) throw R.unauthorizedError('登录后即可在线试用');
 
     const member = (await this.entitlementService.check(userId, 'materials_pdf', {})).allowed;
-    const limit = member ? TRIAL_DAILY_LIMIT.member : TRIAL_DAILY_LIMIT.user;
+    const limit = trialDailyLimit(project, member);
+    if (limit <= 0) throw R.forbiddenError('现场运行是会员功能；示例回放不用开通就能看');
     const now = this.now();
-    const key = trialQuotaKey(userId, now);
+    const key = trialQuotaKey(userId, now, String(body.projectId));
     const used = await this.redisService.incr(key);
     if (used === 1) await this.redisService.expire(key, 2 * 86400);
     if (used > limit) {
-      throw R.forbiddenError(member
-        ? `今天的 ${limit} 次在线试用已用完，明天再来`
-        : `今天的 ${limit} 次在线试用已用完。会员每天 ${TRIAL_DAILY_LIMIT.member} 次，也可以下载源码在自己电脑上运行`);
+      throw R.forbiddenError(`这个项目今天的 ${limit} 次现场运行已用完，明天再来；示例回放随时能看`);
     }
 
     const exp = Math.floor(now.getTime() / 1000) + TRIAL_TICKET_TTL_SEC;
@@ -87,14 +86,16 @@ export class ProjectHTTPService {
     method: 'get',
   })
   @NoAuth()
-  async trialQuota(): Promise<any> {
+  async trialQuota(@Query('projectId') projectId?: string): Promise<any> {
+    const project = TRIAL_PROJECTS[String(projectId || '')];
+    if (!project) return { success: true, data: null };
     const info = await resolveUserInfo(this.ctx, this.redisService);
     const userId = info?.userId || '';
     // 没登录不算错：页面据此不显示次数
     if (!userId) return { success: true, data: null };
     const member = (await this.entitlementService.check(userId, 'materials_pdf', {})).allowed;
-    const limit = member ? TRIAL_DAILY_LIMIT.member : TRIAL_DAILY_LIMIT.user;
-    const used = Number(await this.redisService.get(trialQuotaKey(userId, this.now()))) || 0;
+    const limit = trialDailyLimit(project, member);
+    const used = Number(await this.redisService.get(trialQuotaKey(userId, this.now(), String(projectId)))) || 0;
     return { success: true, data: { limit, remaining: Math.max(0, limit - used), member } };
   }
 
