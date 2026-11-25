@@ -107,6 +107,25 @@ export class OssService {
     await this.client!.delete(objKey);
   }
 
+  /**
+   * 按完整 objKey 删除 images/ 下的对象（固定提交同步里的图片删除）。
+   * 只允许 images/ 前缀，拒绝绝对路径和 ..，防止误删其他目录。
+   * OSS 删除不存在的对象也返回成功，所以重跑是幂等的。
+   */
+  async deleteRaw(objKey: string): Promise<void> {
+    this.assertClient();
+    if (
+      typeof objKey !== 'string' ||
+      !objKey.startsWith('images/') ||
+      objKey.length <= 'images/'.length ||
+      objKey.split('/').some(seg => seg === '..' || seg === '') ||
+      objKey.includes('\\')
+    ) {
+      throw new Error(`拒绝删除非 images/ 对象: ${String(objKey)}`);
+    }
+    await this.client!.delete(objKey);
+  }
+
   /** 将图片字节写入 OSS */
   async putImage(fileName: string, buf: Buffer): Promise<string> {
     this.assertClient();

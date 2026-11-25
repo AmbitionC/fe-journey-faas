@@ -56,4 +56,24 @@ describe('OssService 图片完整性', () => {
     assert.strictEqual(imageContentType('x.svg'), 'image/svg+xml');
     assert.strictEqual(imageContentType('x.unknown'), 'application/octet-stream');
   });
+
+  it('deleteRaw 只删 images/ 下的对象', async () => {
+    const deleted: string[] = [];
+    const service = new OssService();
+    (service as any).client = { delete: async (key: string) => { deleted.push(key); } };
+
+    await service.deleteRaw('images/diagram-sources/figure-v2.aj.mjs');
+    assert.deepStrictEqual(deleted, ['images/diagram-sources/figure-v2.aj.mjs']);
+
+    for (const bad of ['knowledge/a.md', '/images/a.png', 'images/../knowledge/a.md', 'images/', 'images//a.png', '']) {
+      await assert.rejects(() => service.deleteRaw(bad), /拒绝删除/);
+    }
+    assert.strictEqual(deleted.length, 1);
+  });
+
+  it('deleteRaw 的 OSS 错误原样抛出，不当成删除成功', async () => {
+    const service = new OssService();
+    (service as any).client = { delete: async () => { throw new Error('simulated OSS failure'); } };
+    await assert.rejects(() => service.deleteRaw('images/a.png'), /simulated OSS failure/);
+  });
 });
