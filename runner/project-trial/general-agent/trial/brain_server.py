@@ -296,7 +296,11 @@ class Handler(BaseHTTPRequestHandler):
         ticket = verify(str(req.get("ticket", "")), TICKET_SECRET)
         if ticket is None:
             return self._json(401, {"error": "试用票据无效或已过期，请刷新页面重试。"})
-        scenario = SCENARIOS.get(str(req.get("scenario") or ticket.get("scenario") or "store"))
+        # 场景以票据为准：次数是按票据发的，请求里另写一个场景不算数
+        name = str(ticket.get("scenario") or "store")
+        if req.get("scenario") and str(req["scenario"]) != name:
+            return self._json(403, {"error": "试用票据和要运行的场景对不上，请刷新页面重试。"})
+        scenario = SCENARIOS.get(name)
         if scenario is None:
             return self._json(400, {"error": "没有这个试用场景。"})
         task = str(req.get("task") or "").strip()[:MAX_TASK_CHARS] or scenario["default_task"]
