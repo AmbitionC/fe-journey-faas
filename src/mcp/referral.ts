@@ -95,7 +95,7 @@ export const REFERRAL_PROGRAMS: Record<ReferralProduct, ReferralProgram> = {
     ...agentProgram,
     product: 'invest',
     name: 'Invest Journey',
-    shareUrl: 'https://invest-journey.vercel.app/',
+    shareUrl: 'https://invest-journey.cn/',
     invitee: { points: REFERRAL_REWARD.invitee, memberDays: 0 },
     inviter: { points: REFERRAL_REWARD.inviter, memberDays: 0 },
     onPaid: { points: REFERRAL_REWARD.memberBonus, memberDays: 0 },

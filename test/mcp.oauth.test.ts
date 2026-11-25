@@ -217,7 +217,7 @@ describe('MCP OAuth（一句话安装）', () => {
       assert.strictEqual(as.status, 200, p);
       assert.strictEqual(as.json.issuer, 'https://fe.example.com/mcp/invest');
       // 线上函数计算默认域名不许 302 到外站：带产品的授权端点直接给站点授权页
-      assert.strictEqual(as.json.authorization_endpoint, 'https://invest-journey.vercel.app/skills/authorize');
+      assert.strictEqual(as.json.authorization_endpoint, 'https://invest-journey.cn/skills/authorize');
       assert.deepStrictEqual(as.json.code_challenge_methods_supported, ['S256']);
       assert.ok(as.json.registration_endpoint.endsWith('/mcp/oauth/register'));
     }
@@ -237,7 +237,7 @@ describe('MCP OAuth（一句话安装）', () => {
     const id = await register(rt);
     const a = await run(rt, { path: `/mcp/oauth/invest/authorize?${authzQuery(id)}` });
     const page = new URL(jumpTarget(a));
-    assert.strictEqual(page.origin + page.pathname, 'https://invest-journey.vercel.app/skills/authorize');
+    assert.strictEqual(page.origin + page.pathname, 'https://invest-journey.cn/skills/authorize');
     assert.strictEqual(page.searchParams.get('state'), 'st1');
 
     // 授权页取客户端信息
@@ -382,7 +382,7 @@ describe('MCP 设备授权（命令行 login，对照可灵）', () => {
     const { device_code, user_code, verification_uri_complete, interval } = start.json;
     assert.ok(interval >= 1);
     const page = new URL(verification_uri_complete);
-    assert.strictEqual(page.origin + page.pathname, 'https://invest-journey.vercel.app/skills/authorize');
+    assert.strictEqual(page.origin + page.pathname, 'https://invest-journey.cn/skills/authorize');
     assert.strictEqual(page.searchParams.get('user_code'), user_code);
 
     assert.strictEqual((await poll(rt, device_code)).json.error, 'authorization_pending');

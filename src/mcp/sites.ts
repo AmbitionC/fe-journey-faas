@@ -7,7 +7,7 @@ import type { Product } from './store';
  * 支付宝付款后的回跳——都必须按调用来自哪个产品取，不能一律写 Agent Journey。
  * 此前全部写死 agent-journey.cn，Invest 用户点数用完会被引到 Agent Journey 去充值。
  *
- * Invest Journey 目前只有 Vercel 默认域名；以后绑自有域名只改这里一行。
+ * Invest Journey 对外一律用国内域名 invest-journey.cn（2026-11-25：vercel.app 在国内常被屏蔽、访问超时）。
  */
 export interface Site {
   name: string;
@@ -41,7 +41,7 @@ export const SITES: Record<Product, Site> = {
   agent: site('Agent Journey', 'https://www.agent-journey.cn', '/developer', [
     '/membership',
   ]),
-  invest: site('Invest Journey', 'https://invest-journey.vercel.app', '/skills'),
+  invest: site('Invest Journey', 'https://invest-journey.cn', '/skills'),
 };
 
 /**

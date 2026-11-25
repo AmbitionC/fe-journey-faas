@@ -590,7 +590,7 @@ describe('MCP HTTP 适配', () => {
       const text = r.json.result.content[0].text;
       assert.ok(text.includes('需要 5 点') && text.includes('剩余 1 点'), text);
       // Invest 的调用引到 Invest 自己的站，不再一律引去 Agent Journey
-      assert.ok(text.includes('https://invest-journey.vercel.app/skills?from=credit_exhausted#pricing'), text);
+      assert.ok(text.includes('https://invest-journey.cn/skills?from=credit_exhausted#pricing'), text);
       assert.ok(!text.includes('agent-journey.cn'), text);
       assert.ok(text.includes('会员月卡 ¥14.5（原价 ¥29）') && text.includes('加油包 100 点 ¥5（原价 ¥10）'), text);
       assert.ok(!/免费/.test(text), text);
@@ -778,7 +778,7 @@ describe('MCP HTTP 适配', () => {
       const inv = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=invest', method: 'GET' });
       const ag = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=agent', method: 'GET' });
       const bad = await run(fakeRuntime({ now: NOV }).rt, { path: '/mcp/pricing?product=nope', method: 'GET' });
-      assert.strictEqual(inv.json.data.rechargeUrl, 'https://invest-journey.vercel.app/skills#pricing');
+      assert.strictEqual(inv.json.data.rechargeUrl, 'https://invest-journey.cn/skills#pricing');
       assert.strictEqual(inv.json.data.product, 'invest');
       assert.deepStrictEqual(Object.keys(inv.json.data.toolCost).sort(), PRODUCT_TOOLS.invest.slice().sort());
       assert.deepStrictEqual(Object.keys(ag.json.data.toolCost).sort(), PRODUCT_TOOLS.agent.slice().sort());

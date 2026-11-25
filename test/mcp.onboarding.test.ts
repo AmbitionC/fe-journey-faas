@@ -34,22 +34,22 @@ describe('MCP 新用户引导', () => {
     assert.ok(!JSON.stringify(o).includes('Agent Journey'));
     assert.ok(!JSON.stringify(onboardingFor('agent', 'free', 50)).includes('Invest'));
     assert.ok(onboardingFor('agent', 'free', 0)!.balance.includes('https://www.agent-journey.cn/developer?from=credit_exhausted'));
-    assert.ok(onboardingFor('invest', 'free', 0)!.balance.includes('https://invest-journey.vercel.app/skills?from=credit_exhausted'));
+    assert.ok(onboardingFor('invest', 'free', 0)!.balance.includes('https://invest-journey.cn/skills?from=credit_exhausted'));
   });
 
   it('Key 报错排查与低余额提醒按产品给自己站的链接', () => {
-    assert.ok(authHelp('missing', 'invest').includes('https://invest-journey.vercel.app/skills'));
+    assert.ok(authHelp('missing', 'invest').includes('https://invest-journey.cn/skills'));
     assert.ok(!authHelp('missing', 'invest').includes('agent-journey'));
     // 插件用户没登录：先说登录这一步，不让他去找 Key
     const plugin = authHelp('missing', 'invest', 'plugin');
     assert.ok(plugin.startsWith('Invest Journey 插件已装好'));
     assert.ok(plugin.includes('登录 Invest Journey'));
-    assert.ok(plugin.includes('https://invest-journey.vercel.app/skills'));
+    assert.ok(plugin.includes('https://invest-journey.cn/skills'));
     assert.ok(!plugin.includes('agent-journey'));
     assert.ok(!authHelp('missing', 'invest', 'mcp').includes('插件已装好'));
     assert.ok(authHelp('revoked', 'agent').includes('https://www.agent-journey.cn/developer'));
     assert.ok(scopeHelp('invest').includes('Invest Journey') && !scopeHelp('invest').includes('Agent'));
-    assert.ok(lowBalanceNotice(9, 2, 'invest')!.includes('invest-journey.vercel.app/skills?from=credit_low'));
+    assert.ok(lowBalanceNotice(9, 2, 'invest')!.includes('invest-journey.cn/skills?from=credit_low'));
     assert.ok(lowBalanceNotice(9, 2)!.includes('agent-journey.cn/developer?from=credit_low'));
   });
 });
@@ -75,17 +75,26 @@ describe('MCP 站点表（两个产品各自独立）', () => {
     // Invest 站没有会员页，带了也回 /skills
     assert.strictEqual(
       payReturnUrl('invest', '/membership'),
-      'https://invest-journey.vercel.app/skills'
+      'https://invest-journey.cn/skills'
     );
-    assert.strictEqual(payReturnUrl('invest'), 'https://invest-journey.vercel.app/skills');
+    assert.strictEqual(payReturnUrl('invest'), 'https://invest-journey.cn/skills');
     // 未知产品按 Agent Journey
     assert.strictEqual(payReturnUrl(undefined, '/membership'), 'https://www.agent-journey.cn/membership');
+  });
+
+  it('对外站点不用 vercel.app（国内常被屏蔽）', () => {
+    for (const k of ['agent', 'invest'] as const) {
+      const s = siteOf(k);
+      for (const u of [s.origin, s.manage, s.recharge, s.payReturn]) {
+        assert.ok(!/vercel\.app/.test(u), `${k}: ${u}`);
+      }
+    }
   });
 
   it('充值链接按产品带来源参数', () => {
     assert.strictEqual(
       rechargeLink('credit_low', 'invest'),
-      'https://invest-journey.vercel.app/skills?from=credit_low#pricing'
+      'https://invest-journey.cn/skills?from=credit_low#pricing'
     );
     assert.strictEqual(
       rechargeLink('credit_exhausted', 'agent'),
