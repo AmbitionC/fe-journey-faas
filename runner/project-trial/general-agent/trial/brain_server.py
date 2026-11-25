@@ -5,6 +5,8 @@
 
 防滥用：
 - 必须带网站后端签发的一次性票据（HMAC 签名、两分钟内有效），后端在签发前检查登录和每日次数。
+- 开跑前拿票据到后端领一次：函数有多个实例，只有后端知道这张票据用没用过、全站今天的用量还够不够。
+- 页面关了就停；跑完（包括超时、出错、断开）把实际用量报给后端。
 - 每次运行有轮次、总时长、输出量上限。
 - 无界面模式：只放行运行测试的命令，其余命令一律拒绝。
 """
@@ -22,12 +24,15 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "trial"))
 
+import meter  # noqa: E402
 from agent.build import build_coding_agent  # noqa: E402
 from agent.kernel.permission import Rule  # noqa: E402
 from agent.model import OpenAICompatModel  # noqa: E402
@@ -42,6 +47,7 @@ ALLOWED_ORIGINS = [o for o in os.environ.get("TRIAL_ALLOWED_ORIGINS", "").split(
 MAX_TURNS = int(os.environ.get("TRIAL_MAX_TURNS", "24"))
 MAX_SECONDS = int(os.environ.get("TRIAL_MAX_SECONDS", "150"))
 MAX_TASK_CHARS = 500
+KEEPALIVE_SECONDS = 5      # 多久写一次心跳。写失败就知道页面关了，所以也是断开后最多再跑多久
 # 同一个会话里接着下任务：浏览器把上一轮结束时的工作区改动和最近几句对话带回来
 MAX_HISTORY_MESSAGES = 6
 MAX_HISTORY_CHARS = 1500
@@ -155,20 +161,27 @@ def sign(payload: dict, secret: str) -> str:
     return f"{body}.{mac}"
 
 
-def verify(ticket: str, secret: str, now: float | None = None) -> dict | None:
-    """返回票据内容，无效时返回 None。"""
-    if not secret or "." not in ticket:
+def unsign(token: str, secret: str) -> dict | None:
+    """验签名，返回内容；签名不对返回 None。"""
+    if not secret or "." not in token:
         return None
-    body, mac = ticket.rsplit(".", 1)
+    body, mac = token.rsplit(".", 1)
     good = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(mac, good):
+    if not hmac.compare_digest(mac.encode(), good.encode()):
         return None
     try:
         payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
     except Exception:
         return None
+    return payload if isinstance(payload, dict) else None
+
+
+def verify(ticket: str, secret: str, now: float | None = None) -> dict | None:
+    """返回票据内容，无效时返回 None。"""
+    payload = unsign(ticket, secret)
     now = now or time.time()
-    if not isinstance(payload, dict) or payload.get("exp", 0) < now or not payload.get("jti"):
+    # 带 typ 的是发给后端的消息，和票据共用一把密钥，不能当票据用
+    if payload is None or payload.get("typ") or payload.get("exp", 0) < now or not payload.get("jti"):
         return None
     with _used_lock:
         for jti in [j for j, exp in _used.items() if exp < now]:
@@ -177,6 +190,99 @@ def verify(ticket: str, secret: str, now: float | None = None) -> dict | None:
             return None
         _used[payload["jti"]] = payload["exp"]
     return payload
+
+
+def call_backend(ticket: dict, typ: str, **fields) -> dict:
+    """给网站后端发一条签过名的消息（地址在票据里，由后端签发）。失败抛异常。"""
+    token = sign({"typ": typ, "jti": ticket["jti"], "exp": int(time.time()) + 300, **fields}, TICKET_SECRET)
+    req = urllib.request.Request(f"{str(ticket['cb']).rstrip('/')}/project/trial/{typ}",
+                                 data=json.dumps({"token": token}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = json.loads(resp.read())
+    if not isinstance(data.get("data"), dict):
+        raise ValueError("后端的回复不认识")
+    return data["data"]
+
+
+def claim(ticket: dict) -> tuple[int, str]:
+    """领票据。返回 (200, "") 表示可以跑，否则是要回给页面的状态码和说明。"""
+    if not ticket.get("cb"):
+        return 200, ""      # 部署冒烟用的票据没有后端地址
+    try:
+        got = call_backend(ticket, "claim")
+    except Exception as e:
+        print(f"领票据失败 {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+        return 503, "在线试用暂时不可用，请稍后再试。"
+    if got.get("ok") is True:
+        return 200, ""
+    return (429 if got.get("reason") == "budget" else 401), str(got.get("message") or "试用票据无效或已过期，请刷新页面重试。")
+
+
+def report_usage(ticket: dict, usage: dict) -> None:
+    """上报用量。后端按票据编号去重，所以失败可以再试；一直失败就写进日志，不影响已经跑完的结果。"""
+    if not ticket.get("cb"):
+        return
+    for attempt in range(3):
+        try:
+            call_backend(ticket, "usage", **usage)
+            return
+        except Exception as e:
+            print(f"上报用量失败 {type(e).__name__}: {e} {json.dumps(usage)}", file=sys.stderr, flush=True)
+            time.sleep(0.5 * attempt)
+
+
+class Run:
+    """一次运行：在自己的线程和事件循环里跑，可以从外面叫停，结束时一定上报用量。"""
+
+    def __init__(self, ticket: dict, runner, task: str, put) -> None:
+        self.ticket, self.runner, self.task, self.put = ticket, runner, task, put
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._main: asyncio.Task | None = None
+        self._cancelled = False
+        self._lock = threading.Lock()
+        self.thread = threading.Thread(target=self._work, daemon=True)
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            if self._loop is not None and self._main is not None:
+                self._loop.call_soon_threadsafe(self._main.cancel)
+
+    def _work(self) -> None:
+        t0, stopped, final = time.monotonic(), "error", None
+        with meter.measure() as m:
+            async def main() -> dict:
+                with self._lock:
+                    if self._cancelled:
+                        raise asyncio.CancelledError
+                    self._loop, self._main = asyncio.get_running_loop(), asyncio.current_task()
+                try:
+                    return await self.runner(self.task, self.put)
+                finally:
+                    # 超时或被叫停时，线程里可能还有正在生成的调用：让它们就地停下。
+                    # asyncio.run 返回前会等这些线程，所以后面读到的用量是全的
+                    m.stop()
+                    with self._lock:
+                        self._loop = None
+            try:
+                summary = asyncio.run(main())
+                stopped = str(summary.get("stopped") or "finished")
+                final = {"type": "done", **summary, "input_tokens": m.input_tokens, "output_tokens": m.output_tokens} \
+                    if m.calls else {"type": "done", **summary}
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                stopped = "disconnected"
+            except Exception as e:
+                stopped = "disconnected" if self._cancelled else "error"
+                final = {"type": "error", "message": f"{type(e).__name__}: {e}"}
+        if final:
+            self.put(final)
+        # 先报用量再结束响应：响应一结束，函数实例就可能被冻结。结果已经推给页面了，不用等这一步
+        report_usage(self.ticket, {"stopped": stopped[:32], "input_tokens": m.input_tokens,
+                                   "output_tokens": m.output_tokens, "calls": m.calls,
+                                   "estimated_calls": m.estimated_calls,
+                                   "seconds": round(time.monotonic() - t0, 1)})
+        self.put(None)
 
 
 def public_event(event: Event) -> dict | None:
@@ -308,6 +414,9 @@ class Handler(BaseHTTPRequestHandler):
             task = scenario["default_task"]
         runner = scenario["run"] if "run" in scenario else (
             lambda task, emit: run_trial(scenario, task, emit, req.get("workspace"), req.get("history")))
+        code, why = claim(ticket)
+        if code != 200:
+            return self._json(code, {"error": why})
 
         self.send_response(200)
         self._cors()
@@ -322,19 +431,13 @@ class Handler(BaseHTTPRequestHandler):
 
         events: queue.Queue = queue.Queue()
 
-        def worker() -> None:
-            try:
-                events.put({"type": "done", **asyncio.run(runner(task, events.put))})
-            except Exception as e:
-                events.put({"type": "error", "message": f"{type(e).__name__}: {e}"})
-            events.put(None)
-
-        threading.Thread(target=worker, daemon=True).start()
+        run = Run(ticket, runner, task, events.put)
+        run.thread.start()
         try:
             self._send({"type": "start", "task": task, "max_turns": scenario.get("max_turns", MAX_TURNS)})
             while True:
                 try:
-                    ev = events.get(timeout=10)
+                    ev = events.get(timeout=KEEPALIVE_SECONDS)
                 except queue.Empty:
                     self._chunk(b": keep-alive\n\n")
                     continue
@@ -343,8 +446,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(ev)
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass  # 浏览器关了页面
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+            run.cancel()  # 浏览器关了页面
+        # 断开时也等运行收尾、用量报完再返回
+        run.thread.join(timeout=100)
 
     def _send(self, ev: dict) -> None:
         self._chunk(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode())
@@ -358,6 +463,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 load_plugins()
+meter.install()
 
 if __name__ == "__main__":
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
