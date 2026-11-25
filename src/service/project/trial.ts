@@ -11,20 +11,24 @@ import * as crypto from 'crypto';
 export interface TrialProject {
   /** 试用函数里的场景名 */
   scenarios: string[];
+  /** 会员每天能现场跑几次：按一次运行大约要花多少模型用量定 */
+  memberDaily: number;
 }
 
 /** 已接入在线试用的项目。新增项目时在这里登记。 */
 export const TRIAL_PROJECTS: Record<string, TrialProject> = {
   // store：小型电商后端的示例仓库（网站工作台的默认场景）；shop：最早的单文件购物车，部署冒烟还在用
-  'general-agent': { scenarios: ['store', 'shop'] },
+  'general-agent': { scenarios: ['store', 'shop'], memberDaily: 10 },
   // 现场跑一轮进化（第一级提示词 / 第三级配置），场景定义在 runner/project-trial/eval-evolve/trial/plugin.py
-  'eval-evolve': { scenarios: ['evolve-prompt', 'evolve-config'] },
+  'eval-evolve': { scenarios: ['evolve-prompt', 'evolve-config'], memberDaily: 2 },
   // 现场跑一轮完整的增长活动（卖点→人群→素材→审核→试投→归因→进化），场景定义在 runner/project-trial/ecom-growth/trial/plugin.py
-  'ecom-growth': { scenarios: ['campaign'] },
+  'ecom-growth': { scenarios: ['campaign'], memberDaily: 3 },
 };
 
-/** 现场运行每次都要调真模型，只对会员开放；非会员看前端的示例回放（不经过后端） */
-export const TRIAL_DAILY_LIMIT = { user: 0, member: 20 };
+/** 现场运行每次都要调真模型，只对会员开放；非会员看前端的示例回放（不经过后端）。次数按项目分开计 */
+export function trialDailyLimit(project: TrialProject, member: boolean): number {
+  return member ? project.memberDaily : 0;
+}
 export const TRIAL_TICKET_TTL_SEC = 120;
 
 export function trialConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -42,6 +46,6 @@ export function trialDay(now: Date): string {
   return new Date(now.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
-export function trialQuotaKey(userId: string, now: Date): string {
-  return `project:trial:${trialDay(now)}:${userId}`;
+export function trialQuotaKey(userId: string, now: Date, projectId: string): string {
+  return `project:trial:${trialDay(now)}:${userId}:${projectId}`;
 }

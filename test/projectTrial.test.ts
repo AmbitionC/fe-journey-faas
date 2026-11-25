@@ -36,14 +36,14 @@ describe('项目实战在线试用票据', () => {
   it('按北京时间分日', () => {
     assert.strictEqual(trialDay(new Date('2026-11-18T23:30:00+08:00')), '2026-11-18');
     assert.strictEqual(trialDay(new Date('2026-11-18T16:30:00Z')), '2026-11-19');
-    assert.strictEqual(trialQuotaKey('u1', new Date('2026-11-18T00:00:00+08:00')), 'project:trial:2026-11-18:u1');
+    assert.strictEqual(trialQuotaKey('u1', new Date('2026-11-18T00:00:00+08:00'), 'general-agent'), 'project:trial:2026-11-18:u1:general-agent');
   });
 
   it('会员拿到票据和试用地址，返回剩余次数', async () => {
     const { c } = controller({ member: true });
     const r = await c.trialTicket({ projectId: 'general-agent' });
     assert.strictEqual(r.data.url, 'https://trial.fixture.invalid/run');
-    assert.strictEqual(r.data.remaining, 19);
+    assert.strictEqual(r.data.remaining, 9);
     const payload = JSON.parse(Buffer.from(r.data.ticket.split('.')[0], 'base64url').toString());
     assert.strictEqual(payload.scenario, 'store');
     assert.strictEqual(payload.exp, Math.floor(new Date('2026-11-18T23:30:00+08:00').getTime() / 1000) + 120);
@@ -74,12 +74,12 @@ describe('项目实战在线试用票据', () => {
 
   it('查今天还剩几次：只读不占次数，未登录返回空，非会员是 0 次', async () => {
     const { c } = controller({ member: true });
-    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 20, remaining: 20, member: true });
+    assert.deepStrictEqual((await c.trialQuota('general-agent')).data, { limit: 10, remaining: 10, member: true });
     await c.trialTicket({ projectId: 'general-agent' });
-    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 20, remaining: 19, member: true });
-    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 20, remaining: 19, member: true });
-    assert.deepStrictEqual((await controller().c.trialQuota()).data, { limit: 0, remaining: 0, member: false });
-    assert.strictEqual((await controller({ userId: '' }).c.trialQuota()).data, null);
+    assert.deepStrictEqual((await c.trialQuota('general-agent')).data, { limit: 10, remaining: 9, member: true });
+    assert.deepStrictEqual((await c.trialQuota('general-agent')).data, { limit: 10, remaining: 9, member: true });
+    assert.deepStrictEqual((await controller().c.trialQuota('general-agent')).data, { limit: 0, remaining: 0, member: false });
+    assert.strictEqual((await controller({ userId: '' }).c.trialQuota('general-agent')).data, null);
   });
 
   it('未登录、未知项目、未知场景、未配置都拒绝', async () => {
@@ -90,14 +90,19 @@ describe('项目实战在线试用票据', () => {
     await assert.rejects(controller({ member: true }).c.trialTicket({ projectId: 'general-agent' }), /暂时不可用/);
   });
 
-  it('现场运行只对会员开放：非会员拿不到票据也不占计数，会员每天 20 次', async () => {
+  it('现场运行只对会员开放：非会员拿不到票据也不占计数，会员按项目限次', async () => {
     const { c, counts } = controller();
     await assert.rejects(c.trialTicket({ projectId: 'general-agent' }), (e: any) => e.status === 403 && /会员功能/.test(e.message));
-    assert.deepStrictEqual((await c.trialQuota()).data, { limit: 0, remaining: 0, member: false });
+    assert.deepStrictEqual((await c.trialQuota('general-agent')).data, { limit: 0, remaining: 0, member: false });
     assert.strictEqual(counts.size, 0);
+    // 会员按项目分开计：通用 Agent 10 次、电商 3 次、评测 2 次，互不占用
     const m = controller({ member: true }).c;
-    for (let i = 0; i < 20; i++) await m.trialTicket({ projectId: 'general-agent' });
-    await assert.rejects(m.trialTicket({ projectId: 'general-agent' }), /已用完/);
+    for (const [projectId, limit] of [['general-agent', 10], ['ecom-growth', 3], ['eval-evolve', 2]] as const) {
+      for (let i = 0; i < limit; i++) await m.trialTicket({ projectId });
+      await assert.rejects(m.trialTicket({ projectId }), /已用完/);
+      assert.deepStrictEqual((await m.trialQuota(projectId)).data, { limit, remaining: 0, member: true });
+    }
+    assert.strictEqual((await m.trialQuota('nope')).data, null);
   });
 });
 
