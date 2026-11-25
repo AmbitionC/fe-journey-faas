@@ -99,13 +99,14 @@ async def main() -> int:
         summary = await runner(emit)
         if pending:
             print("".join(pending).strip(), flush=True)
-        if name in STORE_TASKS:
-            # 整段事件流压缩后打成一行，可以直接做成网站上的录制回放
-            recorded.insert(0, [0, {"type": "start", "task": STORE_TASKS[name], "max_turns": brain.MAX_TURNS}])
-            recorded.append([int((time.monotonic() - started) * 1000), {"type": "done", **summary}])
-            blob = base64.b64encode(gzip.compress(json.dumps(recorded, ensure_ascii=False).encode())).decode()
-            print(f"RECORDING {name} {blob}", flush=True)
-            summary.pop("workspace", None)
+        # 整段事件流压缩后打成一行，可以直接做成网站上的录制回放；开头那条和试用函数发给页面的一致
+        scenario = brain.SCENARIOS.get(name, {})
+        recorded.insert(0, [0, {"type": "start", "task": STORE_TASKS.get(name) or scenario.get("default_task", ""),
+                                "max_turns": brain.MAX_TURNS if name in STORE_TASKS else scenario.get("max_turns", brain.MAX_TURNS)}])
+        recorded.append([int((time.monotonic() - started) * 1000), {"type": "done", **summary}])
+        blob = base64.b64encode(gzip.compress(json.dumps(recorded, ensure_ascii=False).encode())).decode()
+        print(f"RECORDING {name} {blob}", flush=True)
+        summary.pop("workspace", None)
         for change in summary.pop("changed_files"):
             print(f"\n--- {change['path']}（改之前）\n{change['before']}\n+++ {change['path']}（改之后）\n{change['after']}")
         print(f"\n结果 {summary}  全程 {time.monotonic() - started:.0f}s", flush=True)
