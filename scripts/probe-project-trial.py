@@ -58,7 +58,10 @@ STORE_TASKS = {
     "store-kanban": "做一个任务看板小应用，放在 app/kanban.html：待办、进行中、已完成三列，能新增卡片、在三列之间拖动、删除，每列顶部显示数量。先放几条示例卡片。界面做得精致一些。",
 }
 # 场景名 → （怎么跑, 跑成什么样算正常）
-RUNNERS = {**{name: (lambda emit, sc=sc: evo.run_evolution(sc, emit), "admitted") for name, sc in evo.SCENARIOS.items()},
+# evolve-mismatch 故意用错级别：正常结局是不改或被拦下，合入了反而不对
+RUNNERS = {**{name: (lambda emit, sc=sc: evo.run_evolution(sc, emit),
+                     ("no_change", "rejected") if name == "evolve-mismatch" else "admitted")
+              for name, sc in evo.SCENARIOS.items()},
            **{name: (lambda emit, sc=sc: growth.run_campaign(sc, emit), "finished") for name, sc in growth.SCENARIOS.items()},
            **{name: (lambda emit, task=task: brain.run_trial(brain.SCENARIOS["store"], task, emit), "finished")
               for name, task in STORE_TASKS.items()}}
@@ -110,7 +113,7 @@ async def main() -> int:
         for change in summary.pop("changed_files"):
             print(f"\n--- {change['path']}（改之前）\n{change['before']}\n+++ {change['path']}（改之后）\n{change['after']}")
         print(f"\n结果 {summary}  全程 {time.monotonic() - started:.0f}s", flush=True)
-        bad += summary["stopped"] != expected
+        bad += summary["stopped"] not in ((expected,) if isinstance(expected, str) else expected)
     return 1 if bad else 0
 
 
