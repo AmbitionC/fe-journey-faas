@@ -25,4 +25,4 @@ jobs:
           SANDBOX_URL: https://project-sandbox-aebjiggsbz.cn-hangzhou.fcapp.run
           SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
         # 只跑这次要看的场景；不带参数会把所有场景都跑一遍
-        run: python scripts/probe-project-trial.py store-explain
+        run: python scripts/probe-project-trial.py evolve-mismatch
