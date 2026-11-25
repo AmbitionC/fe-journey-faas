@@ -147,12 +147,12 @@ describe('MCP 支付宝网页收款', () => {
         orderNo: 'MJ20261101ABCDEF12',
         amountCents: 1450,
         subject: 'Invest Journey 会员与点数 · 会员月卡',
-        returnUrl: 'https://invest-journey.vercel.app/skills',
+        returnUrl: 'https://invest-journey.cn/skills',
       })
     );
     const p: Record<string, string> = {};
     url.searchParams.forEach((v, k) => (p[k] = v));
-    assert.strictEqual(p.return_url, 'https://invest-journey.vercel.app/skills');
+    assert.strictEqual(p.return_url, 'https://invest-journey.cn/skills');
     assert.ok(rsaVerify(signContent(p), p.sign, app.pubPem));
   });
 
