@@ -118,6 +118,8 @@ resources:
         # 项目实战在线试用：试用入口函数地址与票据密钥（deploy.yml 先部署试用函数再注入）。缺任一则不发票据。
         PROJECT_TRIAL_URL: ${env('PROJECT_TRIAL_URL', '')}
         PROJECT_TRIAL_TICKET_SECRET: ${env('PROJECT_TRIAL_TICKET_SECRET', '')}
+        # 全站每天用在现场运行上的 token 上限，到顶当天不再放行（默认值在 service/project/trial.ts）
+        PROJECT_TRIAL_TOKEN_DAILY: ${env('PROJECT_TRIAL_TOKEN_DAILY', '')}
       triggers:
         - triggerName: httpTrigger
           triggerType: http

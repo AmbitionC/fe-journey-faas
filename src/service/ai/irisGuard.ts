@@ -117,7 +117,8 @@ export type AlertKind =
   | 'single_call'
   | 'guest_calls'
   | 'guest_tokens'
-  | 'daily_tokens';
+  | 'daily_tokens'
+  | 'trial_tokens';
 
 const DAY_TTL = 86400 + 3600;
 
