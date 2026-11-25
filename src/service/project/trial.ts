@@ -24,7 +24,7 @@ export interface TrialProject {
 /** 已接入在线试用的项目。新增项目时在这里登记。 */
 export const TRIAL_PROJECTS: Record<string, TrialProject> = {
   // store：小型电商后端的示例仓库（网站工作台的默认场景）；shop：最早的单文件购物车，部署冒烟还在用
-  'general-agent': { scenarios: ['store', 'shop'], memberDaily: 10, tokenEstimate: { store: 60_000, shop: 30_000 } },
+  'general-agent': { scenarios: ['store', 'shop'], memberDaily: 10, tokenEstimate: { store: 200_000, shop: 30_000 } },
   // 现场跑一轮进化（第一级提示词 / 第三级配置），场景定义在 runner/project-trial/eval-evolve/trial/plugin.py
   'eval-evolve': { scenarios: ['evolve-prompt', 'evolve-config'], memberDaily: 2, tokenEstimate: { 'evolve-prompt': 800_000, 'evolve-config': 450_000 } },
   // 现场跑一轮完整的增长活动（卖点→人群→素材→审核→试投→归因→进化），场景定义在 runner/project-trial/ecom-growth/trial/plugin.py
