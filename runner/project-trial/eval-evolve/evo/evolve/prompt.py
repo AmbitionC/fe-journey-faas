@@ -13,7 +13,7 @@ from statistics import mean
 from ..report import by_task
 from ..types import AgentVersion, RunRecord, Task
 from .common import example_block, extract_block
-from .gate import Bench, Decision, admit
+from .gate import Bench, Decision, admit, precheck
 
 SYSTEM = "你在改进一个编程 Agent 的系统提示词。"
 TEMPLATE = """当前提示词：
@@ -68,14 +68,14 @@ def select_parent(pool: list[Candidate], rng: random.Random) -> Candidate:
 
 
 async def reflect(bench_model, parent: AgentVersion, tasks: dict[str, Task], records: list[RunRecord],
-                  rejected: list[str]) -> tuple[str, str]:
+                  rejected: list[str], limits: str = "") -> tuple[str, str]:
     """返回（诊断，新提示词）。新提示词为空或与原来相同表示“不该改”。"""
     failures = [r for r in records if not r.passed]
     shown = failures[:4] + [r for r in records if r.passed][:1]   # 带一条成功的做对照
     text = await bench_model.ask(SYSTEM, TEMPLATE.format(
         prompt=parent.system_prompt,
         examples="\n\n".join(example_block(tasks[r.task_id].prompt, r) for r in shown),
-        rejected="\n".join(f"- {x}" for x in rejected) or "（无）"))
+        rejected="\n".join(f"- {x}" for x in rejected) or "（无）") + limits)
     new_prompt = extract_block(text, "prompt").strip()
     if new_prompt and "{cwd}" in parent.system_prompt and "{cwd}" not in new_prompt:
         # 模型常把结尾带占位符的那一行漏掉：把原提示词里的那一行补回去，而不是整份作废
@@ -107,13 +107,17 @@ async def evolve_prompt(bench: Bench, model, current: AgentVersion, rounds: int 
         rng.shuffle(failing), rng.shuffle(rest)
         batch = (failing + rest)[:batch_size]
         parent_runs = await bench.run(parent.version, batch, f"第 {round_no} 轮·父代小批量")
-        diagnosis, new_prompt = await reflect(model, parent.version, tasks, parent_runs, rejected)
+        diagnosis, new_prompt = await reflect(model, parent.version, tasks, parent_runs, rejected, bench.limits())
         bench.notify("proposal", {"level": 1, "round": round_no, "diagnosis": diagnosis,
                                   "changed": bool(new_prompt) and new_prompt != parent.version.system_prompt})
         if not new_prompt or new_prompt == parent.version.system_prompt:
             rejected.append(f"第 {round_no} 轮：反思认为不该改提示词（{diagnosis[:60]}）")
             continue
         child = parent.version.derive(f"改写提示词：{diagnosis[:80]}", system_prompt=new_prompt)
+        # 编辑预算按“相对当前版本改了多少”算：候选池里的版本可能隔了几代
+        if (blocked := precheck(bench, current.derive(child.note, system_prompt=new_prompt), current)):
+            rejected.append(f"{child.note}（{blocked.reason}）")
+            continue
         child_runs = await bench.run(child, batch, f"第 {round_no} 轮·子代小批量")
         if mean(r.passed for r in child_runs) <= mean(r.passed for r in parent_runs):
             rejected.append(f"{child.note}（小批量上没有比父代好）")

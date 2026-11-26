@@ -1,0 +1,18 @@
+{
+  "id": "toc-heading-levels",
+  "split": "accept",
+  "source": "synthetic",
+  "difficulty": "long_file",
+  "similar_group": "toc",
+  "prompt": "文档目录生成得不对：从三级标题直接回到一级标题时，后面的标题全挂到了错误的层级下面，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "cart-merge-quantity",
+  "split": "accept",
+  "source": "synthetic",
+  "difficulty": "long_file",
+  "similar_group": "cart",
+  "prompt": "购物车里同一件商品加两次，数量没有累加，只留下了后一次的数量，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

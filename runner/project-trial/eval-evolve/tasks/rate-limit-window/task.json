@@ -1,0 +1,18 @@
+{
+  "id": "rate-limit-window",
+  "split": "evolve",
+  "source": "synthetic",
+  "difficulty": "long_file",
+  "similar_group": "ratelimit",
+  "prompt": "限流器放行得太多：窗口里已经满了，过期的请求却没有被正确清掉又被重复计算，表现为刚好卡在窗口边界上的请求判断不对，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}
