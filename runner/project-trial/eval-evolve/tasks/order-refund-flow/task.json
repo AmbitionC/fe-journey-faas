@@ -1,0 +1,18 @@
+{
+  "id": "order-refund-flow",
+  "split": "evolve",
+  "source": "synthetic",
+  "difficulty": "long_file",
+  "similar_group": "order-flow",
+  "prompt": "订单状态流转有问题：已发货的订单申请退款后，仓库确认收到退货，订单却卡在“退款中”转不到“已退款”，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

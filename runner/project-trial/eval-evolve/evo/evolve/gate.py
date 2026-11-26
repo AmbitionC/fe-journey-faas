@@ -12,6 +12,7 @@ from ..runner import evaluate
 from ..store import Store
 from ..tasks import by_split
 from ..types import AgentUnderTest, AgentVersion, RunRecord, Task
+from .budget import MAX_STEP, task_terms, violations
 
 Notify = Callable[[str, dict], None]
 
@@ -29,6 +30,7 @@ class Bench:
     max_cost_ratio: float = 1.5      # 候选的平均用量最多是基线的多少倍
     min_gain: float = 0.0            # 波动门槛：验收集通过率的提升要超过它才算数。用同一版本连跑两遍的差值来定
     run_timeout: float = 600         # 单次运行的时间上限（秒）
+    budget: int | None = None        # 编辑预算：这一代最多改多少行。None 为不限（单跑一轮时的默认）
     _cache: dict = field(default_factory=dict)
 
     def split(self, name: str) -> list[Task]:
@@ -36,6 +38,13 @@ class Bench:
 
     def task(self, task_id: str) -> Task:
         return next(t for t in self.tasks if t.id == task_id)
+
+    def limits(self) -> str:
+        """附在提案器输入末尾的一段话：把这一代的约束提前告诉它，省得提出来再被拦下。"""
+        if self.budget is None:
+            return ""
+        return (f"\n\n这一代的约束：改动不能超过 {self.budget} 行（改写一行算一行）；"
+                f"数值型配置最多调到原来的 {MAX_STEP} 倍；不要出现具体任务里的文件名、函数名。超出会被直接拒绝。")
 
     async def run(self, version: AgentVersion, tasks: list[Task], label: str) -> list[RunRecord]:
         """同一个版本在同一批任务上只跑一次，结果复用。"""
@@ -59,7 +68,8 @@ class Decision:
     reason: str
     accept: dict = field(default_factory=dict)
     regressed: list[str] = field(default_factory=list)
-    rule: str = ""                 # 被哪条规则拦下：same | regress | no_gain | noise | cost；合入为 admitted
+    rule: str = ""                 # 被哪条规则拦下：same | budget | step | specific | regress | no_gain | noise | cost；合入为 admitted
+    candidate: str = ""            # 候选的版本号
     regress_skipped: list[str] = field(default_factory=list)   # 基线本来就不稳定通过、报不了警的回归任务
 
 
@@ -67,13 +77,29 @@ def tokens(records: list[RunRecord]) -> float:
     return mean(r.input_tokens + r.output_tokens for r in records) if records else 0.0
 
 
+def reject(bench: Bench, candidate: AgentVersion, baseline: AgentVersion, reason: str, rule: str = "") -> Decision:
+    """不用评测就能判的拒绝：记进版本库，通知出去。"""
+    bench.store.save_version(candidate, "rejected", reason)
+    bench.notify("gate", {"candidate": candidate.id, "baseline": baseline.id, "admitted": False, "reason": reason,
+                          "rule": rule, "regress_skipped": []})
+    return Decision(False, reason, rule=rule, candidate=candidate.id)
+
+
+def precheck(bench: Bench, candidate: AgentVersion, baseline: AgentVersion) -> Decision | None:
+    """编辑预算。在花钱评测之前判；各级提案器在自己的小范围验证之前也会先调一次。"""
+    rule, reason = violations(baseline, candidate, bench.budget, task_terms(bench.split("evolve")))
+    return reject(bench, candidate, baseline, reason, rule) if rule else None
+
+
 async def admit(bench: Bench, candidate: AgentVersion, baseline: AgentVersion) -> Decision:
-    """先跑回归集（便宜，且一票否决），再跑验收集。"""
+    """先判编辑预算，再跑回归集（便宜，且一票否决），最后跑验收集。"""
     bench.store.save_version(candidate, "candidate")
     if candidate.id == baseline.id:
-        decision = Decision(False, "候选与基线内容相同", rule="same")
+        decision = Decision(False, "候选与基线内容相同", rule="same", candidate=candidate.id)
         bench.store.save_version(candidate, "rejected", decision.reason)
         return decision
+    if (blocked := precheck(bench, candidate, baseline)):
+        return blocked
 
     regress = bench.split("regress")
     base_r, cand_r = await asyncio.gather(bench.run(baseline, regress, "基线·回归集"),
@@ -106,6 +132,7 @@ async def admit(bench: Bench, candidate: AgentVersion, baseline: AgentVersion) -
         else:
             decision = Decision(True, f"验收集 {cmp['base']['mean']:.0%} → {cmp['cand']['mean']:.0%}，{held}", cmp,
                                 rule="admitted", regress_skipped=skipped)
+    decision.candidate = candidate.id
     bench.store.save_version(candidate, "merged" if decision.admitted else "rejected", decision.reason)
     bench.notify("gate", {"candidate": candidate.id, "baseline": baseline.id, "admitted": decision.admitted,
                           "reason": decision.reason, "rule": decision.rule,

@@ -1,0 +1,18 @@
+{
+  "id": "stock-reserve",
+  "split": "evolve",
+  "source": "synthetic",
+  "difficulty": "long_file",
+  "similar_group": "inventory",
+  "prompt": "库存预占有问题：同一件货被两张订单各占了一次，加起来超过了实际库存，测试挂了，帮我修好。不要修改测试。",
+  "check": "python -m pytest tests -q",
+  "forbid_changes": [
+    "tests/"
+  ],
+  "allow": [
+    "python -m pytest*",
+    "pytest*",
+    "ls*",
+    "cat *"
+  ]
+}

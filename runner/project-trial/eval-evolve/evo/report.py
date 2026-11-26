@@ -93,3 +93,27 @@ def render(title: str, records: list[RunRecord], base: list[RunRecord] | None = 
               f"平均耗时 {c['avg_seconds']:.1f}s   平均轮次 {c['avg_turns']:.1f}",
               "停止原因：" + "  ".join(f"{k} {v}" for k, v in sorted(stops(records).items()))]
     return "\n".join(lines)
+
+
+def render_tree(versions: list[dict], scores: dict[str, float], head: str | None) -> str:
+    """版本树：谁是从谁改出来的。被拦下的候选也挂在树上，带着拒绝理由。"""
+    ids = {v["id"] for v in versions}
+    children: dict[str | None, list[dict]] = defaultdict(list)
+    for v in versions:
+        children[v["parent"] if v["parent"] in ids else None].append(v)
+    mark = {"merged": "✓", "rejected": "✗", "candidate": "·"}
+    lines: list[str] = []
+
+    def walk(v: dict, prefix: str, branch: str, child_prefix: str) -> None:
+        score = f"  验收 {scores[v['id']]:.0%}" if v["id"] in scores else ""
+        why = f"  ｜{v['reason']}" if v["status"] == "rejected" and v["reason"] else ""
+        here = "  ◀ 当前" if v["id"] == head else ""
+        lines.append(f"{prefix}{branch}{mark.get(v['status'], '?')} {v['id']}  {v['note']}{score}{why}{here}")
+        kids = children[v["id"]]
+        for i, kid in enumerate(kids):
+            last = i == len(kids) - 1
+            walk(kid, child_prefix, "└─ " if last else "├─ ", child_prefix + ("   " if last else "│  "))
+
+    for root in children[None]:
+        walk(root, "", "", "")
+    return "\n".join(lines)

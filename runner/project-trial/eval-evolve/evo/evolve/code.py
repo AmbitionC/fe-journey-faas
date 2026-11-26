@@ -9,7 +9,7 @@ from __future__ import annotations
 from ..harness import DEFAULT_CODE, smoke_code
 from ..types import AgentVersion
 from .common import example_block, extract_block
-from .gate import Bench, Decision, admit
+from .gate import Bench, Decision, admit, reject
 
 SYSTEM = "你在改进一个编程 Agent 的外壳代码。你只能修改一个 Python 钩子函数。"
 TEMPLATE = """Agent 每次调用工具后，结果会先经过下面这个函数再交给模型：
@@ -51,7 +51,7 @@ async def evolve_code(bench: Bench, model, current: AgentVersion) -> tuple[Agent
     code = current.code or DEFAULT_CODE
     text = await model.ask(SYSTEM, TEMPLATE.format(
         code=code, examples="\n\n".join(example_block(tasks[r.task_id].prompt, r) for r in failures[:4]),
-        rejected="\n".join(f"- {x}" for x in bench.store.rejected_notes()) or "（无）"))
+        rejected="\n".join(f"- {x}" for x in bench.store.rejected_notes()) or "（无）") + bench.limits())
     new_code = extract_block(text, "code").strip() + "\n"
     rationale = extract_block(text, "rationale").strip()
     changed = bool(new_code.strip()) and new_code.strip() != code.strip()
@@ -62,10 +62,6 @@ async def evolve_code(bench: Bench, model, current: AgentVersion) -> tuple[Agent
     candidate = current.derive(f"外壳代码：{rationale[:80]}", code=new_code)
     errors = smoke_code(new_code)
     if errors:
-        decision = Decision(False, "代码没有通过检查：" + "；".join(errors))
-        bench.store.save_version(candidate, "rejected", decision.reason)
-        bench.notify("gate", {"candidate": candidate.id, "baseline": current.id, "admitted": False,
-                              "reason": decision.reason})
-        return current, decision
+        return current, reject(bench, candidate, current, "代码没有通过检查：" + "；".join(errors), "unsafe")
     decision = await admit(bench, candidate, current)
     return (candidate if decision.admitted else current), decision

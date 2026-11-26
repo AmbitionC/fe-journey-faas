@@ -3,7 +3,9 @@
     python -m evo.cli audit                       # 审计评分器（不调模型）
     python -m evo.cli eval --split accept -n 3    # 评测当前版本
     python -m evo.cli evolve --level prompt       # 跑一轮进化：prompt | playbook | config | code
+    python -m evo.cli evolve --generations 5      # 连续跑多代：几级轮着来，上一代合入的版本是下一代的起点
     python -m evo.cli versions                    # 版本历史
+    python -m evo.cli tree                        # 版本树和每一代的记录
     python -m evo.cli report 版本号 --base 版本号  # 两个版本的对比报告
     python -m evo.cli rollback 版本号             # 回退到某个版本
 
@@ -65,6 +67,11 @@ def show(kind: str, data: dict) -> None:
         print(f"\n{'✅ 合入' if data['admitted'] else '⛔ 拒绝'} {data['candidate']}：{data['reason']}")
     elif kind == "note":
         print(f"   {data['text']}")
+    elif kind == "generation_start":
+        print(f"\n══ 第 {data['no']} 代：{data['level']}（从 {data['base']} 出发"
+              + (f"，最多改 {data['budget']} 行" if data["budget"] is not None else "") + "）══")
+    elif kind == "generation_end":
+        print(f"   这一代之后验收集通过率 {data['score']:.0%}")
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -80,6 +87,17 @@ async def run(args: argparse.Namespace) -> int:
             for v in store.versions():
                 print(f"{v['id']}  {v['status']:<9}  父 {v['parent'] or '-':<10}  {v['note']}"
                       + (f"  ｜{v['reason']}" if v["reason"] else ""))
+            return 0
+
+        if args.cmd == "tree":
+            head = store.head()
+            print(report.render_tree(store.versions(), store.accept_scores(), head.id if head else None))
+            for g in store.generations():
+                what = {"admitted": "合入", "rejected": "拦下", "no_change": "没有提出修改"}[g["outcome"]]
+                print(f"第 {g['no']} 代  {g['level']:<8}  {what}  验收 {g['score']:.0%}"
+                      + (f"  改动 {g['edit']} 行" if g["candidate"] else "")
+                      + (f"（上限 {g['budget']}）" if g["candidate"] and g["budget"] is not None else "")
+                      + f"  {g['reason']}")
             return 0
 
         if args.cmd == "rollback":
@@ -119,11 +137,21 @@ async def run(args: argparse.Namespace) -> int:
             from .evolve.gate import Bench
             from .evolve.playbook import evolve_playbook
             from .evolve.prompt import evolve_prompt
+            bench = Bench(agent, grader, tasks, store, attempts=args.attempts, concurrency=args.concurrency,
+                          notify=show, min_gain=args.min_gain, budget=args.budget or None)
+            before = current(store, args.seed)
+            if args.generations:
+                from .evolve.loop import ROTATION, evolve_generations
+                after, history = await evolve_generations(
+                    bench, text_model, before, args.generations, (args.level,) if args.level else ROTATION,
+                    budget=20 if args.budget is None else (args.budget or None), decay=args.budget_decay)
+                print(f"\n跑了 {len(history)} 代，合入 {sum(g.outcome == 'admitted' for g in history)} 代。"
+                      f"当前版本：{after.id}。用 tree 看版本树。")
+                return 0
+            if not args.level:
+                sys.exit("单跑一轮要用 --level 指定改哪一级；连续多代用 --generations。")
             step = {"prompt": evolve_prompt, "playbook": evolve_playbook, "config": evolve_config,
                     "code": evolve_code}[args.level]
-            bench = Bench(agent, grader, tasks, store, attempts=args.attempts, concurrency=args.concurrency,
-                          notify=show, min_gain=args.min_gain)
-            before = current(store, args.seed)
             after, decision = await step(bench, text_model, before)
             if decision is None:
                 print("\n这一轮没有产生需要过闸门的候选。")
@@ -141,6 +169,7 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("audit", help="审计评分器")
     sub.add_parser("versions", help="版本历史")
+    sub.add_parser("tree", help="版本树和每一代的记录")
 
     def common(sp):
         sp.add_argument("-n", "--attempts", type=int, default=3, help="每条任务运行几次")
@@ -152,8 +181,13 @@ def main() -> None:
     e.add_argument("--split", choices=(*SPLITS, "all"), default="accept")
     e.add_argument("--version", help="不填则评测当前版本")
     common(e)
-    v = sub.add_parser("evolve", help="跑一轮进化")
-    v.add_argument("--level", choices=LEVELS, required=True)
+    v = sub.add_parser("evolve", help="跑一轮进化；带 --generations 时连续跑多代")
+    v.add_argument("--level", choices=LEVELS, help="改哪一级。连续多代时不填就几级轮着来")
+    v.add_argument("--generations", type=int, default=0, help="连续跑几代")
+    v.add_argument("--budget", type=int, default=None,
+                   help="编辑预算：一代最多改多少行，0 为不限。单跑一轮默认不限；"
+                        "连续多代时是第一代的预算，之后逐代收紧，默认 20")
+    v.add_argument("--budget-decay", type=float, default=0.7, help="连续多代时预算每代乘以多少")
     v.add_argument("--min-gain", type=float, default=0.0,
                    help="验收集至少要涨多少才算数（0.1 即 10 个百分点），用来挡掉重复运行之间的随机波动")
     common(v)

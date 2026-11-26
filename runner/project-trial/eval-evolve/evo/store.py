@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS run (
   stopped TEXT, turns INTEGER, final_reply TEXT, trajectory_path TEXT
 );
 CREATE INDEX IF NOT EXISTS run_lookup ON run (version_id, split, task_id);
+CREATE TABLE IF NOT EXISTS generation (
+  no INTEGER PRIMARY KEY, level TEXT, base TEXT, candidate TEXT, outcome TEXT, rule TEXT, reason TEXT,
+  score REAL, budget INTEGER, edit INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -70,6 +74,24 @@ class Store:
         rows = self.db.execute(
             "SELECT note, reason FROM version WHERE status='rejected' ORDER BY rowid DESC LIMIT ?", (limit,))
         return [f"{r['note']} → 被拒绝：{r['reason']}" for r in rows]
+
+    # ── 连续多代的记录 ──
+    def add_generation(self, g: dict) -> None:
+        keys = ("no", "level", "base", "candidate", "outcome", "rule", "reason", "score", "budget", "edit")
+        self.db.execute(f"INSERT INTO generation ({', '.join(keys)}) VALUES ({','.join('?' * len(keys))})",
+                        [g[k] for k in keys])
+        self.db.commit()
+
+    def generations(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM generation ORDER BY no")]
+
+    def last_generation(self) -> int:
+        return self.db.execute("SELECT COALESCE(MAX(no), 0) FROM generation").fetchone()[0]
+
+    def accept_scores(self) -> dict[str, float]:
+        """每个版本在验收集上的通过率（跑过才有）。版本树上用。"""
+        return {r[0]: r[1] for r in self.db.execute(
+            "SELECT version_id, AVG(passed) FROM run WHERE split='accept' GROUP BY version_id")}
 
     # ── 运行结果 ──
     def add_run(self, r: RunRecord) -> int:

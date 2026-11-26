@@ -45,7 +45,10 @@ def extract_json(text: str):
 def extract_block(text: str, tag: str) -> str:
     """取 <tag>…</tag> 之间的内容；没有就返回空串。"""
     m = re.search(rf"<{tag}>\s*(.*?)\s*</{tag}>", text, flags=re.S)
-    return m.group(1) if m else ""
+    if not m:
+        return ""
+    # 模型偶尔会把开头的标签写两遍：多出来的那个不算内容
+    return re.sub(rf"^(?:<{tag}>\s*)+", "", m.group(1))
 
 
 def trace_summary(record: RunRecord, max_steps: int = 14, width: int = 160) -> str:

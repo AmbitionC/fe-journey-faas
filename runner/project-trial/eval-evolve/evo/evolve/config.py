@@ -14,7 +14,7 @@ from ..harness import BOUNDS, effective_config, validate_config
 from ..types import AgentVersion
 from .common import extract_json
 from .diagnose import cluster, diagnose
-from .gate import Bench, Decision, admit
+from .gate import Bench, Decision, admit, precheck, reject
 
 SYSTEM = "你在调整一个编程 Agent 的外壳配置。只能改给出的配置项，并且要说明预期效果和风险。"
 TEMPLATE = """当前配置：
@@ -65,7 +65,7 @@ async def evolve_config(bench: Bench, model, current: AgentVersion) -> tuple[Age
         config=json.dumps(effective_config(current.config_dict), ensure_ascii=False, indent=2),
         bounds=describe_bounds(), n=len({d.task_id for d in items}), weakness=weakness,
         details="\n".join(f"- {d.task_id}：{d.symptom}；{d.cause}" for d in items),
-        rejected="\n".join(f"- {x}" for x in bench.store.rejected_notes()) or "（无）")))
+        rejected="\n".join(f"- {x}" for x in bench.store.rejected_notes()) or "（无）") + bench.limits()))
     changes = data.get("changes") if isinstance(data, dict) else None
     proposal = Proposal(weakness, changes if isinstance(changes, dict) else {},
                         *(str(data.get(k, "")) for k in ("rationale", "expected_effect", "risk"))) \
@@ -83,21 +83,15 @@ async def evolve_config(bench: Bench, model, current: AgentVersion) -> tuple[Age
     candidate = current.derive(note, config={**current.config_dict, **proposal.changes})
     errors = validate_config(proposal.changes)
     if errors:
-        decision = Decision(False, "超出允许范围：" + "；".join(errors))
-        bench.store.save_version(candidate, "rejected", decision.reason)
-        bench.notify("gate", {"candidate": candidate.id, "baseline": current.id, "admitted": False,
-                              "reason": decision.reason})
-        return current, decision
+        return current, reject(bench, candidate, current, "超出允许范围：" + "；".join(errors), "bounds")
+    if (blocked := precheck(bench, candidate, current)):
+        return current, blocked
 
     # 先只跑这类弱点涉及的任务：它们都没变好，就不必花钱跑另外两套
     targeted = [tasks[t] for t in sorted({d.task_id for d in items})]
     base_t = [r for r in records if r.task_id in {t.id for t in targeted}]
     cand_t = await bench.run(candidate, targeted, "候选·弱点涉及的任务")
     if mean(r.passed for r in cand_t) <= mean(r.passed for r in base_t):
-        decision = Decision(False, "弱点涉及的任务没有变好")
-        bench.store.save_version(candidate, "rejected", decision.reason)
-        bench.notify("gate", {"candidate": candidate.id, "baseline": current.id, "admitted": False,
-                              "reason": decision.reason})
-        return current, decision
+        return current, reject(bench, candidate, current, "弱点涉及的任务没有变好", "targeted")
     decision = await admit(bench, candidate, current)
     return (candidate if decision.admitted else current), decision

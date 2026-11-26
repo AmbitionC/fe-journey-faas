@@ -118,7 +118,7 @@ async def evolve_playbook(bench: Bench, model, current: AgentVersion, batch_size
     shown = ([r for r in records if not r.passed] + [r for r in records if r.passed])[:batch_size]
     data = extract_json(await model.ask(SYSTEM, TEMPLATE.format(
         playbook=render(list(current.playbook)),
-        examples="\n\n".join(example_block(tasks[r.task_id].prompt, r) for r in shown))))
+        examples="\n\n".join(example_block(tasks[r.task_id].prompt, r) for r in shown)) + bench.limits()))
     deltas = parse_deltas(data)
     before = list(current.playbook)
     after = refine(apply(before, deltas, created_in=current.id))
